@@ -26,6 +26,13 @@ private let macros: [String: Macro.Type] = ["XState": XStateMacro.self, "Statefu
 
                 private var _spawned: StateStore.Box<Bool>?
 
+                var $spawned: Binding<Bool> {
+                    Binding(
+                        get: { _spawned?.value ?? false },
+                        set: { _spawned?.value = $0 }
+                    )
+                }
+
                 mutating func _installState(id: StateIdentity, store: StateStore) {
                         _spawned = store._xstateBox(id: id, name: "spawned", default: {
                                 false

@@ -34,7 +34,16 @@ public struct XStateMacro: AccessorMacro, PeerMacro {
         let field = try field(in: declaration)
 
         return [
-            "private var _\(raw: field.name): StateStore.Box<\(field.type.trimmed)>?"
+            """
+            private var _\(raw: field.name): StateStore.Box<\(field.type.trimmed)>?
+
+            var $\(raw: field.name): Binding<\(field.type.trimmed)> {
+                Binding(
+                    get: { _\(raw: field.name)?.value ?? \(field.defaultExpr) },
+                    set: { _\(raw: field.name)?.value = $0 }
+                )
+            }
+            """
         ]
     }
 

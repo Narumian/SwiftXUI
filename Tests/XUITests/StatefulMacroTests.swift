@@ -36,3 +36,40 @@ private struct MacroEntranceOnce: XView {
     #expect(fillColor() == .black)
     #expect(fillColor() == .red)
 }
+
+@Stateful
+private struct BindingProbe {
+    @XState var value: Int = 0
+}
+
+private struct BindingModel {
+    var value: Int = 0
+}
+
+@Stateful
+private struct NestedBindingProbe {
+    @XState var model: BindingModel = BindingModel()
+}
+
+@Test func xStateGeneratesABindingProjection() {
+    var probe = BindingProbe()
+    let store = StateStore()
+    probe._installState(id: .root, store: store)
+
+    let binding = probe.$value
+    #expect(binding.wrappedValue == 0)
+
+    binding.wrappedValue = 7
+    #expect(probe.value == 7)
+}
+
+@Test func bindingProjectsWritableKeyPaths() {
+    var probe = NestedBindingProbe()
+    let store = StateStore()
+    probe._installState(id: .root, store: store)
+
+    let value = probe.$model.value
+    value.wrappedValue = 11
+
+    #expect(probe.model.value == 11)
+}
