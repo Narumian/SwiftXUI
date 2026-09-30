@@ -33,6 +33,9 @@ final class XAsyncLoop<App: XApp> {
         let stream = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         self.events = stream.stream
         self.continuation = stream.continuation
+        driver.session.host.onInvalidate = { [weak self] in
+            self?.setNeedsDisplay()
+        }
     }
 
     func start() {
