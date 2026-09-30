@@ -12,9 +12,9 @@ import Foundation
 /// resolved `any FX` (draw it, play a sound, shake a camera) is entirely up
 /// to that app — this protocol has no opinion, the same way `XView` has no
 /// opinion about pixels.
-@XUIActor
 public protocol FX {
     associatedtype Body: FX
+    @XUIActor
     @FXBuilder var body: Body { get }
 }
 
@@ -35,8 +35,8 @@ public extension FX where Body == Never {
 /// expand to zero or more resolved values, forwarding `id`/`store` to each
 /// child so `@XState` inside a nested composite still resolves to stable,
 /// identity-keyed storage.
-@XUIActor
 public protocol _PrimitiveFX {
+    @XUIActor
     func _emit(id: StateIdentity, store: StateStore, into out: inout [any FX])
 }
 
