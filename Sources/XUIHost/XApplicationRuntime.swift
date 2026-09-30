@@ -17,30 +17,28 @@ public protocol XApplicationRuntimeProtocol: AnyObject {
 }
 
 /// Lifecycle callbacks for the platform shell that hosts an XApp.
-@XUIActor
-public protocol XAppDelegate: AnyObject {
-    func applicationDidLaunch(_ application: any XApplicationRuntimeProtocol)
-    func applicationDidBecomeActive(_ application: any XApplicationRuntimeProtocol)
-    func applicationWillResignActive(_ application: any XApplicationRuntimeProtocol)
-    func applicationDidEnterBackground(_ application: any XApplicationRuntimeProtocol)
-    func applicationWillTerminate(_ application: any XApplicationRuntimeProtocol)
+public protocol XAppDelegate: AnyObject, Sendable {
+    func applicationDidLaunch()
+    func applicationDidBecomeActive()
+    func applicationWillResignActive()
+    func applicationDidEnterBackground()
+    func applicationWillTerminate()
 }
 
-@XUIActor
 public extension XAppDelegate {
-    func applicationDidLaunch(_ application: any XApplicationRuntimeProtocol) {}
-    func applicationDidBecomeActive(_ application: any XApplicationRuntimeProtocol) {}
-    func applicationWillResignActive(_ application: any XApplicationRuntimeProtocol) {}
-    func applicationDidEnterBackground(_ application: any XApplicationRuntimeProtocol) {}
-    func applicationWillTerminate(_ application: any XApplicationRuntimeProtocol) {}
+    func applicationDidLaunch() {}
+    func applicationDidBecomeActive() {}
+    func applicationWillResignActive() {}
+    func applicationDidEnterBackground() {}
+    func applicationWillTerminate() {}
 }
 
 /// Owns an app driver and translates platform lifecycle events into
 /// renderer-neutral XUI callbacks.
 @XUIActor
 public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
+    public let app: App
     public let driver: XAppDriver<App>
-    public let delegate: (any XAppDelegate)?
 
     public private(set) var isRunning = false
     public private(set) var isActive = false
@@ -50,12 +48,10 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
 
     public init(
         _ app: App,
-        renderer: any XRenderer,
-        context: XApplicationContext? = nil,
-        delegate: (any XAppDelegate)? = nil
+        renderer: any XRenderer
     ) {
-        self.driver = XAppDriver(app, renderer: renderer, context: context)
-        self.delegate = delegate
+        self.app = app
+        self.driver = XAppDriver(app, renderer: renderer)
     }
 
     /// Starts the runtime and makes it active. Platform shells can use the
@@ -68,7 +64,7 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         guard !hasLaunched else { return }
         hasLaunched = true
         isRunning = true
-        delegate?.applicationDidLaunch(self)
+        app.delegate.applicationDidLaunch()
     }
 
     public func becomeActive() {
@@ -76,26 +72,26 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         guard !isActive else { return }
         isActive = true
         isInBackground = false
-        delegate?.applicationDidBecomeActive(self)
+        app.delegate.applicationDidBecomeActive()
     }
 
     public func resignActive() {
         guard isActive else { return }
         isActive = false
-        delegate?.applicationWillResignActive(self)
+        app.delegate.applicationWillResignActive()
     }
 
     public func enterBackground() {
         guard !isInBackground else { return }
         resignActive()
         isInBackground = true
-        delegate?.applicationDidEnterBackground(self)
+        app.delegate.applicationDidEnterBackground()
     }
 
     public func terminate() {
         guard isRunning else { return }
         resignActive()
-        delegate?.applicationWillTerminate(self)
+        app.delegate.applicationWillTerminate()
         isRunning = false
     }
 

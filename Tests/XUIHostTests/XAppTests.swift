@@ -4,6 +4,8 @@ import XUI
 @testable import XUIHost
 
 private struct TestApp: XApp {
+    let delegate = TestDelegate()
+
     var body: some XView {
         Color.red
     }
@@ -16,6 +18,40 @@ private struct TestApp: XApp {
     }
 }
 
+private final class TestDelegate: XAppDelegate, Sendable {}
+
+private final class RecordingDelegate: XAppDelegate, @unchecked Sendable {
+    var events: [String] = []
+
+    func applicationDidLaunch() {
+        events.append("launch")
+    }
+
+    func applicationDidBecomeActive() {
+        events.append("active")
+    }
+
+    func applicationWillResignActive() {
+        events.append("inactive")
+    }
+
+    func applicationDidEnterBackground() {
+        events.append("background")
+    }
+
+    func applicationWillTerminate() {
+        events.append("terminate")
+    }
+}
+
+private struct LifecycleApp: XApp {
+    let delegate: RecordingDelegate
+
+    var body: some XView {
+        Color.red
+    }
+}
+
 private final class RecordingRenderer: XRenderer {
     var frames: [CompiledFrame] = []
     var times: [Float] = []
@@ -23,30 +59,6 @@ private final class RecordingRenderer: XRenderer {
     func render(_ frame: CompiledFrame, time: Float) {
         frames.append(frame)
         times.append(time)
-    }
-}
-
-private final class RecordingDelegate: XAppDelegate {
-    var events: [String] = []
-
-    func applicationDidLaunch(_ application: any XApplicationRuntimeProtocol) {
-        events.append("launch")
-    }
-
-    func applicationDidBecomeActive(_ application: any XApplicationRuntimeProtocol) {
-        events.append("active")
-    }
-
-    func applicationWillResignActive(_ application: any XApplicationRuntimeProtocol) {
-        events.append("inactive")
-    }
-
-    func applicationDidEnterBackground(_ application: any XApplicationRuntimeProtocol) {
-        events.append("background")
-    }
-
-    func applicationWillTerminate(_ application: any XApplicationRuntimeProtocol) {
-        events.append("terminate")
     }
 }
 
@@ -69,28 +81,6 @@ private final class RecordingDelegate: XAppDelegate {
     #expect(ObjectIdentifier(session.host) == firstHost)
 }
 
-@Test @XUIActor func appSessionInstallsApplicationAndDocumentContexts() {
-    let context = XApplicationContext()
-    let session = XApplication.session(TestApp(), context: context)
-
-    #expect(session.context === context)
-    #expect(session.host.environment.applicationContext === context)
-    #expect(session.host.environment.documentContext === context.document)
-}
-
-@Test @XUIActor func documentContextPublishesRevisionChanges() {
-    let context = XDocumentContext()
-    var changes = 0
-    let subscription = context.changed.subscribe { changes += 1 }
-
-    context.markChanged()
-    context.markChanged()
-
-    #expect(context.revision == 2)
-    #expect(changes == 2)
-    _ = subscription
-}
-
 @Test @XUIActor func appDriverCompilesAndForwardsEachFrame() {
     let renderer = RecordingRenderer()
     let driver = XAppDriver(TestApp(), renderer: renderer)
@@ -109,7 +99,10 @@ private final class RecordingDelegate: XAppDelegate {
 @Test @XUIActor func applicationRuntimeForwardsLifecycleInOrder() {
     let renderer = RecordingRenderer()
     let delegate = RecordingDelegate()
-    let runtime = XApplication.runtime(TestApp(), renderer: renderer, delegate: delegate)
+    let runtime = XApplication.runtime(
+        LifecycleApp(delegate: delegate),
+        renderer: renderer
+    )
 
     runtime.start()
     runtime.start()

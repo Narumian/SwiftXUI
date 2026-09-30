@@ -24,10 +24,12 @@ public struct XAppConfiguration {
 @XUIActor
 public protocol XApp {
     associatedtype Body: XView
+    associatedtype Delegate: XAppDelegate
 
     @XViewBuilder
     var body: Body { get }
 
+    var delegate: Delegate { get }
     var configuration: XAppConfiguration { get }
 }
 
@@ -41,20 +43,15 @@ public extension XApp {
 @XUIActor
 public final class XAppSession<App: XApp> {
     public let app: App
-    public let context: XApplicationContext
     public let host: XUIHost
 
-    public init(_ app: App, context: XApplicationContext? = nil) {
+    public init(_ app: App) {
         self.app = app
         let configuration = app.configuration
-        self.context = context ?? configuration.environment.applicationContext ?? XApplicationContext()
-        var environment = configuration.environment
-        environment.applicationContext = self.context
-        environment.documentContext = self.context.document
         self.host = XUIHost(
             size: configuration.size,
             background: configuration.background,
-            environment: environment
+            environment: configuration.environment
         )
     }
 
@@ -75,8 +72,8 @@ public final class XAppDriver<App: XApp> {
     public let session: XAppSession<App>
     public let renderer: any XRenderer
 
-    public init(_ app: App, renderer: any XRenderer, context: XApplicationContext? = nil) {
-        self.session = XAppSession(app, context: context)
+    public init(_ app: App, renderer: any XRenderer) {
+        self.session = XAppSession(app)
         self.renderer = renderer
     }
 
@@ -104,19 +101,14 @@ public final class XAppDriver<App: XApp> {
 /// Creates a persistent session for a declarative XApp.
 @XUIActor
 public enum XApplication {
-    public static func session<App: XApp>(
-        _ app: App,
-        context: XApplicationContext? = nil
-    ) -> XAppSession<App> {
-        XAppSession(app, context: context)
+    public static func session<App: XApp>(_ app: App) -> XAppSession<App> {
+        XAppSession(app)
     }
 
     public static func runtime<App: XApp>(
         _ app: App,
-        renderer: any XRenderer,
-        context: XApplicationContext? = nil,
-        delegate: (any XAppDelegate)? = nil
+        renderer: any XRenderer
     ) -> XApplicationRuntime<App> {
-        XApplicationRuntime(app, renderer: renderer, context: context, delegate: delegate)
+        XApplicationRuntime(app, renderer: renderer)
     }
 }
