@@ -16,6 +16,16 @@ private struct TestApp: XApp {
     }
 }
 
+private final class RecordingRenderer: XRenderer {
+    var frames: [CompiledFrame] = []
+    var times: [Float] = []
+
+    func render(_ frame: CompiledFrame, time: Float) {
+        frames.append(frame)
+        times.append(time)
+    }
+}
+
 @Test func appSessionUsesTheAppConfiguration() {
     let session = XApplication.session(TestApp())
     let frame = session.render(time: 4)
@@ -33,4 +43,19 @@ private struct TestApp: XApp {
     _ = session.render(time: 2)
 
     #expect(ObjectIdentifier(session.host) == firstHost)
+}
+
+@Test func appDriverCompilesAndForwardsEachFrame() {
+    let renderer = RecordingRenderer()
+    let driver = XAppDriver(TestApp(), renderer: renderer)
+
+    let compiled = driver.frame(
+        at: 4,
+        framebuffer: RenderSize(width: 1280, height: 720)
+    )
+
+    #expect(renderer.frames == [compiled])
+    #expect(renderer.times == [4])
+    #expect(compiled.draws.count == 1)
+    #expect(compiled.shapeVertices.count == 36)
 }

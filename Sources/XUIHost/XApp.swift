@@ -56,6 +56,42 @@ public final class XAppSession<App: XApp> {
     }
 }
 
+/// Drives an `XApp` through declaration, scene compilation, and the renderer
+/// boundary for one display frame.
+///
+/// A platform shell owns the actual display link or event loop and calls
+/// `frame(at:)`. This keeps platform lifecycle code outside the declarative
+/// XUI package while giving it one stable entry point.
+public final class XAppDriver<App: XApp> {
+    public let session: XAppSession<App>
+    public let renderer: any XRenderer
+
+    public init(_ app: App, renderer: any XRenderer) {
+        self.session = XAppSession(app)
+        self.renderer = renderer
+    }
+
+    @discardableResult
+    public func frame(
+        at time: Double,
+        framebuffer: RenderSize? = nil,
+        fit: Bool = true
+    ) -> CompiledFrame {
+        let xFrame = session.render(time: time)
+        let logicalSize = session.host.size
+        let framebufferSize = framebuffer ?? logicalSize
+        let compiled = SceneCompiler.compile(
+            xFrame.scene,
+            canvas: logicalSize,
+            framebuffer: framebufferSize,
+            fit: fit,
+            fonts: session.host.fonts
+        )
+        renderer.render(compiled, time: Float(time))
+        return compiled
+    }
+}
+
 /// Creates a persistent session for a declarative XApp.
 public enum XApplication {
     public static func session<App: XApp>(_ app: App) -> XAppSession<App> {
