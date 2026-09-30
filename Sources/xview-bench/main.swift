@@ -1,5 +1,5 @@
 import Foundation
-import SwiftXUI
+import XUI
 
 // Measures the automatic-identity mechanism's real per-frame cost before
 // deciding whether the existential-avoiding `lower(_:)` redesign is worth

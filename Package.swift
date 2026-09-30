@@ -1,72 +1,71 @@
 // swift-tools-version: 6.0
-// SwiftXUI — SwiftUI の手触りを持つ、コンパイル時静的なレイアウト DSL。
-// コア(`SwiftXUI`)はSwiftXShaderのrenderer-neutral契約だけを参照し、
-// `SwiftXUISceneKit` がGameRenderに橋を架ける。
+// SwiftX — renderer-neutral shader, scene, and XView foundations.
 
 import CompilerPluginSupport
 import PackageDescription
 
 let package = Package(
-    name: "SwiftXUI",
+    name: "SwiftX",
     platforms: [
         .iOS(.v16),
         .macOS(.v13),
     ],
     products: [
-        .library(name: "SwiftXUI", targets: ["SwiftXUI"]),
-        .library(name: "SwiftXUISceneKit", targets: ["SwiftXUISceneKit"]),
+        .library(name: "XShader", targets: ["XShader"]),
+        .library(name: "XRender", targets: ["XRender"]),
+        .library(name: "XUI", targets: ["XUI"]),
+        .library(name: "XUISceneKit", targets: ["XUISceneKit"]),
         .executable(name: "xview-bench", targets: ["xview-bench"]),
     ],
     dependencies: [
-        .package(path: "../GameRender"),
-        .package(path: "../SwiftXShader"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
         .macro(
-            name: "SwiftXUIMacros",
+            name: "XUIMacros",
             dependencies: [
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]
         ),
         .target(
-            name: "SwiftXUI",
+            name: "XShader",
+            resources: [.process("Resources")]
+        ),
+        .target(
+            name: "XRender",
+            dependencies: ["XShader"]
+        ),
+        .target(
+            name: "XUI",
             dependencies: [
-                .product(name: "SwiftXShader", package: "SwiftXShader"),
-                "SwiftXUIMacros",
+                "XShader",
+                "XUIMacros",
             ]
         ),
         .target(
-            name: "SwiftXUISceneKit",
+            name: "XUISceneKit",
             dependencies: [
-                "SwiftXUI",
-                .product(name: "GameRender", package: "GameRender"),
+                "XUI",
+                "XRender",
+                "XShader",
             ]
         ),
-        // Measures the automatic-identity mechanism's real per-frame cost
-        // (TaskLocal push, StateIdentity combine, whole-tree lower()) before
-        // deciding whether the existential-avoiding walk redesign is worth it.
-        .executableTarget(name: "xview-bench", dependencies: ["SwiftXUI"]),
-        .testTarget(name: "SwiftXUITests", dependencies: ["SwiftXUI"]),
-        // Tests macro diagnostics directly (e.g. @XState without @Stateful)
-        // via assertMacroExpansion — no compile step needed, so a would-be
-        // compile error can be asserted without breaking this test target's
-        // own build.
+        .executableTarget(name: "xview-bench", dependencies: ["XUI"]),
+        .testTarget(name: "XShaderTests", dependencies: ["XShader"]),
+        .testTarget(name: "XRenderTests", dependencies: ["XRender", "XShader"]),
+        .testTarget(name: "XUITests", dependencies: ["XUI"]),
         .testTarget(
-            name: "SwiftXUIMacrosTests",
+            name: "XUIMacrosTests",
             dependencies: [
-                "SwiftXUIMacros",
+                "XUIMacros",
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
             ]
         ),
         .testTarget(
-            name: "SwiftXUISceneKitTests",
-            dependencies: [
-                "SwiftXUISceneKit",
-                .product(name: "GameRender", package: "GameRender"),
-            ]
+            name: "XUISceneKitTests",
+            dependencies: ["XUISceneKit", "XRender", "XShader"]
         ),
     ]
 )
