@@ -97,4 +97,12 @@ public enum XApplication {
     public static func session<App: XApp>(_ app: App) -> XAppSession<App> {
         XAppSession(app)
     }
+
+    public static func runtime<App: XApp>(
+        _ app: App,
+        renderer: any XRenderer,
+        delegate: (any XAppDelegate)? = nil
+    ) -> XApplicationRuntime<App> {
+        XApplicationRuntime(app, renderer: renderer, delegate: delegate)
+    }
 }
