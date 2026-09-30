@@ -1,6 +1,8 @@
 import XRender
+import XUI
 
 /// The platform-neutral lifecycle surface exposed to an XApp delegate.
+@XUIActor
 public protocol XApplicationRuntimeProtocol: AnyObject {
     var isRunning: Bool { get }
     var isActive: Bool { get }
@@ -15,6 +17,7 @@ public protocol XApplicationRuntimeProtocol: AnyObject {
 }
 
 /// Lifecycle callbacks for the platform shell that hosts an XApp.
+@XUIActor
 public protocol XAppDelegate: AnyObject {
     func applicationDidLaunch(_ application: any XApplicationRuntimeProtocol)
     func applicationDidBecomeActive(_ application: any XApplicationRuntimeProtocol)
@@ -23,6 +26,7 @@ public protocol XAppDelegate: AnyObject {
     func applicationWillTerminate(_ application: any XApplicationRuntimeProtocol)
 }
 
+@XUIActor
 public extension XAppDelegate {
     func applicationDidLaunch(_ application: any XApplicationRuntimeProtocol) {}
     func applicationDidBecomeActive(_ application: any XApplicationRuntimeProtocol) {}
@@ -33,6 +37,7 @@ public extension XAppDelegate {
 
 /// Owns an app driver and translates platform lifecycle events into
 /// renderer-neutral XUI callbacks.
+@XUIActor
 public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public let driver: XAppDriver<App>
     public let delegate: (any XAppDelegate)?

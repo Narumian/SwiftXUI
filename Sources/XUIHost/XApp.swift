@@ -21,6 +21,7 @@ public struct XAppConfiguration {
 /// The declarative application root. Platform lifecycle and display-loop
 /// integration are supplied by the host layer; the app only declares its root
 /// XView and presentation configuration.
+@XUIActor
 public protocol XApp {
     associatedtype Body: XView
 
@@ -30,12 +31,14 @@ public protocol XApp {
     var configuration: XAppConfiguration { get }
 }
 
+@XUIActor
 public extension XApp {
     var configuration: XAppConfiguration { XAppConfiguration() }
 }
 
 /// A live application session. It owns one XUIHost so declarative state stays
 /// alive across frame renders instead of being recreated with every call.
+@XUIActor
 public final class XAppSession<App: XApp> {
     public let app: App
     public let host: XUIHost
@@ -62,6 +65,7 @@ public final class XAppSession<App: XApp> {
 /// A platform shell owns the actual display link or event loop and calls
 /// `frame(at:)`. This keeps platform lifecycle code outside the declarative
 /// XUI package while giving it one stable entry point.
+@XUIActor
 public final class XAppDriver<App: XApp> {
     public let session: XAppSession<App>
     public let renderer: any XRenderer
@@ -93,6 +97,7 @@ public final class XAppDriver<App: XApp> {
 }
 
 /// Creates a persistent session for a declarative XApp.
+@XUIActor
 public enum XApplication {
     public static func session<App: XApp>(_ app: App) -> XAppSession<App> {
         XAppSession(app)

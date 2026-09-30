@@ -50,7 +50,7 @@ private final class RecordingDelegate: XAppDelegate {
     }
 }
 
-@Test func appSessionUsesTheAppConfiguration() {
+@Test @XUIActor func appSessionUsesTheAppConfiguration() {
     let session = XApplication.session(TestApp())
     let frame = session.render(time: 4)
 
@@ -59,7 +59,7 @@ private final class RecordingDelegate: XAppDelegate {
     #expect(frame.scene.commands.count == 1)
 }
 
-@Test func appSessionKeepsOneHostAcrossFrames() {
+@Test @XUIActor func appSessionKeepsOneHostAcrossFrames() {
     let session = XApplication.session(TestApp())
     let firstHost = ObjectIdentifier(session.host)
 
@@ -69,7 +69,7 @@ private final class RecordingDelegate: XAppDelegate {
     #expect(ObjectIdentifier(session.host) == firstHost)
 }
 
-@Test func appDriverCompilesAndForwardsEachFrame() {
+@Test @XUIActor func appDriverCompilesAndForwardsEachFrame() {
     let renderer = RecordingRenderer()
     let driver = XAppDriver(TestApp(), renderer: renderer)
 
@@ -84,7 +84,7 @@ private final class RecordingDelegate: XAppDelegate {
     #expect(compiled.shapeVertices.count == 36)
 }
 
-@Test func applicationRuntimeForwardsLifecycleInOrder() {
+@Test @XUIActor func applicationRuntimeForwardsLifecycleInOrder() {
     let renderer = RecordingRenderer()
     let delegate = RecordingDelegate()
     let runtime = XApplication.runtime(TestApp(), renderer: renderer, delegate: delegate)
