@@ -13,12 +13,13 @@ public struct _OnReceiveModifier<Content: XView, Value>: XView, _PrimitiveXView 
     let signal: Signal<Value>
     let action: (Value) -> Void
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let box: StateStore.Box<Subscription?> = store.box(for: id.child(type: Self.self)) { nil }
         if box.value == nil {
             box.value = signal.subscribe(action)
         }
-        return lower(content, id: id, store: store)
+        return await lower(content, id: id, store: store)
     }
 }
 

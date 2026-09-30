@@ -7,11 +7,12 @@ public struct _BorderModifier<Content: XView>: XView, _PrimitiveXView {
     let width: Double
     let cornerRadius: Double
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let contentNode = LayoutNode(layout: PassthroughLayout(),
-                                     children: lower(content, id: id.child(type: Content.self, index: 0), store: store))
-        let borderNode = _BorderView(color: color, width: width, cornerRadius: cornerRadius)
-            ._lower(id: id.child(type: _BorderView.self, index: 1), store: store)[0]
+                                     children: await lower(content, id: id.child(type: Content.self, index: 0), store: store))
+        let borderNode = (await _BorderView(color: color, width: width, cornerRadius: cornerRadius)
+            ._lower(id: id.child(type: _BorderView.self, index: 1), store: store))[0]
         return [
             LayoutNode(
                 layout: DecorationLayout(kind: .overlay, alignment: .center),
@@ -27,7 +28,8 @@ private struct _BorderView: XView, _PrimitiveXView {
     var width: Double
     var cornerRadius: Double
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
         let color = color
         let width = width

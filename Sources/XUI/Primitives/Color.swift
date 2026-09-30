@@ -22,7 +22,8 @@ public struct Color: XView, _PrimitiveXView, Sendable {
         Color(value.opacity(amount))
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
         let fill = value
         node.draw = { rect, context in

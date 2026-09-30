@@ -11,7 +11,8 @@ public struct Spacer: XView, _PrimitiveXView {
         self.minLength = minLength
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FixedSizeLayout(size: .zero))
         node.isSpacer = true
         node.spacerMinLength = minLength

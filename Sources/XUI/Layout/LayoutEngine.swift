@@ -9,14 +9,15 @@ enum LayoutEngine {
 
     /// Place `node` at `rect` and recurse. `placeChildren` fills the direct
     /// children's frames; we then walk each subtree.
-    static func place(_ node: LayoutNode, in rect: Rect, _ context: LayoutContext) {
+    @XUIActor
+    static func place(_ node: LayoutNode, in rect: Rect, _ context: LayoutContext) async {
         node.frame = rect
         if let make = node.lazyChildren {
-            node.children = make(rect, context)
+            node.children = await make(rect, context)
         }
         node.layout.placeChildren(in: rect, node.children, context)
         for child in node.children {
-            place(child, in: child.frame, context)
+            await place(child, in: child.frame, context)
         }
     }
 

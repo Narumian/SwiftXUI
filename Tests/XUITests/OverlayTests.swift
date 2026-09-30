@@ -1,49 +1,50 @@
 import Testing
 @testable import XUI
 
-private func frames(_ view: some XView, canvas: Size = Size(width: 300, height: 200)) -> [Rect] {
+@XUIActor
+private func frames(_ view: some XView, canvas: Size = Size(width: 300, height: 200)) async -> [Rect] {
     let surface = RecordingCanvas()
-    LayoutHost(canvas: canvas).render(view, into: surface)
+    await LayoutHost(canvas: canvas).render(view, into: surface)
     return surface.fills.map(\.rect)
 }
 
-@Test func backgroundDoesNotChangeContentSize() {
+@Test @XUIActor func backgroundDoesNotChangeContentSize() async {
     let view = Color.white
         .frame(width: 80, height: 50)
         .background { Color.black }
 
-    let f = frames(view)
+    let f = await frames(view)
     #expect(f[0].isApproximately(Rect(x: 0, y: 0, width: 80, height: 50)))
     #expect(f[1].isApproximately(Rect(x: 0, y: 0, width: 80, height: 50)))
 }
 
-@Test func overlayDoesNotChangeContentSize() {
+@Test @XUIActor func overlayDoesNotChangeContentSize() async {
     let view = Color.black
         .frame(width: 80, height: 50)
         .overlay { Color.white.frame(width: 20, height: 10) }
 
-    let f = frames(view)
+    let f = await frames(view)
     #expect(f[0].isApproximately(Rect(x: 0, y: 0, width: 80, height: 50)))
     #expect(f[1].isApproximately(Rect(x: 30, y: 20, width: 20, height: 10)))
 }
 
-@Test func overlayHonoursAlignment() {
+@Test @XUIActor func overlayHonoursAlignment() async {
     let view = Color.black
         .frame(width: 80, height: 50)
         .overlay(alignment: .bottomTrailing) {
             Color.white.frame(width: 20, height: 10)
         }
 
-    let f = frames(view)
+    let f = await frames(view)
     #expect(f[1].isApproximately(Rect(x: 60, y: 40, width: 20, height: 10)))
 }
 
-@Test func backgroundPaintsBehindContent() {
+@Test @XUIActor func backgroundPaintsBehindContent() async {
     let view = Color.white
         .frame(width: 80, height: 50)
         .background { Color.black }
 
-    let f = frames(view)
+    let f = await frames(view)
     #expect(f.count == 2)
     #expect(f[0].isApproximately(Rect(x: 0, y: 0, width: 80, height: 50)))
     #expect(f[1].isApproximately(Rect(x: 0, y: 0, width: 80, height: 50)))
@@ -51,8 +52,9 @@ private func frames(_ view: some XView, canvas: Size = Size(width: 300, height: 
 
 // MARK: sheet
 
-private func render(_ view: some XView, canvas: Size = Size(width: 300, height: 200)) -> RenderResult {
-    LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
+@XUIActor
+private func render(_ view: some XView, canvas: Size = Size(width: 300, height: 200)) async -> RenderResult {
+    await LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
 }
 
 private func sheetScreen(presented: Bool, dismissed: @escaping () -> Void = {}) -> some XView {
@@ -68,25 +70,25 @@ private func sheetScreen(presented: Bool, dismissed: @escaping () -> Void = {}) 
         }
 }
 
-@Test func sheetPaintsCentredAtFractionOfBase() {
+@Test @XUIActor func sheetPaintsCentredAtFractionOfBase() async {
     let surface = RecordingCanvas()
-    LayoutHost(canvas: Size(width: 300, height: 200)).render(sheetScreen(presented: true), into: surface)
+    await LayoutHost(canvas: Size(width: 300, height: 200)).render(sheetScreen(presented: true), into: surface)
     let inner = surface.fills.last!.rect
     #expect(abs(inner.width - 300 * 0.618_033_988_749_895) < 0.001)
     #expect(abs(inner.height - 200 * 0.618_033_988_749_895) < 0.001)
     #expect(abs(inner.midX - 150) < 0.001 && abs(inner.midY - 100) < 0.001)
 }
 
-@Test func sheetBlocksBaseInputAndScopesItsOwnControls() {
-    let r = render(sheetScreen(presented: true))
+@Test @XUIActor func sheetBlocksBaseInputAndScopesItsOwnControls() async {
+    let r = await render(sheetScreen(presented: true))
     #expect(r.tapGestures.compactMap(\.id).contains("base") == false)
     #expect(r.controls.map(\.control.id) == ["inner-c"])
     #expect(r.controls.first?.control.scope == "sheet")
 }
 
-@Test func sheetContentTapBeatsScrimAndScrimDismisses() {
+@Test @XUIActor func sheetContentTapBeatsScrimAndScrimDismisses() async {
     var dismissed = 0
-    let r = render(sheetScreen(presented: true) { dismissed += 1 })
+    let r = await render(sheetScreen(presented: true) { dismissed += 1 })
     var hit = ""
     if let g = r.tapGestures.first(where: { $0.rect.contains(Point(x: 150, y: 100)) }) { hit = g.id ?? "" }
     #expect(hit == "inner")
@@ -94,8 +96,8 @@ private func sheetScreen(presented: Bool, dismissed: @escaping () -> Void = {}) 
     #expect(dismissed == 1)
 }
 
-@Test func sheetClosedLeavesBaseInteractive() {
-    let r = render(sheetScreen(presented: false))
+@Test @XUIActor func sheetClosedLeavesBaseInteractive() async {
+    let r = await render(sheetScreen(presented: false))
     #expect(r.tapGestures.compactMap(\.id) == ["base"])
     #expect(r.controls.map(\.control.id) == ["base-c"])
 }

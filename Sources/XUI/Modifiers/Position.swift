@@ -28,8 +28,9 @@ public struct _PositionModifier<Content: XView>: XView, _PrimitiveXView {
     let x: Double
     let y: Double
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        [LayoutNode(layout: PositionLayout(x: x, y: y), children: lower(content, id: id, store: store))]
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        [LayoutNode(layout: PositionLayout(x: x, y: y), children: await lower(content, id: id, store: store))]
     }
 }
 

@@ -56,8 +56,8 @@ public final class XAppSession<App: XApp> {
     }
 
     @discardableResult
-    public func render(time: Double? = nil) -> XUIFrame {
-        host.render(app.body, time: time)
+    public func render(time: Double? = nil) async -> XUIFrame {
+        await host.render(app.body, time: time)
     }
 }
 
@@ -82,8 +82,8 @@ public final class XAppDriver<App: XApp> {
         at time: Double,
         framebuffer: RenderSize? = nil,
         fit: Bool = true
-    ) -> CompiledFrame {
-        let xFrame = session.render(time: time)
+    ) async -> CompiledFrame {
+        let xFrame = await session.render(time: time)
         let logicalSize = session.host.size
         let framebufferSize = framebuffer ?? logicalSize
         let compiled = SceneCompiler.compile(

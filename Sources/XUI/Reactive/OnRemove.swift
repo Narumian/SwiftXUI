@@ -17,11 +17,12 @@ public struct _OnRemoveModifier<Content: XView, Value>: XView, _PrimitiveXView {
     let value: Value
     let action: (Value) -> Void
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let box: StateStore.Box<Value> = store.box(for: id.child(type: Self.self)) { value }
         box.value = value
         box.onRemove = action
-        return lower(content, id: id, store: store)
+        return await lower(content, id: id, store: store)
     }
 }
 

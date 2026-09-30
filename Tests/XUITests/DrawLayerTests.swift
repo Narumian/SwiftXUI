@@ -25,34 +25,34 @@ extension EnvironmentValues {
     }
 }
 
-@Test func drawLayerFillsAndReceivesResolvedRect() {
+@Test @XUIActor func drawLayerFillsAndReceivesResolvedRect() async {
     var painted = Rect.zero
     let view = DrawLayer { rect, _ in painted = rect }
         .frame(width: 120, height: 80, alignment: .topLeading)
-    _ = LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
+    _ = await LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
     #expect(painted.isApproximately(Rect(x: 0, y: 0, width: 120, height: 80)))
 }
 
-@Test func drawLayerReadsInjectedEnvironment() {
+@Test @XUIActor func drawLayerReadsInjectedEnvironment() async {
     var seenClock = -1.0
     var env = EnvironmentValues()
     env.clock = 42
     let view = DrawLayer { _, context in seenClock = context.environment.clock }
-    _ = LayoutHost(canvas: canvas, environment: env).render(view, into: RecordingCanvas())
+    _ = await LayoutHost(canvas: canvas, environment: env).render(view, into: RecordingCanvas())
     #expect(seenClock == 42)
 }
 
-@Test func drawLayerCanPaintThroughTheThinCanvas() {
+@Test @XUIActor func drawLayerCanPaintThroughTheThinCanvas() async {
     let view = DrawLayer { rect, context in
         context.canvas.fillRect(rect, color: .black)
     }
     let surface = RecordingCanvas()
-    _ = LayoutHost(canvas: canvas).render(view, into: surface)
+    _ = await LayoutHost(canvas: canvas).render(view, into: surface)
     #expect(surface.fills.count == 1)
     #expect(surface.fills[0].rect.isApproximately(Rect(x: 0, y: 0, width: 300, height: 200)))
 }
 
-@Test func drawLayerEmitsHitRegionsForSubAreas() {
+@Test @XUIActor func drawLayerEmitsHitRegionsForSubAreas() async {
     let view = DrawLayer { rect, context in
         // three stacked hitboxes computed by the leaf itself
         for i in 0..<3 {
@@ -61,29 +61,27 @@ extension EnvironmentValues {
         }
     }
     .frame(width: 100, height: 120, alignment: .topLeading)
-    let (_, result) = { () -> (RecordingCanvas, RenderResult) in
-        let s = RecordingCanvas()
-        return (s, LayoutHost(canvas: canvas).render(view, into: s))
-    }()
+    let s = RecordingCanvas()
+    let result = await LayoutHost(canvas: canvas).render(view, into: s)
     #expect(result.regions.count == 3)
     #expect(result.hit(Point(x: 10, y: 50), as: Int.self) == 1)
 }
 
-@Test func drawLayerWithExplicitSizeParticipatesInStackDistribution() {
+@Test @XUIActor func drawLayerWithExplicitSizeParticipatesInStackDistribution() async {
     let view = HStack(spacing: 0) {
         DrawLayer(size: { _ in Size(width: 60, height: 30) }) { _, _ in }
         Color.white
     }
     let surface = RecordingCanvas()
-    _ = LayoutHost(canvas: canvas).render(view, into: surface)
+    _ = await LayoutHost(canvas: canvas).render(view, into: surface)
     // The sized DrawLayer paints nothing; only the Color records a fill.
     #expect(surface.fills.count == 1)
     #expect(surface.fills[0].rect.isApproximately(Rect(x: 60, y: 0, width: 240, height: 200)))
 }
 
-@Test func intrinsicViewOwnsItsSizingAndPaintWithoutADrawLayerWrapper() {
+@Test @XUIActor func intrinsicViewOwnsItsSizingAndPaintWithoutADrawLayerWrapper() async {
     let surface = RecordingCanvas()
-    _ = LayoutHost(canvas: canvas)
+    _ = await LayoutHost(canvas: canvas)
         .render(TestIntrinsicView().frame(width: 60, alignment: .topLeading), into: surface)
 
     #expect(surface.fills.count == 1)

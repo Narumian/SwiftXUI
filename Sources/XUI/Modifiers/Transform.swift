@@ -8,8 +8,9 @@ public struct _TransformModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let transform: XTransform
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let node = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: id, store: store))
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let node = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: id, store: store))
         node.transform = transform
         return [node]
     }
@@ -21,8 +22,9 @@ public struct _AnchoredTransformModifier<Content: XView>: XView, _PrimitiveXView
     let transform: XTransform
     let anchor: Alignment
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let node = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: id, store: store))
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let node = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: id, store: store))
         let transform = transform
         let anchor = anchor
         node.transformInFrame = { rect in

@@ -28,7 +28,8 @@ public struct DrawLayer: XView, _PrimitiveXView {
         self.draw = draw
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: DrawLayerLayout(sizing: sizing))
         node.draw = draw
         return [node]

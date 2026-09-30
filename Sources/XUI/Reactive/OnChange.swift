@@ -13,13 +13,14 @@ public struct _OnChangeModifier<Content: XView, Value: Equatable>: XView, _Primi
     let value: Value
     let action: (Value?, Value) -> Void
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let box: StateStore.Box<Value?> = store.box(for: id.child(type: Self.self)) { nil }
         if box.value != value {
             action(box.value, value)
             box.value = value
         }
-        return lower(content, id: id, store: store)
+        return await lower(content, id: id, store: store)
     }
 }
 

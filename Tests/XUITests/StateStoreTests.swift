@@ -1,7 +1,7 @@
 import Testing
 @testable import XUI
 
-@Test func sameIdentityReturnsTheSameBox() {
+@Test @XUIActor func sameIdentityReturnsTheSameBox() async {
     let store = StateStore()
     let id = StateIdentity.root.child(type: Int.self, index: 0)
     let a: StateStore.Box<Int> = store.box(for: id) { 1 }
@@ -10,7 +10,7 @@ import Testing
     #expect(b.value == 1)
 }
 
-@Test func endPassPurgesIdentitiesNotReVisited() {
+@Test @XUIActor func endPassPurgesIdentitiesNotReVisited() async {
     let store = StateStore()
     let id = StateIdentity.root.child(type: Int.self, index: 0)
 
@@ -27,7 +27,7 @@ import Testing
     #expect(second.value == 7, "expected a fresh box after the id went unvisited for a full pass")
 }
 
-@Test func revisitingWithinAPassKeepsTheBoxAlive() {
+@Test @XUIActor func revisitingWithinAPassKeepsTheBoxAlive() async {
     let store = StateStore()
     let id = StateIdentity.root.child(type: Int.self, index: 0)
 
@@ -41,7 +41,7 @@ import Testing
     #expect(second.value == 42)
 }
 
-@Test func onRemoveFiresOnceWithTheLastValueWhenAnIdentityGoesUnvisited() {
+@Test @XUIActor func onRemoveFiresOnceWithTheLastValueWhenAnIdentityGoesUnvisited() async {
     let store = StateStore()
     let id = StateIdentity.root.child(type: Int.self, index: 0)
 
@@ -65,7 +65,7 @@ import Testing
     #expect(removed == [42], "must not fire again on a later pass")
 }
 
-@Test func onRemoveDoesNotFireWhileTheIdentityKeepsBeingRevisited() {
+@Test @XUIActor func onRemoveDoesNotFireWhileTheIdentityKeepsBeingRevisited() async {
     let store = StateStore()
     let id = StateIdentity.root.child(type: Int.self, index: 0)
 

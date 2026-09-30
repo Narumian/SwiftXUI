@@ -3,14 +3,15 @@ import Testing
 
 private let canvas = Size(width: 300, height: 200)
 
-private func render(_ view: some XView) -> RecordingCanvas {
+@XUIActor
+private func render(_ view: some XView) async -> RecordingCanvas {
     let surface = RecordingCanvas()
-    LayoutHost(canvas: canvas).render(view, into: surface)
+    await LayoutHost(canvas: canvas).render(view, into: surface)
     return surface
 }
 
-@Test func borderDrawsOverTheContentWithoutChangingLayout() {
-    let surface = render(
+@Test @XUIActor func borderDrawsOverTheContentWithoutChangingLayout() async {
+    let surface = await render(
         Color.white
             .frame(width: 80, height: 40)
             .border(.black, width: 4)
@@ -21,8 +22,8 @@ private func render(_ view: some XView) -> RecordingCanvas {
     #expect(surface.strokes[0].lineWidth == 4)
 }
 
-@Test func borderCanUseACornerRadius() {
-    let surface = render(
+@Test @XUIActor func borderCanUseACornerRadius() async {
+    let surface = await render(
         Color.white
             .frame(width: 80, height: 40)
             .border(.red, width: 2, cornerRadius: 8)

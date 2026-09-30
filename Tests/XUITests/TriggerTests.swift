@@ -7,42 +7,43 @@ import Testing
 /// Peak scale is read back off the recorded fill's post-transform width,
 /// since `RecordingCanvas` doesn't expose its transform stack directly.
 
-private func fillWidth(_ signal: Signal<Int>, store: StateStore) -> Double {
+@XUIActor
+private func fillWidth(_ signal: Signal<Int>, store: StateStore) async -> Double {
     let view = Color(.black).trigger(signal, on: 1, peakScale: 2, frames: 4)
     let canvas = RecordingCanvas()
-    _ = LayoutHost(canvas: Size(width: 10, height: 10)).render(view, into: canvas, store: store)
+    _ = await LayoutHost(canvas: Size(width: 10, height: 10)).render(view, into: canvas, store: store)
     return canvas.fills.last!.rect.width
 }
 
-@Test func triggerStaysAtRestUntilAMatchingValueArrives() {
+@Test @XUIActor func triggerStaysAtRestUntilAMatchingValueArrives() async {
     let signal = Signal<Int>()
     let store = StateStore()
-    let rest = fillWidth(signal, store: store)
-    #expect(fillWidth(signal, store: store) == rest, "no trigger fired — width should be stable")
+    let rest = await fillWidth(signal, store: store)
+    #expect(await fillWidth(signal, store: store) == rest, "no trigger fired — width should be stable")
 }
 
-@Test func triggerPulsesForExactlyFramesWalksThenSettles() {
+@Test @XUIActor func triggerPulsesForExactlyFramesWalksThenSettles() async {
     let signal = Signal<Int>()
     let store = StateStore()
 
-    let rest = fillWidth(signal, store: store)
+    let rest = await fillWidth(signal, store: store)
 
     signal.send(1)
-    let peak = fillWidth(signal, store: store)
+    let peak = await fillWidth(signal, store: store)
     #expect(peak > rest * 1.9, "first walk after a match should be at (or essentially at) peak scale")
 
-    let mid = fillWidth(signal, store: store)
+    let mid = await fillWidth(signal, store: store)
     #expect(mid < peak, "scale should be settling back down on later walks")
 
-    for _ in 0..<10 { _ = fillWidth(signal, store: store) }
-    #expect(fillWidth(signal, store: store) == rest, "should be fully at rest well after `frames` walks have passed")
+    for _ in 0..<10 { _ = await fillWidth(signal, store: store) }
+    #expect(await fillWidth(signal, store: store) == rest, "should be fully at rest well after `frames` walks have passed")
 }
 
-@Test func triggerIgnoresNonMatchingValues() {
+@Test @XUIActor func triggerIgnoresNonMatchingValues() async {
     let signal = Signal<Int>()
     let store = StateStore()
-    let rest = fillWidth(signal, store: store)
+    let rest = await fillWidth(signal, store: store)
 
     signal.send(2)
-    #expect(fillWidth(signal, store: store) == rest)
+    #expect(await fillWidth(signal, store: store) == rest)
 }

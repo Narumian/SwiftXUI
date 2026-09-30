@@ -5,8 +5,9 @@ public struct _AnchorModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let id: AnchorID
 
-    func _lower(id stateID: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let wrapper = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: stateID, store: store))
+    @XUIActor
+    func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: stateID, store: store))
         wrapper.anchor = id
         return [wrapper]
     }
@@ -17,8 +18,9 @@ public struct _RegionModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let payload: AnyHashable
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let wrapper = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: id, store: store))
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: id, store: store))
         wrapper.region = payload
         return [wrapper]
     }
@@ -29,8 +31,9 @@ public struct _ControlModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let control: XControl
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let wrapper = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: id, store: store))
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: id, store: store))
         wrapper.control = control
         return [wrapper]
     }
@@ -43,8 +46,9 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
     let label: String?
     let action: () -> Void
 
-    func _lower(id stateID: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let wrapper = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: stateID, store: store))
+    @XUIActor
+    func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: stateID, store: store))
         wrapper.tapGestureID = id
         wrapper.tapGestureLabel = label
         wrapper.tapGesture = action

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Opts a composite `FX`/`XView` into `@XState`. `_installState` wires each
-/// `@XState` property to its identity-keyed box; the walk (`lower(_:)`,
+/// `@XState` property to its identity-keyed box; the walk (`await lower(_:)`,
 /// `emit(_:)`) calls it on a mutable copy before reading `body`. Shared by
 /// both DSLs — neither refines `XView` nor `FX`, checked via `as?` against
 /// an already-known `any XView`/`any FX`, the same idiom `_PrimitiveXView`/

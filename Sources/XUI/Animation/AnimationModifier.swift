@@ -9,7 +9,8 @@ public struct _AnimationModifier<Content: XView, Value: Equatable>: XView, _Prim
     let animation: Animation?
     let value: Value
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let previous: StateStore.Box<Value?> = store.box(for: id.child(type: Self.self, index: 0)) { nil }
         // The first frame is not a change: nothing animates in.
         let triggered = previous.value.map { $0 != value } ?? false
@@ -18,7 +19,7 @@ public struct _AnimationModifier<Content: XView, Value: Equatable>: XView, _Prim
         let saved = store.transaction
         store.transaction = Transaction(animation: animation, triggered: triggered)
         defer { store.transaction = saved }
-        return lower(content, id: id, store: store)
+        return await lower(content, id: id, store: store)
     }
 }
 

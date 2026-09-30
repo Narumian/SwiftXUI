@@ -4,7 +4,8 @@ import Foundation
 public struct EmptyView: XView, _PrimitiveXView {
     public typealias Body = Never
     public init() {}
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] { [] }
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] { [] }
 }
 
 /// The output of a multi-statement `@XViewBuilder` block.
@@ -18,10 +19,13 @@ public struct TupleView: XView, _PrimitiveXView {
     public typealias Body = Never
     let children: [any XView]
     init(_ children: [any XView]) { self.children = children }
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        children.enumerated().flatMap { i, child in
-            lower(child, id: id.child(type: type(of: child), index: i), store: store)
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        var nodes: [LayoutNode] = []
+        for (i, child) in children.enumerated() {
+            nodes += await lower(child, id: id.child(type: type(of: child), index: i), store: store)
         }
+        return nodes
     }
 }
 
@@ -30,8 +34,10 @@ public struct OptionalView<Wrapped: XView>: XView, _PrimitiveXView {
     public typealias Body = Never
     let wrapped: Wrapped?
     init(_ wrapped: Wrapped?) { self.wrapped = wrapped }
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        wrapped.map { lower($0, id: id, store: store) } ?? []
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        guard let wrapped else { return [] }
+        return await lower(wrapped, id: id, store: store)
     }
 }
 
@@ -45,10 +51,11 @@ public struct ConditionalView<TrueContent: XView, FalseContent: XView>: XView, _
     let storage: Storage
     init(storage: Storage) { self.storage = storage }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         switch storage {
-        case .first(let view): return lower(view, id: id, store: store)
-        case .second(let view): return lower(view, id: id, store: store)
+        case .first(let view): return await lower(view, id: id, store: store)
+        case .second(let view): return await lower(view, id: id, store: store)
         }
     }
 }
@@ -59,9 +66,12 @@ public struct ArrayView<Element: XView>: XView, _PrimitiveXView {
     public typealias Body = Never
     let elements: [Element]
     init(_ elements: [Element]) { self.elements = elements }
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        elements.enumerated().flatMap { i, element in
-            lower(element, id: id.child(type: type(of: element), index: i), store: store)
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        var nodes: [LayoutNode] = []
+        for (i, element) in elements.enumerated() {
+            nodes += await lower(element, id: id.child(type: type(of: element), index: i), store: store)
         }
+        return nodes
     }
 }

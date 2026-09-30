@@ -19,26 +19,27 @@ private struct TestFX: FX, _PrimitiveFX {
     let tag: String
 }
 
-private func render(_ view: some XView, store: StateStore, environment: EnvironmentValues = EnvironmentValues()) {
+@XUIActor
+private func render(_ view: some XView, store: StateStore, environment: EnvironmentValues = EnvironmentValues()) async {
     let canvas = RecordingCanvas()
-    _ = LayoutHost(canvas: Size(width: 100, height: 100), environment: environment)
+    _ = await LayoutHost(canvas: Size(width: 100, height: 100), environment: environment)
         .render(view, into: canvas, store: store)
 }
 
-@Test func fxDoesNothingWhenNothingWasSent() {
+@Test @XUIActor func fxDoesNothingWhenNothingWasSent() async {
     let store = StateStore()
     let signal = Signal<any FX>()
     var received: [(String, Point)] = []
     var env = EnvironmentValues()
     env.fxApply = { value, p in received.append(((value as! TestFX).tag, p)) }
 
-    render(Color(.black).fx(signal), store: store, environment: env)
-    render(Color(.black).fx(signal), store: store, environment: env)
+    await render(Color(.black).fx(signal), store: store, environment: env)
+    await render(Color(.black).fx(signal), store: store, environment: env)
 
     #expect(received.isEmpty)
 }
 
-@Test func fxDeliversAtThisFramesResolvedRectWithTheRegisteredAnchor() {
+@Test @XUIActor func fxDeliversAtThisFramesResolvedRectWithTheRegisteredAnchor() async {
     let store = StateStore()
     let signal = Signal<any FX>()
     var received: [(String, Point)] = []
@@ -46,16 +47,16 @@ private func render(_ view: some XView, store: StateStore, environment: Environm
     env.fxApply = { value, p in received.append(((value as! TestFX).tag, p)) }
     let view = Color(.black).frame(width: 40, height: 20).fx(signal, anchor: .topLeading)
 
-    render(view, store: store, environment: env) // installs the subscription
+    await render(view, store: store, environment: env) // installs the subscription
     signal.send(TestFX(tag: "pop"))
-    render(view, store: store, environment: env) // draws with this frame's rect, applies
+    await render(view, store: store, environment: env) // draws with this frame's rect, applies
 
     #expect(received.count == 1)
     #expect(received[0].0 == "pop")
     #expect(received[0].1 == Point(x: 0, y: 0), "topLeading of a 40x20 rect at the origin")
 }
 
-@Test func fxAtCenterUsesTheRectMidpoint() {
+@Test @XUIActor func fxAtCenterUsesTheRectMidpoint() async {
     let store = StateStore()
     let signal = Signal<any FX>()
     var received: [Point] = []
@@ -63,24 +64,24 @@ private func render(_ view: some XView, store: StateStore, environment: Environm
     env.fxApply = { _, p in received.append(p) }
     let view = Color(.black).frame(width: 40, height: 20).fx(signal)
 
-    render(view, store: store, environment: env)
+    await render(view, store: store, environment: env)
     signal.send(TestFX(tag: "spray"))
-    render(view, store: store, environment: env)
+    await render(view, store: store, environment: env)
 
     #expect(received == [Point(x: 20, y: 10)])
 }
 
-@Test func fxDoesNothingWhenNoInterpreterIsRegistered() {
+@Test @XUIActor func fxDoesNothingWhenNoInterpreterIsRegistered() async {
     let store = StateStore()
     let signal = Signal<any FX>()
     let view = Color(.black).fx(signal)
 
-    render(view, store: store) // no fxApply set
+    await render(view, store: store) // no fxApply set
     signal.send(TestFX(tag: "pop"))
-    render(view, store: store) // must not crash, must silently drop
+    await render(view, store: store) // must not crash, must silently drop
 }
 
-@Test func fxBufferIsDrainedOncePerDraw() {
+@Test @XUIActor func fxBufferIsDrainedOncePerDraw() async {
     let store = StateStore()
     let signal = Signal<any FX>()
     var received: [String] = []
@@ -88,18 +89,18 @@ private func render(_ view: some XView, store: StateStore, environment: Environm
     env.fxApply = { value, _ in received.append((value as! TestFX).tag) }
     let view = Color(.black).fx(signal)
 
-    render(view, store: store, environment: env)
+    await render(view, store: store, environment: env)
     signal.send(TestFX(tag: "a"))
     signal.send(TestFX(tag: "b"))
-    render(view, store: store, environment: env)
+    await render(view, store: store, environment: env)
     #expect(received == ["a", "b"])
 
     received.removeAll()
-    render(view, store: store, environment: env)
+    await render(view, store: store, environment: env)
     #expect(received.isEmpty, "already drained — nothing new was sent")
 }
 
-@Test func delayedLeafStartsOnlyOnceItsTimeArrives() {
+@Test @XUIActor func delayedLeafStartsOnlyOnceItsTimeArrives() async {
     struct Late: FX {
         var body: some FX { TestFX(tag: "late").delay(0.5) }
     }
@@ -114,25 +115,25 @@ private func render(_ view: some XView, store: StateStore, environment: Environm
     }
     let view = Color(.black).fx(signal)
 
-    render(view, store: store, environment: env(0))
+    await render(view, store: store, environment: env(0))
     signal.send(Late())
-    render(view, store: store, environment: env(0.1))
+    await render(view, store: store, environment: env(0.1))
     #expect(received.isEmpty)
-    render(view, store: store, environment: env(0.4))
+    await render(view, store: store, environment: env(0.4))
     #expect(received.isEmpty)
-    render(view, store: store, environment: env(0.7))
+    await render(view, store: store, environment: env(0.7))
     #expect(received == ["late"])
-    render(view, store: store, environment: env(1.0))
+    await render(view, store: store, environment: env(1.0))
     #expect(received == ["late"], "released once")
 }
 
-@Test func nestedDelaysAdd() {
+@Test @XUIActor func nestedDelaysAdd() async {
     let leaf = ScheduledFX(ScheduledFX(TestFX(tag: "x"), delay: 0.2), delay: 0.3)
     #expect(abs(leaf.delay - 0.5) < 1e-9)
     #expect((leaf.leaf as? TestFX)?.tag == "x")
 }
 
-@Test func delayedVisualStartsAtItsScheduledTimeNotTheFrameThatNoticed() {
+@Test @XUIActor func delayedVisualStartsAtItsScheduledTimeNotTheFrameThatNoticed() async {
     final class Probe: FXPlayback {
         var finished = false
         func step(now: Double) {}
@@ -150,15 +151,15 @@ private func render(_ view: some XView, store: StateStore, environment: Environm
     let signal = Signal<any FX>()
     var started: [Double] = []
     let view = Color(.black).fx(signal)
-    func frame(_ t: Double) {
+    func frame(_ t: Double) async {
         var e = EnvironmentValues()
         e.fxTime = t
-        render(view, store: store, environment: e)
+        await render(view, store: store, environment: e)
     }
-    frame(0)
+    await frame(0)
     signal.send(Leaf { started.append($0) }.delay(0.5))
-    frame(0.1)
-    frame(0.9) // a late frame
+    await frame(0.1)
+    await frame(0.9) // a late frame
     #expect(started.count == 1)
     #expect(abs(started[0] - 0.6) < 1e-9, "due at 0.1 + 0.5, not 0.9")
 }

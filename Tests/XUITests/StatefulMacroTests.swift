@@ -20,21 +20,22 @@ private struct MacroEntranceOnce: XView {
     }
 }
 
-@Test func statefulMacroExpandsToTheMarkerConformance() {
+@Test @XUIActor func statefulMacroExpandsToTheMarkerConformance() async {
     #expect(MacroEntranceOnce() is any _Stateful)
 }
 
-@Test func statefulMacroWiredViewPersistsAcrossRenders() {
+@Test @XUIActor func statefulMacroWiredViewPersistsAcrossRenders() async {
     let store = StateStore()
 
-    func fillColor() -> XColorValue? {
+    @XUIActor
+    func fillColor() async -> XColorValue? {
         let surface = RecordingCanvas()
-        LayoutHost(canvas: Size(width: 100, height: 100)).render(MacroEntranceOnce(), into: surface, store: store)
+        await LayoutHost(canvas: Size(width: 100, height: 100)).render(MacroEntranceOnce(), into: surface, store: store)
         return surface.fills.first?.color
     }
 
-    #expect(fillColor() == .black)
-    #expect(fillColor() == .red)
+    #expect(await fillColor() == .black)
+    #expect(await fillColor() == .red)
 }
 
 @Stateful
@@ -51,7 +52,7 @@ private struct NestedBindingProbe {
     @XState var model: BindingModel = BindingModel()
 }
 
-@Test func xStateGeneratesABindingProjection() {
+@Test @XUIActor func xStateGeneratesABindingProjection() async {
     var probe = BindingProbe()
     let store = StateStore()
     probe._installState(id: .root, store: store)
@@ -63,7 +64,7 @@ private struct NestedBindingProbe {
     #expect(probe.value == 7)
 }
 
-@Test func bindingProjectsWritableKeyPaths() {
+@Test @XUIActor func bindingProjectsWritableKeyPaths() async {
     var probe = NestedBindingProbe()
     let store = StateStore()
     probe._installState(id: .root, store: store)

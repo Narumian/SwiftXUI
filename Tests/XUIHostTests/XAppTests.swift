@@ -62,30 +62,30 @@ private final class RecordingRenderer: XRenderer {
     }
 }
 
-@Test @XUIActor func appSessionUsesTheAppConfiguration() {
+@Test @XUIActor func appSessionUsesTheAppConfiguration() async {
     let session = XApplication.session(TestApp())
-    let frame = session.render(time: 4)
+    let frame = await session.render(time: 4)
 
     #expect(frame.scene.authoringCanvas == RenderSize(width: 640, height: 360))
     #expect(frame.scene.background == RenderColor(0.1, 0.2, 0.3, 1))
     #expect(frame.scene.commands.count == 1)
 }
 
-@Test @XUIActor func appSessionKeepsOneHostAcrossFrames() {
+@Test @XUIActor func appSessionKeepsOneHostAcrossFrames() async {
     let session = XApplication.session(TestApp())
     let firstHost = ObjectIdentifier(session.host)
 
-    _ = session.render(time: 1)
-    _ = session.render(time: 2)
+    _ = await session.render(time: 1)
+    _ = await session.render(time: 2)
 
     #expect(ObjectIdentifier(session.host) == firstHost)
 }
 
-@Test @XUIActor func appDriverCompilesAndForwardsEachFrame() {
+@Test @XUIActor func appDriverCompilesAndForwardsEachFrame() async {
     let renderer = RecordingRenderer()
     let driver = XAppDriver(TestApp(), renderer: renderer)
 
-    let compiled = driver.frame(
+    let compiled = await driver.frame(
         at: 4,
         framebuffer: RenderSize(width: 1280, height: 720)
     )
@@ -96,7 +96,7 @@ private final class RecordingRenderer: XRenderer {
     #expect(compiled.shapeVertices.count == 36)
 }
 
-@Test @XUIActor func applicationRuntimeForwardsLifecycleInOrder() {
+@Test @XUIActor func applicationRuntimeForwardsLifecycleInOrder() async {
     let renderer = RecordingRenderer()
     let delegate = RecordingDelegate()
     let runtime = XApplication.runtime(

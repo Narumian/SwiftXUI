@@ -18,7 +18,8 @@ private struct Nest: XView {
     }
 }
 
-private func textMeasurements(nestedStacks depth: Int) -> Int {
+@XUIActor
+private func textMeasurements(nestedStacks depth: Int) async -> Int {
     let counter = MeasureCount()
     var environment = EnvironmentValues()
     environment.measureText = { string, size, _ in
@@ -29,22 +30,22 @@ private func textMeasurements(nestedStacks depth: Int) -> Int {
     // The same leaf, wrapped `depth` times in a stack that also holds a Spacer:
     // every level asks its child for a size several times.
     let view = Nest(level: depth)
-    LayoutHost(canvas: Size(width: 400, height: 400), environment: environment)
+    await LayoutHost(canvas: Size(width: 400, height: 400), environment: environment)
         .resolveAnchors(view, store: StateStore())
     return counter.calls
 }
 
-@Test func measuringANestedStackDoesNotMultiplyWithDepth() {
+@Test @XUIActor func measuringANestedStackDoesNotMultiplyWithDepth() async {
     // Without remembering sizes the count grows about threefold per level
     // (thousands of measurements at depth 8); with it, it grows by a small
     // constant per level.
-    let shallow = textMeasurements(nestedStacks: 2)
-    let deep = textMeasurements(nestedStacks: 8)
+    let shallow = await textMeasurements(nestedStacks: 2)
+    let deep = await textMeasurements(nestedStacks: 8)
     #expect(deep < 200, "deep tree measured its text \(deep) times")
     #expect(deep <= shallow + 6 * 12, "shallow \(shallow) vs deep \(deep): should grow linearly")
 }
 
-@Test func aNodeRemembersASizeOnlyWithinOnePass() {
+@Test @XUIActor func aNodeRemembersASizeOnlyWithinOnePass() async {
     let counter = MeasureCount()
     var environment = EnvironmentValues()
     environment.measureText = { string, size, _ in
@@ -53,8 +54,8 @@ private func textMeasurements(nestedStacks depth: Int) -> Int {
     }
     let view = VStack { Text("a", size: 10) }
     let host = LayoutHost(canvas: Size(width: 100, height: 100), environment: environment)
-    _ = host.resolveAnchors(view, store: StateStore())
+    _ = await host.resolveAnchors(view, store: StateStore())
     let first = counter.calls
-    _ = host.resolveAnchors(view, store: StateStore())
+    _ = await host.resolveAnchors(view, store: StateStore())
     #expect(counter.calls == first * 2, "each pass measures for itself")
 }

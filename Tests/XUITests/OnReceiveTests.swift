@@ -7,30 +7,31 @@ import Testing
 /// stops receiving once `StateStore` garbage-collects its box — mirroring
 /// `StatefulXViewTests`'s coverage of `@XState` itself.
 
-private func resolve(_ signal: Signal<Int>, log: @escaping (Int) -> Void, store: StateStore) {
+@XUIActor
+private func resolve(_ signal: Signal<Int>, log: @escaping (Int) -> Void, store: StateStore) async {
     let view = Color(.black).onReceive(signal, perform: log)
-    _ = LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
+    _ = await LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
 }
 
-@Test func onReceiveSubscribesOnceAcrossRepeatedWalks() {
+@Test @XUIActor func onReceiveSubscribesOnceAcrossRepeatedWalks() async {
     let signal = Signal<Int>()
     var received: [Int] = []
     let store = StateStore()
 
-    resolve(signal, log: { received.append($0) }, store: store)
-    resolve(signal, log: { received.append($0) }, store: store)
+    await resolve(signal, log: { received.append($0) }, store: store)
+    await resolve(signal, log: { received.append($0) }, store: store)
 
     signal.send(1)
 
     #expect(received == [1], "a second walk should reuse the existing subscription, not add a second one")
 }
 
-@Test func onReceiveUnsubscribesOnceTheNodeStopsBeingDeclared() {
+@Test @XUIActor func onReceiveUnsubscribesOnceTheNodeStopsBeingDeclared() async {
     let signal = Signal<Int>()
     var received: [Int] = []
     let store = StateStore()
 
-    resolve(signal, log: { received.append($0) }, store: store)
+    await resolve(signal, log: { received.append($0) }, store: store)
 
     // A pass that never re-declares the `.onReceive` node at all — its box
     // goes unvisited and `endPass()` drops it.

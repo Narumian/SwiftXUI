@@ -13,9 +13,9 @@ private struct TestShader: Shader {
     }
 }
 
-@Test func sceneCanvasIsolatesLayerShadersWithTheirSubviewCommands() {
+@Test @XUIActor func sceneCanvasIsolatesLayerShadersWithTheirSubviewCommands() async {
     let surface = SceneCanvas(size: RenderSize(width: 100, height: 50))
-    _ = LayoutHost(canvas: XUI.Size(width: 100, height: 50)).render(
+    _ = await LayoutHost(canvas: XUI.Size(width: 100, height: 50)).render(
         Color.black.frame(width: 20, height: 10, alignment: .topLeading)
             .shader(TestShader()),
         into: surface

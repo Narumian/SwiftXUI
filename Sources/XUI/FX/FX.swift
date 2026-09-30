@@ -12,6 +12,7 @@ import Foundation
 /// resolved `any FX` (draw it, play a sound, shake a camera) is entirely up
 /// to that app — this protocol has no opinion, the same way `XView` has no
 /// opinion about pixels.
+@XUIActor
 public protocol FX {
     associatedtype Body: FX
     @FXBuilder var body: Body { get }
@@ -34,10 +35,12 @@ public extension FX where Body == Never {
 /// expand to zero or more resolved values, forwarding `id`/`store` to each
 /// child so `@XState` inside a nested composite still resolves to stable,
 /// identity-keyed storage.
+@XUIActor
 public protocol _PrimitiveFX {
     func _emit(id: StateIdentity, store: StateStore, into out: inout [any FX])
 }
 
+@XUIActor
 public extension _PrimitiveFX where Self: FX {
     /// The common case: a true leaf with nothing further to resolve just
     /// appends itself. Override only when a primitive needs to expand into
@@ -57,6 +60,7 @@ public extension _PrimitiveFX where Self: FX {
 /// per `@XState` property) only runs for `@Stateful`-attached composites —
 /// this is a cold path, but there's no reason to pay it for the ordinary
 /// one-shot beats.
+@XUIActor
 public func emit(_ fx: any FX, id: StateIdentity, store: StateStore, into out: inout [any FX]) {
     if let primitive = fx as? _PrimitiveFX {
         primitive._emit(id: id, store: store, into: &out)

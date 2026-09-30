@@ -5,7 +5,7 @@ import Foundation
 ///
 /// ```swift
 /// let host = LayoutHost(canvas: Size(width: 1920, height: 1080), environment: env)
-/// let result = host.render(BattleView(snapshot: s), into: sceneCanvas)
+/// let result = await host.render(BattleView(snapshot: s), into: sceneCanvas)
 /// // result.anchors["screen"], result.regions
 /// ```
 public struct LayoutHost {
@@ -18,7 +18,8 @@ public struct LayoutHost {
     }
 
     @discardableResult
-    public func render(_ view: some XView, into surface: any XCanvas, store: StateStore = StateStore()) -> RenderResult {
+    @XUIActor
+    public func render(_ view: some XView, into surface: any XCanvas, store: StateStore = StateStore()) async -> RenderResult {
         store.beginPass(now: environment.fxTime)
         defer { store.endPass() }
 
@@ -27,8 +28,8 @@ public struct LayoutHost {
         var layoutContext = LayoutContext(environment: env, referenceSize: canvas)
         layoutContext.pass = LayoutPass.next()
 
-        let root = LayoutNode(layout: RootLayout(), children: lower(view, id: .root, store: store))
-        LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
+        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
 
         let renderContext = RenderContext(canvas: surface, environment: env)
         LayoutEngine.render(root, into: renderContext)
@@ -48,14 +49,15 @@ public struct LayoutHost {
     /// Layout only — no painting. Useful for parity tests that just want the
     /// resolved anchor rects. Text falls back to the environment's default
     /// measurer unless one was set on `environment`.
-    public func resolveAnchors(_ view: some XView, store: StateStore = StateStore()) -> [AnchorID: Rect] {
+    @XUIActor
+    public func resolveAnchors(_ view: some XView, store: StateStore = StateStore()) async -> [AnchorID: Rect] {
         store.beginPass(now: environment.fxTime)
         defer { store.endPass() }
 
         var layoutContext = LayoutContext(environment: environment, referenceSize: canvas)
         layoutContext.pass = LayoutPass.next()
-        let root = LayoutNode(layout: RootLayout(), children: lower(view, id: .root, store: store))
-        LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
+        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
         var anchors: [AnchorID: Rect] = [:]
         collectAnchors(root, into: &anchors)
         return anchors

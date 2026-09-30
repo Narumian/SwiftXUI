@@ -5,9 +5,9 @@ import XRender
 
 private let canvas = Size(width: 1920, height: 1080)
 
-@Test func colorPaintsOneRectIntoTheScene() {
+@Test @XUIActor func colorPaintsOneRectIntoTheScene() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(Color(red: 1, green: 0, blue: 0), into: surface)
+    await LayoutHost(canvas: canvas).render(Color(red: 1, green: 0, blue: 0), into: surface)
 
     let shapes = surface.scene.commands.compactMap { command -> ShapeCommand? in
         if case .shape(let s) = command { return s }
@@ -17,9 +17,9 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(shapes[0].color.red == 1)
 }
 
-@Test func frameResolvesToExpectedRenderRect() {
+@Test @XUIActor func frameResolvesToExpectedRenderRect() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(
+    await LayoutHost(canvas: canvas).render(
         Color.white.frame(width: 200, height: 120, alignment: .topLeading),
         into: surface
     )
@@ -32,9 +32,9 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(rect == RenderRect(x: 0, y: 0, width: 200, height: 120))
 }
 
-@Test func clippedViewCarriesItsResolvedRectIntoSceneCommands() {
+@Test @XUIActor func clippedViewCarriesItsResolvedRectIntoSceneCommands() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(
+    await LayoutHost(canvas: canvas).render(
         Color.white
             .frame(width: 80, height: 40, alignment: .topLeading)
             .clipped(),
@@ -48,9 +48,9 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(shape.clip == RenderRect(x: 0, y: 0, width: 80, height: 40))
 }
 
-@Test func ellipsePaintsAnEllipseShapeIntoTheScene() {
+@Test @XUIActor func ellipsePaintsAnEllipseShapeIntoTheScene() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(
+    await LayoutHost(canvas: canvas).render(
         Ellipse(fill: XColorValue(1, 0, 0, 0.5)).frame(width: 80, height: 40),
         into: surface
     )
@@ -66,9 +66,9 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(shape.color.alpha == 0.5)
 }
 
-@Test func borderPaintsAStrokeShapeIntoTheScene() {
+@Test @XUIActor func borderPaintsAStrokeShapeIntoTheScene() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(
+    await LayoutHost(canvas: canvas).render(
         Color.white
             .frame(width: 80, height: 40)
             .border(.black, width: 4),
@@ -93,14 +93,14 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(closed)
 }
 
-@Test func pathPaintsPolygonAndPolylineShapesIntoTheScene() {
+@Test @XUIActor func pathPaintsPolygonAndPolylineShapesIntoTheScene() async {
     let fillSurface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
     let triangle = XUI.Path(points: [
         XUI.Point(x: 0, y: 0),
         XUI.Point(x: 1, y: 0),
         XUI.Point(x: 1, y: 1)
     ])
-    LayoutHost(canvas: canvas).render(triangle.fill(.white).frame(width: 90, height: 45), into: fillSurface)
+    await LayoutHost(canvas: canvas).render(triangle.fill(.white).frame(width: 90, height: 45), into: fillSurface)
 
     guard case .shape(let fillShape)? = fillSurface.scene.commands.first,
           case .polygon(let fillPoints) = fillShape.geometry else {
@@ -114,7 +114,7 @@ private let canvas = Size(width: 1920, height: 1080)
     ])
 
     let strokeSurface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(triangle.stroke(.black, lineWidth: 6).frame(width: 90, height: 45), into: strokeSurface)
+    await LayoutHost(canvas: canvas).render(triangle.stroke(.black, lineWidth: 6).frame(width: 90, height: 45), into: strokeSurface)
 
     guard case .shape(let strokeShape)? = strokeSurface.scene.commands.first,
           case .stroke(let strokePoints, let width, let closed) = strokeShape.geometry else {
@@ -126,9 +126,9 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(closed)
 }
 
-@Test func outlinedTextPaintsStrokeCopiesBeforeTheFill() {
+@Test @XUIActor func outlinedTextPaintsStrokeCopiesBeforeTheFill() async {
     let surface = SceneCanvas(size: RenderSize(width: 1920, height: 1080))
-    LayoutHost(canvas: canvas).render(
+    await LayoutHost(canvas: canvas).render(
         Text("28", size: 3, color: .white)
             .font(.display)
             .outline(color: .black, width: 2),
@@ -146,7 +146,7 @@ private let canvas = Size(width: 1920, height: 1080)
     #expect(texts.first?.font == .display)
 }
 
-@Test func geometryBridgingRoundTrips() {
+@Test @XUIActor func geometryBridgingRoundTrips() async {
     let r = XUI.Rect(x: 12, y: 34, width: 56, height: 78)
     let back = XUI.Size(r.render.width == 56 ? RenderSize(width: 56, height: 78) : .init(width: 0, height: 0))
     #expect(back.width == 56)

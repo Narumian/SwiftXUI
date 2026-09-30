@@ -50,8 +50,9 @@ public struct _SafeAreaPaddingModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let edges: Edge
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        [LayoutNode(layout: SafeAreaPaddingLayout(edges: edges), children: lower(content, id: id, store: store))]
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        [LayoutNode(layout: SafeAreaPaddingLayout(edges: edges), children: await lower(content, id: id, store: store))]
     }
 }
 
@@ -60,8 +61,9 @@ public struct _PaddingModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let insets: EdgeInsets
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        [LayoutNode(layout: PaddingLayout(insets: insets), children: lower(content, id: id, store: store))]
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        [LayoutNode(layout: PaddingLayout(insets: insets), children: await lower(content, id: id, store: store))]
     }
 }
 

@@ -5,10 +5,11 @@ public struct _ClipModifier<Content: XView>: XView, _PrimitiveXView {
 
     let content: Content
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(
             layout: PassthroughLayout(),
-            children: lower(content, id: id.child(type: Content.self), store: store)
+            children: await lower(content, id: id.child(type: Content.self), store: store)
         )
         node.clipsToBounds = true
         return [node]

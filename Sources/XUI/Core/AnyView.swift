@@ -9,7 +9,8 @@ public struct AnyView: XView, _PrimitiveXView {
         self.view = view
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        lower(view, id: id, store: store)
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        await lower(view, id: id, store: store)
     }
 }

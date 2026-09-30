@@ -36,7 +36,8 @@ public final class XUIHost {
     /// code should consume the frame through the eventual XUI application
     /// host instead of touching the scene directly.
     @discardableResult
-    public func render<V: XView>(_ view: V, time: Double? = nil) -> XUIFrame {
+    @XUIActor
+    public func render<V: XView>(_ view: V, time: Double? = nil) async -> XUIFrame {
         var frameEnvironment = environment
         if let time { frameEnvironment.fxTime = time }
 
@@ -46,7 +47,7 @@ public final class XUIHost {
             fonts: fonts,
             images: images
         )
-        let layout = LayoutHost(
+        let layout = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
             environment: frameEnvironment
         ).render(view, into: surface, store: store)

@@ -27,7 +27,8 @@ public struct _FXSinkModifier<Content: XView>: XView, _PrimitiveXView {
     let anchor: Alignment
     let offset: Point
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let buffer: StateStore.Box<[any FX]> = store.box(for: id.child(type: Self.self, index: 0)) { [] }
         let sub: StateStore.Box<Subscription?> = store.box(for: id.child(type: Self.self, index: 1)) { nil }
         let playback: StateStore.Box<[any FXPlayback]> = store.box(for: id.child(type: Self.self, index: 2)) { [] }
@@ -57,7 +58,7 @@ public struct _FXSinkModifier<Content: XView>: XView, _PrimitiveXView {
             sub.value = signal.subscribe { buffer.value.append($0) }
         }
 
-        let nodes = lower(content, id: id, store: store)
+        let nodes = await lower(content, id: id, store: store)
         guard let first = nodes.first else { return nodes }
         let previousDraw = first.draw
         first.draw = { rect, context in

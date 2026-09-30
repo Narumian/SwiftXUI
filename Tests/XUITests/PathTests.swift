@@ -3,13 +3,14 @@ import Testing
 
 private let canvas = Size(width: 300, height: 200)
 
-private func render(_ view: some XView) -> RecordingCanvas {
+@XUIActor
+private func render(_ view: some XView) async -> RecordingCanvas {
     let surface = RecordingCanvas()
-    LayoutHost(canvas: canvas).render(view, into: surface)
+    await LayoutHost(canvas: canvas).render(view, into: surface)
     return surface
 }
 
-@Test func pathKeepsItsAuthoredBoundsAndFillsTheRootProposal() {
+@Test @XUIActor func pathKeepsItsAuthoredBoundsAndFillsTheRootProposal() async {
     let path = Path { p in
         p.move(to: Point(x: 10, y: 20))
         p.addLine(to: Point(x: 90, y: 20))
@@ -17,25 +18,25 @@ private func render(_ view: some XView) -> RecordingCanvas {
         p.closeSubpath()
     }
 
-    let surface = render(path)
+    let surface = await render(path)
     #expect(path.bounds == Rect(x: 10, y: 20, width: 80, height: 30))
     #expect(surface.paths[0].rect == Rect(x: 0, y: 0, width: 300, height: 200))
 }
 
-@Test func pathCanBeStrokedInAResolvedFrame() {
+@Test @XUIActor func pathCanBeStrokedInAResolvedFrame() async {
     let path = Path(points: [
         Point(x: 0, y: 0),
         Point(x: 1, y: 0),
         Point(x: 1, y: 1)
     ], closed: false)
-    let surface = render(path.stroke(.white, lineWidth: 4).frame(width: 120, height: 60))
+    let surface = await render(path.stroke(.white, lineWidth: 4).frame(width: 120, height: 60))
 
     #expect(surface.paths[0].rect == Rect(x: 0, y: 0, width: 120, height: 60))
     #expect(surface.paths[0].color == .white)
     #expect(surface.paths[0].lineWidth == 4)
 }
 
-@Test func pathSubpathsFitAuthoredPointsIntoDestinationRect() {
+@Test @XUIActor func pathSubpathsFitAuthoredPointsIntoDestinationRect() async {
     let path = Path(points: [
         Point(x: 10, y: 20),
         Point(x: 30, y: 20),

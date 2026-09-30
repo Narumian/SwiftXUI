@@ -75,7 +75,7 @@ final class LayoutNode {
     var clipsToBounds = false
     /// Content that can only be built once the node's resolved frame is known
     /// (`GeometryReader`). The engine runs this during `place`.
-    var lazyChildren: ((Rect, LayoutContext) -> [LayoutNode])?
+    var lazyChildren: (@XUIActor (Rect, LayoutContext) async -> [LayoutNode])?
 
     private var measuredSizes: [ProposedSize: Size] = [:]
     private var measuredPass: UInt64 = .max

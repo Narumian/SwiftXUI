@@ -15,7 +15,8 @@ public struct _TriggerPulseModifier<Content: XView, Value>: XView, _PrimitiveXVi
     let peakScale: Double
     let frames: Int
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let countdown: StateStore.Box<Int> = store.box(for: id.child(type: Self.self, index: 0)) { 0 }
         let subscription: StateStore.Box<Subscription?> = store.box(for: id.child(type: Self.self, index: 1)) { nil }
         if subscription.value == nil {
@@ -29,7 +30,7 @@ public struct _TriggerPulseModifier<Content: XView, Value>: XView, _PrimitiveXVi
 
         let t = Double(remaining) / Double(max(frames, 1))
         let scale = 1 + (peakScale - 1) * t
-        return lower(content.scaleEffect(x: scale, y: scale), id: id, store: store)
+        return await lower(content.scaleEffect(x: scale, y: scale), id: id, store: store)
     }
 }
 

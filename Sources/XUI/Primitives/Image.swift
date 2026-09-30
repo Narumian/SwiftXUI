@@ -51,7 +51,8 @@ public struct Image: XView, _PrimitiveXView {
         self.resizing = .fixed
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: ImageLayout(source: source, resizing: resizing))
         let source = self.source
         let opacity = self.opacity

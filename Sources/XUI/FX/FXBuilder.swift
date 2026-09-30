@@ -2,6 +2,7 @@ import Foundation
 
 /// Result builder for `FX.body` — the same shape as `XViewBuilder`: identity
 /// for a single child, a value parameter pack for any larger arity.
+@XUIActor
 @resultBuilder
 public enum FXBuilder {
     public static func buildBlock() -> EmptyFX { EmptyFX() }
@@ -32,6 +33,7 @@ public enum FXBuilder {
 
 /// A builder aggregate whose direct children are the steps a composer such as
 /// a sequence should treat as units. `TupleFX` and `ArrayFX` conform.
+@XUIActor
 public protocol _FXGrouping {
     var _steps: [any FX] { get }
 }

@@ -121,7 +121,8 @@ public struct Path: XView, _PrimitiveXView, Hashable, Sendable {
         return result
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: PathLayout(path: self))
         let path = self
         node.draw = { rect, context in

@@ -12,10 +12,13 @@ public struct ForEach<Data: RandomAccessCollection, Content: XView>: XView, _Pri
         self.content = content
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        data.enumerated().flatMap { i, element in
-            lower(content(element), id: id.child(type: Content.self, index: i), store: store)
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        var nodes: [LayoutNode] = []
+        for (i, element) in data.enumerated() {
+            nodes += await lower(content(element), id: id.child(type: Content.self, index: i), store: store)
         }
+        return nodes
     }
 }
 

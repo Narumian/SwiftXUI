@@ -16,7 +16,8 @@ public struct Rectangle: XView, _PrimitiveXView, Sendable {
         return copy
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
         let fill = fill
         node.draw = { rect, context in
@@ -43,7 +44,8 @@ public struct RoundedRectangle: XView, _PrimitiveXView, Sendable {
         return copy
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
         let cornerRadius = cornerRadius
         let fill = fill
@@ -69,7 +71,8 @@ public struct Ellipse: XView, _PrimitiveXView, Sendable {
         return copy
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
         let fill = fill
         node.draw = { rect, context in
@@ -94,9 +97,10 @@ public struct Circle: XView, _PrimitiveXView, Sendable {
         return copy
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: AspectRatioLayout(ratio: 1, contentMode: .fit, alignment: .center), children: [
-            Ellipse(fill: fill)._lower(id: id.child(type: Ellipse.self), store: store)[0]
+            (await Ellipse(fill: fill)._lower(id: id.child(type: Ellipse.self), store: store))[0]
         ])
         return [node]
     }

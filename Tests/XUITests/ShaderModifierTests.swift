@@ -12,9 +12,9 @@ private struct TestShader: Shader {
     }
 }
 
-@Test func shaderModifierExportsResolvedFrameWithoutChangingLayout() {
+@Test @XUIActor func shaderModifierExportsResolvedFrameWithoutChangingLayout() async {
     let surface = RecordingCanvas()
-    let result = LayoutHost(canvas: Size(width: 300, height: 200)).render(
+    let result = await LayoutHost(canvas: Size(width: 300, height: 200)).render(
         Color.black.frame(width: 40, height: 30, alignment: .topLeading)
             .shader(TestShader(amount: 0.75)),
         into: surface
@@ -27,7 +27,7 @@ private struct TestShader: Shader {
     #expect(surface.fills[0].rect == Rect(x: 0, y: 0, width: 40, height: 30))
 }
 
-@Test func shaderScopeIsRecordedForNestedViewsInPaintOrder() {
+@Test @XUIActor func shaderScopeIsRecordedForNestedViewsInPaintOrder() async {
     let surface = RecordingCanvas()
     let view = VStack(spacing: 0) {
         Color.black.frame(width: 20, height: 20)
@@ -36,6 +36,6 @@ private struct TestShader: Shader {
             .shader(TestShader(amount: 2))
     }
 
-    let result = LayoutHost(canvas: Size(width: 100, height: 100)).render(view, into: surface)
+    let result = await LayoutHost(canvas: Size(width: 100, height: 100)).render(view, into: surface)
     #expect(result.shaders.map(\.shader.uniforms.values) == [[1], [2]])
 }

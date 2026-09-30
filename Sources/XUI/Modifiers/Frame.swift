@@ -112,14 +112,15 @@ public struct _FrameModifier<Content: XView>: XView, _PrimitiveXView {
     let vertical: FrameAxis
     let alignment: Alignment
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         // Inside `.animation(_:value:)` a fixed width or height eases to its new
         // length instead of jumping. Anywhere else this is the axis unchanged.
         let h = animated(horizontal, id: id.child(type: Self.self, index: 1), store)
         let v = animated(vertical, id: id.child(type: Self.self, index: 2), store)
         return [LayoutNode(
             layout: FrameLayout(horizontal: h, vertical: v, alignment: alignment),
-            children: lower(content, id: id, store: store)
+            children: await lower(content, id: id, store: store)
         )]
     }
 

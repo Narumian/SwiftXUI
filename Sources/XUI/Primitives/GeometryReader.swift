@@ -29,13 +29,14 @@ public struct GeometryReader<Content: XView>: XView, _PrimitiveXView {
         self.content = content
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: GeometryReaderLayout())
         let build = content
         // `lazyChildren` fires later, from `LayoutEngine.place` — capture `id`/
         // `store` now since they aren't available at that call site.
         node.lazyChildren = { rect, _ in
-            lower(build(GeometryProxy(frame: rect)), id: id, store: store)
+            await lower(build(GeometryProxy(frame: rect)), id: id, store: store)
         }
         return [node]
     }

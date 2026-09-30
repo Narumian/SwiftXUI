@@ -7,16 +7,17 @@ import Testing
 /// rely on, but refreshed each walk instead of installed once (see
 /// `Reactive/OnRemove.swift`'s doc comment for why).
 
-private func resolve(_ view: some XView, store: StateStore) {
-    _ = LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
+@XUIActor
+private func resolve(_ view: some XView, store: StateStore) async {
+    _ = await LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
 }
 
-@Test func onRemoveFiresWithTheLastDeclaredValueOnceTheNodeStopsBeingDeclared() {
+@Test @XUIActor func onRemoveFiresWithTheLastDeclaredValueOnceTheNodeStopsBeingDeclared() async {
     let store = StateStore()
     var removed: [Int] = []
 
-    resolve(Color(.black).onRemove(1, perform: { removed.append($0) }), store: store)
-    resolve(Color(.black).onRemove(2, perform: { removed.append($0) }), store: store)
+    await resolve(Color(.black).onRemove(1, perform: { removed.append($0) }), store: store)
+    await resolve(Color(.black).onRemove(2, perform: { removed.append($0) }), store: store)
     #expect(removed.isEmpty, "still declared — must not fire yet")
 
     // A pass that never redeclares the `.onRemove` node at all.
@@ -26,19 +27,19 @@ private func resolve(_ view: some XView, store: StateStore) {
     #expect(removed == [2], "fires once with the LAST declared value, not the first")
 }
 
-@Test func onRemoveDoesNotFireWhileRedeclaredEveryWalk() {
+@Test @XUIActor func onRemoveDoesNotFireWhileRedeclaredEveryWalk() async {
     let store = StateStore()
     var removed: [Int] = []
     for _ in 0..<3 {
-        resolve(Color(.black).onRemove(9, perform: { removed.append($0) }), store: store)
+        await resolve(Color(.black).onRemove(9, perform: { removed.append($0) }), store: store)
     }
     #expect(removed.isEmpty)
 }
 
-@Test func onRemoveWithNoValueFiresOnceOnDisappearance() {
+@Test @XUIActor func onRemoveWithNoValueFiresOnceOnDisappearance() async {
     let store = StateStore()
     var count = 0
-    resolve(Color(.black).onRemove(perform: { count += 1 }), store: store)
+    await resolve(Color(.black).onRemove(perform: { count += 1 }), store: store)
 
     store.beginPass()
     store.endPass()
@@ -51,7 +52,7 @@ private func resolve(_ view: some XView, store: StateStore) {
     #expect(count == 1, "must not fire again on a later pass")
 }
 
-@Test func fxOnRemoveFiresWithTheLastDeclaredValueOnceNoLongerEmitted() {
+@Test @XUIActor func fxOnRemoveFiresWithTheLastDeclaredValueOnceNoLongerEmitted() async {
     let store = StateStore()
     var removed: [Int] = []
 

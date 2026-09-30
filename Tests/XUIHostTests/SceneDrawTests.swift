@@ -7,7 +7,7 @@ private enum ClockKey: XUI.EnvironmentKey {
     static var defaultValue: Double { 0 }
 }
 
-@Test func sceneDrawGetsRealBuilderAndEnvironment() {
+@Test @XUIActor func sceneDrawGetsRealBuilderAndEnvironment() async {
     var env = XUI.EnvironmentValues()
     env[ClockKey.self] = 7
 
@@ -19,7 +19,7 @@ private enum ClockKey: XUI.EnvironmentKey {
     .frame(width: 200, height: 100, alignment: .topLeading)
 
     let surface = SceneCanvas(size: RenderSize(width: 300, height: 200))
-    LayoutHost(canvas: XUI.Size(width: 300, height: 200), environment: env)
+    await LayoutHost(canvas: XUI.Size(width: 300, height: 200), environment: env)
         .render(view, into: surface)
 
     let hasGradient = surface.scene.commands.contains { command in
@@ -29,16 +29,16 @@ private enum ClockKey: XUI.EnvironmentKey {
     #expect(hasGradient)
 }
 
-@Test func sceneDrawAnchorStillExports() {
+@Test @XUIActor func sceneDrawAnchorStillExports() async {
     let view = SceneDraw { _, _, _ in }
         .frame(width: 80, height: 60, alignment: .topLeading)
         .anchor("screen")
     let surface = SceneCanvas(size: RenderSize(width: 300, height: 200))
-    let result = LayoutHost(canvas: XUI.Size(width: 300, height: 200)).render(view, into: surface)
+    let result = await LayoutHost(canvas: XUI.Size(width: 300, height: 200)).render(view, into: surface)
     #expect(result.anchors["screen"] == XUI.Rect(x: 0, y: 0, width: 80, height: 60))
 }
 
-@Test func sceneDrawUsesItsResolvedOriginAsTheLocalOrigin() {
+@Test @XUIActor func sceneDrawUsesItsResolvedOriginAsTheLocalOrigin() async {
     let view = HStack(spacing: 0) {
         Color.clear.frame(width: 50, height: 40)
         SceneDraw { rect, builder, context in
@@ -48,7 +48,7 @@ private enum ClockKey: XUI.EnvironmentKey {
         .frame(width: 20, height: 10)
     }
     let surface = SceneCanvas(size: RenderSize(width: 300, height: 200))
-    let result = LayoutHost(canvas: XUI.Size(width: 300, height: 200)).render(view, into: surface)
+    let result = await LayoutHost(canvas: XUI.Size(width: 300, height: 200)).render(view, into: surface)
 
     let shape = surface.scene.commands.compactMap { command -> ShapeCommand? in
         if case .shape(let shape) = command, shape.color == RenderColor(1, 0, 0) { return shape }

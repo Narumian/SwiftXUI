@@ -1,7 +1,7 @@
 import Testing
 @testable import XUI
 
-@Test func sendDeliversToEverySubscriberInOrder() {
+@Test @XUIActor func sendDeliversToEverySubscriberInOrder() async {
     let signal = Signal<Int>()
     var received: [String] = []
     let a = signal.subscribe { received.append("a:\($0)") }
@@ -13,7 +13,7 @@ import Testing
     #expect(received == ["a:1", "b:1"])
 }
 
-@Test func cancellingStopsDelivery() {
+@Test @XUIActor func cancellingStopsDelivery() async {
     let signal = Signal<Int>()
     var received: [Int] = []
     let subscription = signal.subscribe { received.append($0) }
@@ -25,7 +25,7 @@ import Testing
     #expect(received == [1])
 }
 
-@Test func droppingTheSubscriptionTokenAlsoStopsDelivery() {
+@Test @XUIActor func droppingTheSubscriptionTokenAlsoStopsDelivery() async {
     let signal = Signal<Int>()
     var received: [Int] = []
     do {
@@ -38,7 +38,7 @@ import Testing
     #expect(received == [1])
 }
 
-@Test func voidSignalHasAnArgumentlessSend() {
+@Test @XUIActor func voidSignalHasAnArgumentlessSend() async {
     let signal = Signal<Void>()
     var count = 0
     let subscription = signal.subscribe { count += 1 }
@@ -49,7 +49,7 @@ import Testing
     #expect(count == 1)
 }
 
-@Test func bufferedSignalQueuesUntilDrainedOntoASignal() {
+@Test @XUIActor func bufferedSignalQueuesUntilDrainedOntoASignal() async {
     let bridge = BufferedSignal<Int>()
     let signal = Signal<Int>()
     var received: [Int] = []
@@ -64,7 +64,7 @@ import Testing
     #expect(received == [1, 2])
 }
 
-@Test func bufferedSignalDrainIsEmptyAfterFlushing() {
+@Test @XUIActor func bufferedSignalDrainIsEmptyAfterFlushing() async {
     let bridge = BufferedSignal<Int>()
     let signal = Signal<Int>()
     var received: [Int] = []
@@ -78,7 +78,7 @@ import Testing
     #expect(received == [1])
 }
 
-@Test func bufferedSignalAcceptsSendsFromAnotherThread() async {
+@Test @XUIActor func bufferedSignalAcceptsSendsFromAnotherThread() async {
     let bridge = BufferedSignal<Int>()
     let signal = Signal<Int>()
     var received: [Int] = []
@@ -95,7 +95,7 @@ import Testing
     #expect(received.sorted() == Array(1...10))
 }
 
-@Test func bufferedSignalDrainWithClosureConsumesInOrderAndEmptiesTheQueue() {
+@Test @XUIActor func bufferedSignalDrainWithClosureConsumesInOrderAndEmptiesTheQueue() async {
     let bridge = BufferedSignal<Int>()
     bridge.send(1)
     bridge.send(2)

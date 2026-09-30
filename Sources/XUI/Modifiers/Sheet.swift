@@ -10,11 +10,12 @@ struct _SheetLayer<Content: XView>: XView, _PrimitiveXView {
     let onDismiss: () -> Void
     let content: Content
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let scrimNode = LayoutNode(layout: PassthroughLayout(),
-                                   children: lower(scrim, id: id.child(type: Color.self, index: 0), store: store))
+                                   children: await lower(scrim, id: id.child(type: Color.self, index: 0), store: store))
         let contentNode = LayoutNode(layout: PassthroughLayout(),
-                                     children: lower(content, id: id.child(type: Content.self, index: 1), store: store))
+                                     children: await lower(content, id: id.child(type: Content.self, index: 1), store: store))
         let layer = LayoutNode(layout: ZStackLayout(alignment: .center), children: [scrimNode, contentNode])
         layer.tapGesture = onDismiss
         layer.tapGestureID = "sheet-dismiss"
@@ -34,14 +35,15 @@ public struct _SheetModifier<Content: XView, Sheet: XView>: XView, _PrimitiveXVi
     let onDismiss: () -> Void
     let sheet: Sheet
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let base = LayoutNode(layout: PassthroughLayout(),
-                              children: lower(content, id: id.child(type: Content.self, index: 0), store: store))
+                              children: await lower(content, id: id.child(type: Content.self, index: 0), store: store))
         guard isPresented else { return [base] }
         base.blocksInput = true
         let layer = LayoutNode(
             layout: PassthroughLayout(),
-            children: lower(_SheetLayer(scrim: scrim, scope: scope, onDismiss: onDismiss, content: sheet),
+            children: await lower(_SheetLayer(scrim: scrim, scope: scope, onDismiss: onDismiss, content: sheet),
                             id: id.child(type: Sheet.self, index: 1), store: store))
         return [LayoutNode(layout: DecorationLayout(kind: .overlay, alignment: .center), children: [base, layer])]
     }

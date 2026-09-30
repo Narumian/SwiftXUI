@@ -10,8 +10,9 @@ public struct _ShaderModifier<Content: XView, S: Shader>: XView, _PrimitiveXView
     let content: Content
     let shader: S
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        let node = LayoutNode(layout: PassthroughLayout(), children: lower(content, id: id, store: store))
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let node = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: id, store: store))
         node.shader = shader.erased()
         return [node]
     }

@@ -13,7 +13,7 @@ public protocol XApplicationRuntimeProtocol: AnyObject {
         at time: Double,
         framebuffer: RenderSize?,
         fit: Bool
-    ) -> CompiledFrame
+    ) async -> CompiledFrame
 }
 
 /// Lifecycle callbacks for the platform shell that hosts an XApp.
@@ -100,7 +100,7 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         at time: Double,
         framebuffer: RenderSize? = nil,
         fit: Bool = true
-    ) -> CompiledFrame {
-        driver.frame(at: time, framebuffer: framebuffer, fit: fit)
+    ) async -> CompiledFrame {
+        await driver.frame(at: time, framebuffer: framebuffer, fit: fit)
     }
 }

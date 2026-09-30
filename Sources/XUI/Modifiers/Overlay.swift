@@ -45,11 +45,12 @@ public struct _BackgroundModifier<Content: XView, Background: XView>: XView, _Pr
     let background: Background
     let alignment: Alignment
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let backgroundNode = LayoutNode(layout: PassthroughLayout(),
-                                        children: lower(background, id: id.child(type: Background.self, index: 0), store: store))
+                                        children: await lower(background, id: id.child(type: Background.self, index: 0), store: store))
         let contentNode = LayoutNode(layout: PassthroughLayout(),
-                                     children: lower(content, id: id.child(type: Content.self, index: 1), store: store))
+                                     children: await lower(content, id: id.child(type: Content.self, index: 1), store: store))
         return [
             LayoutNode(
                 layout: DecorationLayout(kind: .background, alignment: alignment),
@@ -65,11 +66,12 @@ public struct _OverlayModifier<Content: XView, Overlay: XView>: XView, _Primitiv
     let overlay: Overlay
     let alignment: Alignment
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let contentNode = LayoutNode(layout: PassthroughLayout(),
-                                     children: lower(content, id: id.child(type: Content.self, index: 0), store: store))
+                                     children: await lower(content, id: id.child(type: Content.self, index: 0), store: store))
         let overlayNode = LayoutNode(layout: PassthroughLayout(),
-                                     children: lower(overlay, id: id.child(type: Overlay.self, index: 1), store: store))
+                                     children: await lower(overlay, id: id.child(type: Overlay.self, index: 1), store: store))
         return [
             LayoutNode(
                 layout: DecorationLayout(kind: .overlay, alignment: alignment),

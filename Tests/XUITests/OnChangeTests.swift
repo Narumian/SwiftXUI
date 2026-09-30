@@ -6,34 +6,35 @@ import Testing
 /// first declaration, and nothing fires while the same value keeps being
 /// redeclared.
 
-private func resolve(_ view: some XView, store: StateStore) {
-    _ = LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
+@XUIActor
+private func resolve(_ view: some XView, store: StateStore) async {
+    _ = await LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
 }
 
-@Test func onChangeFiresOnTheFirstDeclarationWithNilOld() {
+@Test @XUIActor func onChangeFiresOnTheFirstDeclarationWithNilOld() async {
     let store = StateStore()
     var seen: [(Int?, Int)] = []
-    resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
+    await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
 
     #expect(seen.count == 1)
     #expect(seen[0].0 == nil)
     #expect(seen[0].1 == 1)
 }
 
-@Test func onChangeDoesNotFireWhileRedeclaringTheSameValue() {
+@Test @XUIActor func onChangeDoesNotFireWhileRedeclaringTheSameValue() async {
     let store = StateStore()
     var seen: [(Int?, Int)] = []
     for _ in 0..<3 {
-        resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
+        await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
     }
     #expect(seen.count == 1, "only the first declaration should fire")
 }
 
-@Test func onChangeFiresWithOldAndNewWhenTheValueDiffers() {
+@Test @XUIActor func onChangeFiresWithOldAndNewWhenTheValueDiffers() async {
     let store = StateStore()
     var seen: [(Int?, Int)] = []
-    resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
-    resolve(Color(.black).onChange(of: 2) { old, new in seen.append((old, new)) }, store: store)
+    await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
+    await resolve(Color(.black).onChange(of: 2) { old, new in seen.append((old, new)) }, store: store)
 
     #expect(seen.count == 2)
     #expect(seen[1].0 == 1)

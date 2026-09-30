@@ -114,10 +114,34 @@ let canvas = NullCanvas()
 let host = LayoutHost(canvas: Size(width: 1920, height: 1080))
 let renderStore = StateStore()
 
+final class RenderRequest<V: XView>: @unchecked Sendable {
+    let view: V
+    let host: LayoutHost
+    let canvas: any XCanvas
+    let store: StateStore
+
+    init(view: V, host: LayoutHost, canvas: any XCanvas, store: StateStore) {
+        self.view = view
+        self.host = host
+        self.canvas = canvas
+        self.store = store
+    }
+}
+
+func blockingRender<V: XView>(_ view: V, host: LayoutHost, into canvas: any XCanvas, store: StateStore) {
+    let request = RenderRequest(view: view, host: host, canvas: canvas, store: store)
+    let semaphore = DispatchSemaphore(value: 0)
+    Task { @XUIActor in
+        _ = await request.host.render(request.view, into: request.canvas, store: request.store)
+        semaphore.signal()
+    }
+    semaphore.wait()
+}
+
 report("render(): 80-leaf grid, no _Stateful nodes", iterations: 10_000) {
-    host.render(PlainGrid(), into: canvas, store: renderStore)
+    blockingRender(PlainGrid(), host: host, into: canvas, store: renderStore)
 }
 
 report("render(): 80-leaf grid, every composite is _Stateful (@XState)", iterations: 10_000) {
-    host.render(StatefulGrid(), into: canvas, store: renderStore)
+    blockingRender(StatefulGrid(), host: host, into: canvas, store: renderStore)
 }

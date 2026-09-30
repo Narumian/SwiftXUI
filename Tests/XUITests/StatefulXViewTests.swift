@@ -32,24 +32,25 @@ private struct EntranceOnce: XView, _Stateful {
     }
 }
 
-private func firstFillColor(_ store: StateStore) -> XColorValue? {
+@XUIActor
+private func firstFillColor(_ store: StateStore) async -> XColorValue? {
     let surface = RecordingCanvas()
-    LayoutHost(canvas: Size(width: 100, height: 100)).render(EntranceOnce(), into: surface, store: store)
+    await LayoutHost(canvas: Size(width: 100, height: 100)).render(EntranceOnce(), into: surface, store: store)
     return surface.fills.first?.color
 }
 
-@Test func statefulXViewPlaysItsEntranceOnceThenRepeatsTheSteadyState() {
+@Test @XUIActor func statefulXViewPlaysItsEntranceOnceThenRepeatsTheSteadyState() async {
     let store = StateStore()
-    #expect(firstFillColor(store) == .black)
-    #expect(firstFillColor(store) == .red)
-    #expect(firstFillColor(store) == .red)
+    #expect(await firstFillColor(store) == .black)
+    #expect(await firstFillColor(store) == .red)
+    #expect(await firstFillColor(store) == .red)
 }
 
-@Test func aFreshStoreIsAFreshScopeNotAGlobalLeak() {
+@Test @XUIActor func aFreshStoreIsAFreshScopeNotAGlobalLeak() async {
     let store = StateStore()
-    _ = firstFillColor(store)
-    #expect(firstFillColor(store) == .red)
+    _ = await firstFillColor(store)
+    #expect(await firstFillColor(store) == .red)
 
     let otherStore = StateStore()
-    #expect(firstFillColor(otherStore) == .black, "a new store should see the entrance again, not the other store's state")
+    #expect(await firstFillColor(otherStore) == .black, "a new store should see the entrance again, not the other store's state")
 }

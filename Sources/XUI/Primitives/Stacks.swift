@@ -17,9 +17,10 @@ public struct HStack<Content: XView>: XView, _PrimitiveXView {
         self.content = content()
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let layout = StackLayout(axis: .horizontal, spacing: spacing, crossFraction: alignment.fraction)
-        return [LayoutNode(layout: layout, children: lower(content, id: id, store: store))]
+        return [LayoutNode(layout: layout, children: await lower(content, id: id, store: store))]
     }
 }
 
@@ -40,9 +41,10 @@ public struct VStack<Content: XView>: XView, _PrimitiveXView {
         self.content = content()
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let layout = StackLayout(axis: .vertical, spacing: spacing, crossFraction: alignment.fraction)
-        return [LayoutNode(layout: layout, children: lower(content, id: id, store: store))]
+        return [LayoutNode(layout: layout, children: await lower(content, id: id, store: store))]
     }
 }
 
@@ -60,7 +62,8 @@ public struct ZStack<Content: XView>: XView, _PrimitiveXView {
         self.content = content()
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
-        [LayoutNode(layout: ZStackLayout(alignment: alignment), children: lower(content, id: id, store: store))]
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        [LayoutNode(layout: ZStackLayout(alignment: alignment), children: await lower(content, id: id, store: store))]
     }
 }

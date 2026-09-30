@@ -49,7 +49,8 @@ public struct AsyncView<
         self.failure = failure
     }
 
-    func _lower(id: StateIdentity, store: StateStore) -> [LayoutNode] {
+    @XUIActor
+    func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let box: StateStore.Box<_AsyncViewState<Value>> = store.box(for: id.child(type: Self.self)) {
             _AsyncViewState()
         }
@@ -81,11 +82,11 @@ public struct AsyncView<
 
         switch box.value.phase {
         case .loading:
-            return lower(placeholder(), id: id.child(name: "loading"), store: store)
+            return await lower(placeholder(), id: id.child(name: "loading"), store: store)
         case .success(let value):
-            return lower(content(value), id: id.child(name: "success"), store: store)
+            return await lower(content(value), id: id.child(name: "success"), store: store)
         case .failure(let message):
-            return lower(failure(message), id: id.child(name: "failure"), store: store)
+            return await lower(failure(message), id: id.child(name: "failure"), store: store)
         }
     }
 }
