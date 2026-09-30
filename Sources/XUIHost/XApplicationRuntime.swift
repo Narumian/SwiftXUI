@@ -50,13 +50,18 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public init(
         _ app: App,
         renderer: any XRenderer,
-        maxFPS: Double = 60,
+        maxFPS: Double? = nil,
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) {
         self.app = app
         self.driver = XAppDriver(app, renderer: renderer)
-        self.loop = XAsyncLoop(driver: driver, maxFPS: maxFPS, framebuffer: framebuffer, fit: fit)
+        self.loop = XAsyncLoop(
+            driver: driver,
+            maxFPS: maxFPS ?? renderer.maximumFramesPerSecond,
+            framebuffer: framebuffer,
+            fit: fit
+        )
     }
 
     /// Starts the runtime and makes it active. Platform shells can use the

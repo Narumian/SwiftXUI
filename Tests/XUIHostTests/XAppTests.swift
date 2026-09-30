@@ -62,8 +62,28 @@ private final class RecordingRenderer: XRenderer {
     }
 }
 
+private final class HighRefreshRenderer: XRenderer {
+    var maximumFramesPerSecond: Double { 120 }
+    var frames: [CompiledFrame] = []
+
+    func render(_ frame: CompiledFrame, time: Float) {
+        frames.append(frame)
+    }
+}
+
 private func settleLoop() async {
     try? await Task.sleep(for: .milliseconds(20))
+}
+
+@Test @XUIActor func runtimeUsesRendererFrameRateWhenNoOverrideIsProvided() async {
+    let renderer = HighRefreshRenderer()
+    let runtime = XApplication.runtime(TestApp(), renderer: renderer)
+
+    runtime.start()
+    await settleLoop()
+    runtime.terminate()
+
+    #expect(renderer.frames.count == 1)
 }
 
 @Test @XUIActor func appSessionUsesTheAppConfiguration() async {
