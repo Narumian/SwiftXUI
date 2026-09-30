@@ -68,7 +68,6 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     /// more granular lifecycle methods when their OS has separate callbacks.
     public func start() {
         becomeActive()
-        loop.start()
     }
 
     public func launch() {
@@ -84,11 +83,13 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         isActive = true
         isInBackground = false
         app.delegate.applicationDidBecomeActive()
+        loop.start()
     }
 
     public func resignActive() {
         guard isActive else { return }
         isActive = false
+        loop.pause()
         app.delegate.applicationWillResignActive()
     }
 

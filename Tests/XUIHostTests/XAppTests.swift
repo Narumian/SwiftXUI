@@ -176,6 +176,29 @@ private func settleLoop() async {
     runtime.terminate()
 }
 
+@Test @XUIActor func applicationRuntimePausesWhileInBackground() async {
+    let renderer = RecordingRenderer()
+    let runtime = XApplication.runtime(
+        TestApp(),
+        renderer: renderer,
+        maxFPS: 1_000
+    )
+
+    runtime.start()
+    await settleLoop()
+    let activeCount = renderer.frames.count
+
+    runtime.enterBackground()
+    runtime.setNeedsDisplay()
+    await settleLoop()
+    #expect(renderer.frames.count == activeCount)
+
+    runtime.becomeActive()
+    await settleLoop()
+    #expect(renderer.frames.count == activeCount + 1)
+    runtime.terminate()
+}
+
 @Test @XUIActor func applicationRuntimeStopsItsLoopOnTerminate() async {
     let renderer = RecordingRenderer()
     let runtime = XApplication.runtime(

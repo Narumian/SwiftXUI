@@ -14,6 +14,7 @@ final class XAsyncLoop<App: XApp> {
     private let continuation: AsyncStream<Void>.Continuation
 
     private var task: Task<Void, Never>?
+    private var isPaused = false
     private var needsDraw = false
     private var lastDraw: ContinuousClock.Instant?
     private let clock = ContinuousClock()
@@ -39,9 +40,11 @@ final class XAsyncLoop<App: XApp> {
     }
 
     func start() {
-        guard task == nil else { return }
-        task = Task { [weak self] in
-            await self?.run()
+        isPaused = false
+        if task == nil {
+            task = Task { [weak self] in
+                await self?.run()
+            }
         }
         setNeedsDisplay()
     }
@@ -52,19 +55,25 @@ final class XAsyncLoop<App: XApp> {
     }
 
     func stop() {
+        isPaused = true
         task?.cancel()
         task = nil
+        needsDraw = false
         continuation.yield(())
+    }
+
+    func pause() {
+        isPaused = true
     }
 
     private func run() async {
         for await _ in events {
-            guard !Task.isCancelled, needsDraw else { continue }
+            guard !Task.isCancelled, !isPaused, needsDraw else { continue }
 
             if let lastDraw {
                 try? await clock.sleep(until: lastDraw.advanced(by: interval))
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !isPaused else { continue }
 
             needsDraw = false
             let now = clock.now
@@ -72,7 +81,7 @@ final class XAsyncLoop<App: XApp> {
             let time = Date.timeIntervalSinceReferenceDate - startedAt
             _ = await driver.frame(at: time, framebuffer: framebuffer, fit: fit)
 
-            if needsDraw {
+            if !isPaused, needsDraw {
                 continuation.yield(())
             }
         }
