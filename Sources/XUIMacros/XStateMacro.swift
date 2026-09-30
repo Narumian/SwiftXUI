@@ -37,8 +37,8 @@ public struct XStateMacro: AccessorMacro, PeerMacro {
             """
             private var _\(raw: field.name): StateStore.Box<\(field.type.trimmed)>?
 
-            var $\(raw: field.name): Binding<\(field.type.trimmed)> {
-                Binding(
+            var $\(raw: field.name): LocalBinding<\(field.type.trimmed)> {
+                LocalBinding(
                     get: { _\(raw: field.name)?.value ?? \(field.defaultExpr) },
                     set: { _\(raw: field.name)?.value = $0 }
                 )

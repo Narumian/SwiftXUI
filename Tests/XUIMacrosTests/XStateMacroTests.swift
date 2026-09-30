@@ -26,8 +26,8 @@ private let macros: [String: Macro.Type] = ["XState": XStateMacro.self, "Statefu
 
                 private var _spawned: StateStore.Box<Bool>?
 
-                var $spawned: Binding<Bool> {
-                    Binding(
+                var $spawned: LocalBinding<Bool> {
+                    LocalBinding(
                         get: { _spawned?.value ?? false },
                         set: { _spawned?.value = $0 }
                     )
