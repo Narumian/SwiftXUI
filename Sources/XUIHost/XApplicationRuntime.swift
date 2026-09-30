@@ -51,9 +51,10 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public init(
         _ app: App,
         renderer: any XRenderer,
+        context: XApplicationContext? = nil,
         delegate: (any XAppDelegate)? = nil
     ) {
-        self.driver = XAppDriver(app, renderer: renderer)
+        self.driver = XAppDriver(app, renderer: renderer, context: context)
         self.delegate = delegate
     }
 

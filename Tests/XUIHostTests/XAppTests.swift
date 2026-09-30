@@ -69,6 +69,28 @@ private final class RecordingDelegate: XAppDelegate {
     #expect(ObjectIdentifier(session.host) == firstHost)
 }
 
+@Test @XUIActor func appSessionInstallsApplicationAndDocumentContexts() {
+    let context = XApplicationContext()
+    let session = XApplication.session(TestApp(), context: context)
+
+    #expect(session.context === context)
+    #expect(session.host.environment.applicationContext === context)
+    #expect(session.host.environment.documentContext === context.document)
+}
+
+@Test @XUIActor func documentContextPublishesRevisionChanges() {
+    let context = XDocumentContext()
+    var changes = 0
+    let subscription = context.changed.subscribe { changes += 1 }
+
+    context.markChanged()
+    context.markChanged()
+
+    #expect(context.revision == 2)
+    #expect(changes == 2)
+    _ = subscription
+}
+
 @Test @XUIActor func appDriverCompilesAndForwardsEachFrame() {
     let renderer = RecordingRenderer()
     let driver = XAppDriver(TestApp(), renderer: renderer)
