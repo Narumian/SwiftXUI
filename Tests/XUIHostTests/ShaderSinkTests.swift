@@ -2,7 +2,7 @@ import Testing
 import XRender
 import XShader
 import XUI
-@testable import XUISceneKit
+@testable import XUIHost
 
 private struct TestShader: Shader {
     static let key: ShaderKey = "test.sceneCanvas"

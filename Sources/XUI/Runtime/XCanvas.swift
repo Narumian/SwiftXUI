@@ -1,7 +1,7 @@
 import Foundation
 
 /// The drawing surface XUI renders into. The core ships no implementation;
-/// `XUISceneKit` conforms `SceneBuilder` to this, and a test double
+/// `XUIHost` conforms `SceneBuilder` to this, and a test double
 /// conforms for unit tests.
 ///
 /// A reference type: the layout walk hands the same instance to every leaf's

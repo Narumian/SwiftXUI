@@ -1,7 +1,7 @@
 import Testing
 import XRender
 @testable import XUI
-@testable import XUISceneKit
+@testable import XUIHost
 
 private enum ClockKey: XUI.EnvironmentKey {
     static var defaultValue: Double { 0 }

@@ -1,7 +1,7 @@
 import Testing
 import XRender
 @testable import XUI
-@testable import XUISceneKit
+@testable import XUIHost
 
 private func renderedSprite(_ view: some XView) -> SpriteCommand? {
     let surface = SceneCanvas(size: RenderSize(width: 300, height: 200))

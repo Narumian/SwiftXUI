@@ -14,7 +14,6 @@ let package = Package(
         .library(name: "XShader", targets: ["XShader"]),
         .library(name: "XRender", targets: ["XRender"]),
         .library(name: "XUI", targets: ["XUI"]),
-        .library(name: "XUISceneKit", targets: ["XUISceneKit"]),
         .library(name: "XUIHost", targets: ["XUIHost"]),
         .executable(name: "xview-bench", targets: ["xview-bench"]),
     ],
@@ -45,19 +44,11 @@ let package = Package(
             ]
         ),
         .target(
-            name: "XUISceneKit",
-            dependencies: [
-                "XUI",
-                "XRender",
-                "XShader",
-            ]
-        ),
-        .target(
             name: "XUIHost",
             dependencies: [
                 "XUI",
                 "XRender",
-                "XUISceneKit",
+                "XShader",
             ]
         ),
         .executableTarget(name: "xview-bench", dependencies: ["XUI"]),
@@ -73,9 +64,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "XUISceneKitTests",
-            dependencies: ["XUISceneKit", "XRender", "XShader"]
+            name: "XUIHostTests",
+            dependencies: ["XUIHost", "XUI", "XRender", "XShader"]
         ),
-        .testTarget(name: "XUIHostTests", dependencies: ["XUIHost", "XRender"]),
     ]
 )

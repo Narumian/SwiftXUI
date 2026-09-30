@@ -1,7 +1,7 @@
 import Testing
 import XRender
 @testable import XUI
-@testable import XUISceneKit
+@testable import XUIHost
 
 private let canvas = Size(width: 1920, height: 1080)
 

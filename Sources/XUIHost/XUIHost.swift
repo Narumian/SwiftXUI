@@ -1,6 +1,5 @@
 import XRender
 import XUI
-import XUISceneKit
 
 /// The high-level bridge from an XView tree to one renderer-neutral frame.
 ///
