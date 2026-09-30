@@ -91,5 +91,6 @@ struct XUIMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         StatefulMacro.self,
         XStateMacro.self,
+        ObservableActorMacro.self,
     ]
 }
