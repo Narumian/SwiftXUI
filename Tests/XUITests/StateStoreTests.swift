@@ -79,19 +79,3 @@ import Testing
 
     #expect(removed.isEmpty)
 }
-
-@Test @XUIActor func changeNotifiesOutsideDeclarationPassesOnly() async {
-    let store = StateStore()
-    let id = StateIdentity.root.child(type: Int.self, index: 0)
-    var changes = 0
-    store.onChange = { changes += 1 }
-
-    let box: StateStore.Box<Int> = store.box(for: id) { 0 }
-    box.value = 1
-    #expect(changes == 1)
-
-    store.beginPass()
-    box.value = 2
-    store.endPass()
-    #expect(changes == 1, "declaration-time writes must not wake the frame loop")
-}

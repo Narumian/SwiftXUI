@@ -13,11 +13,6 @@ public final class XUIHost {
     public var fonts: FontBook?
     public var images: [ImageSource: TextureID]
 
-    /// Internal runtime hook for waking the event-driven frame loop.
-    var onInvalidate: (() -> Void)? {
-        didSet { store.onChange = onInvalidate }
-    }
-
     private let store = StateStore()
 
     public init(

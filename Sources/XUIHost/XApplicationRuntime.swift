@@ -39,7 +39,6 @@ public extension XAppDelegate {
 public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public let app: App
     public let driver: XAppDriver<App>
-    private let loop: XAsyncLoop<App>
 
     public private(set) var isRunning = false
     public private(set) var isActive = false
@@ -50,18 +49,11 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public init(
         _ app: App,
         renderer: any XRenderer,
-        maxFPS: Double? = nil,
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) {
         self.app = app
         self.driver = XAppDriver(app, renderer: renderer)
-        self.loop = XAsyncLoop(
-            driver: driver,
-            maxFPS: maxFPS ?? renderer.maximumFramesPerSecond,
-            framebuffer: framebuffer,
-            fit: fit
-        )
     }
 
     /// Starts the runtime and makes it active. Platform shells can use the
@@ -83,13 +75,11 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         isActive = true
         isInBackground = false
         app.delegate.applicationDidBecomeActive()
-        loop.start()
     }
 
     public func resignActive() {
         guard isActive else { return }
         isActive = false
-        loop.pause()
         app.delegate.applicationWillResignActive()
     }
 
@@ -102,16 +92,9 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
 
     public func terminate() {
         guard isRunning else { return }
-        loop.stop()
         resignActive()
         app.delegate.applicationWillTerminate()
         isRunning = false
-    }
-
-    /// Requests one coalesced frame. The loop remains asleep until this is
-    /// called again when no animation or other work is active.
-    public func setNeedsDisplay() {
-        loop.setNeedsDisplay()
     }
 
     @discardableResult

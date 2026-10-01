@@ -108,14 +108,12 @@ public enum XApplication {
     public static func runtime<App: XApp>(
         _ app: App,
         renderer: any XRenderer,
-        maxFPS: Double? = nil,
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) -> XApplicationRuntime<App> {
         XApplicationRuntime(
             app,
             renderer: renderer,
-            maxFPS: maxFPS,
             framebuffer: framebuffer,
             fit: fit
         )

@@ -23,29 +23,27 @@ public struct LayoutHost {
         store.beginPass(now: environment.fxTime)
         defer { store.endPass() }
 
-        return await _XUIBindingContext.$store.withValue(store) {
-            var env = environment
-            env.measureText = { surface.measureText($0, fontSize: $1, font: $2) }
-            var layoutContext = LayoutContext(environment: env, referenceSize: canvas)
-            layoutContext.pass = LayoutPass.next()
+        var env = environment
+        env.measureText = { surface.measureText($0, fontSize: $1, font: $2) }
+        var layoutContext = LayoutContext(environment: env, referenceSize: canvas)
+        layoutContext.pass = LayoutPass.next()
 
-            let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
-            await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
+        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
 
-            let renderContext = RenderContext(canvas: surface, environment: env)
-            LayoutEngine.render(root, into: renderContext)
-            if let sink = surface as? ShaderSink {
-                sink.submit(shaders: renderContext.shaders)
-            }
-
-            return RenderResult(
-                regions: renderContext.regions,
-                shaders: renderContext.shaders,
-                controls: renderContext.controls,
-                tapGestures: renderContext.tapGestures,
-                anchors: renderContext.anchors
-            )
+        let renderContext = RenderContext(canvas: surface, environment: env)
+        LayoutEngine.render(root, into: renderContext)
+        if let sink = surface as? ShaderSink {
+            sink.submit(shaders: renderContext.shaders)
         }
+
+        return RenderResult(
+            regions: renderContext.regions,
+            shaders: renderContext.shaders,
+            controls: renderContext.controls,
+            tapGestures: renderContext.tapGestures,
+            anchors: renderContext.anchors
+        )
     }
 
     /// Layout only — no painting. Useful for parity tests that just want the
@@ -56,15 +54,13 @@ public struct LayoutHost {
         store.beginPass(now: environment.fxTime)
         defer { store.endPass() }
 
-        return await _XUIBindingContext.$store.withValue(store) {
-            var layoutContext = LayoutContext(environment: environment, referenceSize: canvas)
-            layoutContext.pass = LayoutPass.next()
-            let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
-            await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
-            var anchors: [AnchorID: Rect] = [:]
-            collectAnchors(root, into: &anchors)
-            return anchors
-        }
+        var layoutContext = LayoutContext(environment: environment, referenceSize: canvas)
+        layoutContext.pass = LayoutPass.next()
+        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
+        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+        var anchors: [AnchorID: Rect] = [:]
+        collectAnchors(root, into: &anchors)
+        return anchors
     }
 
     private func collectAnchors(_ node: LayoutNode, into anchors: inout [AnchorID: Rect]) {

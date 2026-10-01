@@ -62,30 +62,6 @@ private final class RecordingRenderer: XRenderer {
     }
 }
 
-private final class HighRefreshRenderer: XRenderer {
-    var maximumFramesPerSecond: Double { 120 }
-    var frames: [CompiledFrame] = []
-
-    func render(_ frame: CompiledFrame, time: Float) {
-        frames.append(frame)
-    }
-}
-
-private func settleLoop() async {
-    try? await Task.sleep(for: .milliseconds(20))
-}
-
-@Test @XUIActor func runtimeUsesRendererFrameRateWhenNoOverrideIsProvided() async {
-    let renderer = HighRefreshRenderer()
-    let runtime = XApplication.runtime(TestApp(), renderer: renderer)
-
-    runtime.start()
-    await settleLoop()
-    runtime.terminate()
-
-    #expect(renderer.frames.count == 1)
-}
-
 @Test @XUIActor func appSessionUsesTheAppConfiguration() async {
     let session = XApplication.session(TestApp())
     let frame = await session.render(time: 4)
@@ -139,81 +115,4 @@ private func settleLoop() async {
     ])
     #expect(!runtime.isRunning)
     #expect(!runtime.isActive)
-}
-
-@Test @XUIActor func applicationRuntimeDrawsOnceThenSleeps() async {
-    let renderer = RecordingRenderer()
-    let runtime = XApplication.runtime(
-        TestApp(),
-        renderer: renderer,
-        maxFPS: 1_000
-    )
-
-    runtime.start()
-    await settleLoop()
-
-    #expect(renderer.frames.count == 1)
-    runtime.terminate()
-}
-
-@Test @XUIActor func applicationRuntimeCoalescesInvalidations() async {
-    let renderer = RecordingRenderer()
-    let runtime = XApplication.runtime(
-        TestApp(),
-        renderer: renderer,
-        maxFPS: 1_000
-    )
-
-    runtime.start()
-    await settleLoop()
-    let initialCount = renderer.frames.count
-
-    runtime.setNeedsDisplay()
-    runtime.setNeedsDisplay()
-    await settleLoop()
-
-    #expect(renderer.frames.count == initialCount + 1)
-    runtime.terminate()
-}
-
-@Test @XUIActor func applicationRuntimePausesWhileInBackground() async {
-    let renderer = RecordingRenderer()
-    let runtime = XApplication.runtime(
-        TestApp(),
-        renderer: renderer,
-        maxFPS: 1_000
-    )
-
-    runtime.start()
-    await settleLoop()
-    let activeCount = renderer.frames.count
-
-    runtime.enterBackground()
-    runtime.setNeedsDisplay()
-    await settleLoop()
-    #expect(renderer.frames.count == activeCount)
-
-    runtime.becomeActive()
-    await settleLoop()
-    #expect(renderer.frames.count == activeCount + 1)
-    runtime.terminate()
-}
-
-@Test @XUIActor func applicationRuntimeStopsItsLoopOnTerminate() async {
-    let renderer = RecordingRenderer()
-    let runtime = XApplication.runtime(
-        TestApp(),
-        renderer: renderer,
-        maxFPS: 1_000
-    )
-
-    runtime.start()
-    await settleLoop()
-    runtime.terminate()
-    let count = renderer.frames.count
-
-    runtime.setNeedsDisplay()
-    await settleLoop()
-
-    #expect(renderer.frames.count == count)
 }

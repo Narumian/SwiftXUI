@@ -13,17 +13,8 @@ public final class StateStore: @unchecked Sendable {
     /// `init` stays module-private: only `box(for:default:)` ever creates one.
     /// See `box(for:default:)`'s own comment for why an app can build its own
     /// `.onReceive`-shaped modifiers on top of this same type.
-    public final class Box<Value> {
-        private var storedValue: Value
-        private let onSet: () -> Void
-
-        public var value: Value {
-            get { storedValue }
-            set {
-                storedValue = newValue
-                onSet()
-            }
-        }
+    public final class Box<Value>: @unchecked Sendable {
+        public var value: Value
         /// Fires once, with the box's last `value`, the first time this
         /// identity goes an entire pass without being revisited — the
         /// identity-keyed equivalent of SwiftUI's `.onDisappear`, just set
@@ -32,19 +23,11 @@ public final class StateStore: @unchecked Sendable {
         /// other than firing — reassign it if the meaning of "removed"
         /// changes across a box's lifetime.
         public var onRemove: ((Value) -> Void)?
-        init(_ value: Value, onSet: @escaping () -> Void) {
-            self.storedValue = value
-            self.onSet = onSet
-        }
+        init(_ value: Value) { self.value = value }
     }
 
     private var boxes: [StateIdentity: AnyObject] = [:]
     private var reachedThisPass: Set<StateIdentity> = []
-    private var suppressInvalidation = false
-
-    /// Called when a persistent box changes outside a declaration pass.
-    /// `XUIHost` connects this to its event-driven frame loop.
-    public var onChange: (() -> Void)?
 
     /// The host's presentation clock for the pass being declared (seconds).
     /// Lowering has no environment, so animatable modifiers read it here.
@@ -63,10 +46,7 @@ public final class StateStore: @unchecked Sendable {
     public func box<Value>(for id: StateIdentity, default make: () -> Value) -> Box<Value> {
         reachedThisPass.insert(id)
         if let existing = boxes[id] as? Box<Value> { return existing }
-        let created = Box(make()) { [weak self] in
-            guard let self, !self.suppressInvalidation else { return }
-            self.onChange?()
-        }
+        let created = Box(make())
         boxes[id] = created
         return created
     }
@@ -85,7 +65,6 @@ public final class StateStore: @unchecked Sendable {
         reachedThisPass.removeAll(keepingCapacity: true)
         clock = now
         transaction = Transaction()
-        suppressInvalidation = true
     }
 
     /// Call once after the pass finishes: anything not re-visited this pass
@@ -96,7 +75,6 @@ public final class StateStore: @unchecked Sendable {
         let dropped = boxes.filter { !reachedThisPass.contains($0.key) }
         boxes = boxes.filter { reachedThisPass.contains($0.key) }
         for (_, box) in dropped { (box as? _AnyRemovableBox)?.fireOnRemove() }
-        suppressInvalidation = false
     }
 }
 
