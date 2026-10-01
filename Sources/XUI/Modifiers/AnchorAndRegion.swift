@@ -57,6 +57,19 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
 }
 
 public extension XView {
+    /// Attach a value-style gesture to this view.
+    ///
+    /// This first overload bridges `TapGesture` to the existing tap resolver.
+    /// More gesture types can be added without changing the view-facing API.
+    func gesture(_ gesture: TapGesture) -> _TapGestureModifier<Self> {
+        _TapGestureModifier(
+            content: self,
+            id: nil,
+            label: nil,
+            action: gesture._endedAction ?? {}
+        )
+    }
+
     /// Export this view's resolved frame as `result.anchors[id]` — the
     /// replacement for the hand-computed rects on `BattleLayout`.
     func anchor(_ id: AnchorID) -> _AnchorModifier<Self> {

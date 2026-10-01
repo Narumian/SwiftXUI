@@ -3,6 +3,10 @@ import Testing
 
 private let canvas = Size(width: 300, height: 200)
 
+private final class SendableTapCounter: @unchecked Sendable {
+    var value = 0
+}
+
 @XUIActor
 private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
     let surface = RecordingCanvas()
@@ -155,6 +159,33 @@ private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
     #expect(taps == 0)
     #expect(result.tap(Point(x: 150, y: 100)) == true)
     #expect(taps == 1)
+}
+
+@Test @XUIActor func tapGestureValueStylePerformsClosureWhenHit() async {
+    let taps = SendableTapCounter()
+    let view = ZStack {
+        Color.white
+        Color.black
+            .frame(width: 80, height: 50, alignment: .center)
+            .gesture(
+                TapGesture().onEnded {
+                    taps.value += 1
+                }
+            )
+    }
+
+    let (_, result) = await run(view)
+    #expect(result.tap(Point(x: 150, y: 100)))
+    #expect(taps.value == 1)
+}
+
+@Test @XUIActor func tapGestureWithoutHandlerIsSafe() async {
+    let view = Color.black
+        .frame(width: 80, height: 50, alignment: .center)
+        .gesture(TapGesture())
+
+    let (_, result) = await run(view)
+    #expect(result.tap(Point(x: 150, y: 100)))
 }
 
 @Test @XUIActor func controlExportsSemanticMetadataWithResolvedFrame() async {
