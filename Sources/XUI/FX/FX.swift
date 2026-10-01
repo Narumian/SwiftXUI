@@ -67,9 +67,9 @@ public func emit(_ fx: any FX, id: StateIdentity, store: StateStore, into out: i
         return
     }
     let childID = id.child(type: type(of: fx))
-    if var stateful = fx as? any _Stateful {
-        stateful._installState(id: childID, store: store)
-        emit((stateful as! any FX).body, id: childID, store: store, into: &out)
+    if var dynamic = fx as? any DynamicProperty {
+        dynamic.update(id: childID, store: store)
+        emit((dynamic as! any FX).body, id: childID, store: store, into: &out)
         return
     }
     emit(fx.body, id: childID, store: store, into: &out)

@@ -36,9 +36,9 @@ func lower(_ view: any XView, id: StateIdentity, store: StateStore) async -> [La
         return intrinsic._lowerIntrinsicView()
     }
     let childID = id.child(type: type(of: view))
-    if var stateful = view as? any _Stateful {
-        stateful._installState(id: childID, store: store)
-        return await lower((stateful as! any XView).body, id: childID, store: store)
+    if var dynamic = view as? any DynamicProperty {
+        dynamic.update(id: childID, store: store)
+        return await lower((dynamic as! any XView).body, id: childID, store: store)
     }
     return await lower(view.body, id: childID, store: store)
 }

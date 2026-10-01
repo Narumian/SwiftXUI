@@ -6,8 +6,19 @@ import Foundation
 /// both DSLs — neither refines `XView` nor `FX`, checked via `as?` against
 /// an already-known `any XView`/`any FX`, the same idiom `_PrimitiveXView`/
 /// `IntrinsicView` already use in this codebase.
-public protocol _Stateful {
+public protocol DynamicProperty {
+    mutating func update(id: StateIdentity, store: StateStore)
+}
+
+/// Compatibility bridge for the original state hook.
+public protocol _Stateful: DynamicProperty {
     mutating func _installState(id: StateIdentity, store: StateStore)
+}
+
+public extension _Stateful {
+    mutating func update(id: StateIdentity, store: StateStore) {
+        _installState(id: id, store: store)
+    }
 }
 
 /// Sugar for hand-writing `_installState` — attach to a composite `FX`/
