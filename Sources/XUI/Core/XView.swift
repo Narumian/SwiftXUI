@@ -8,7 +8,7 @@ import Foundation
 /// The authored tree is fully static and compiler-checked. Erasure to
 /// `[any XView]` happens only inside the engine's walk, one shallow level per
 /// container — never in the types you write.
-public protocol XView {
+public protocol XView: Sendable {
     associatedtype Body: XView
     @XUIActor
     @XViewBuilder var body: Body { get async }
