@@ -42,6 +42,7 @@ public struct LayoutHost {
             shaders: renderContext.shaders,
             controls: renderContext.controls,
             tapGestures: renderContext.tapGestures,
+            dragGestures: renderContext.dragGestures,
             anchors: renderContext.anchors
         )
     }

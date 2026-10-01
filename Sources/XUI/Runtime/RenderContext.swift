@@ -95,6 +95,7 @@ public final class RenderContext {
     public private(set) var shaders: [ResolvedShader] = []
     public private(set) var controls: [ResolvedControl] = []
     public private(set) var tapGestures: [ResolvedTapGesture] = []
+    public private(set) var dragGestures: [ResolvedDragGesture] = []
     public private(set) var anchors = AnchorMap()
     var inputSuspendedDepth = 0
     var focusScopeStack: [FocusScopeID] = []
@@ -125,6 +126,11 @@ public final class RenderContext {
     func addTapGesture(_ rect: Rect, id: String?, label: String?, action: @escaping () -> Void) {
         guard acceptsInput else { return }
         tapGestures.append(ResolvedTapGesture(rect: rect, id: id, label: label, action: action))
+    }
+
+    func addDragGesture(_ rect: Rect, gesture: DragGesture) {
+        guard acceptsInput else { return }
+        dragGestures.append(ResolvedDragGesture(rect: rect, gesture: gesture))
     }
 
     func setAnchor(_ id: AnchorID, _ rect: Rect) {
@@ -159,6 +165,7 @@ public struct RenderResult {
     public var shaders: [ResolvedShader]
     public var controls: [ResolvedControl]
     public var tapGestures: [ResolvedTapGesture]
+    public var dragGestures: [ResolvedDragGesture]
     public var anchors: AnchorMap
 
     public init(
@@ -166,12 +173,14 @@ public struct RenderResult {
         shaders: [ResolvedShader] = [],
         controls: [ResolvedControl] = [],
         tapGestures: [ResolvedTapGesture] = [],
+        dragGestures: [ResolvedDragGesture] = [],
         anchors: AnchorMap
     ) {
         self.regions = regions
         self.shaders = shaders
         self.controls = controls
         self.tapGestures = tapGestures
+        self.dragGestures = dragGestures
         self.anchors = anchors
     }
 

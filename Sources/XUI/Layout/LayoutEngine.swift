@@ -49,6 +49,9 @@ enum LayoutEngine {
         if let action = node.tapGesture, !node.tapGestureAfterChildren {
             context.addTapGesture(node.frame, id: node.tapGestureID, label: node.tapGestureLabel, action: action)
         }
+        if let gesture = node.dragGesture {
+            context.addDragGesture(node.frame, gesture: gesture)
+        }
         let transform = node.transformInFrame?(node.frame) ?? node.transform
         let transformed = transform.map { !$0.isIdentity } ?? false
         if transformed { context.canvas.pushTransform(transform!) }

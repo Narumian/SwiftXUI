@@ -56,6 +56,19 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
     }
 }
 
+public struct _DragGestureModifier<Content: XView>: XView, _PrimitiveXView {
+    public typealias Body = Never
+    let content: Content
+    let gesture: DragGesture
+
+    @XUIActor
+    func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: stateID, store: store))
+        wrapper.dragGesture = gesture
+        return [wrapper]
+    }
+}
+
 public extension XView {
     /// Attach a value-style gesture to this view.
     ///
@@ -68,6 +81,11 @@ public extension XView {
             label: nil,
             action: gesture._endedAction ?? {}
         )
+    }
+
+    /// Attach a value-style drag gesture to this view.
+    func gesture(_ gesture: DragGesture) -> _DragGestureModifier<Self> {
+        _DragGestureModifier(content: self, gesture: gesture)
     }
 
     /// Export this view's resolved frame as `result.anchors[id]` — the
