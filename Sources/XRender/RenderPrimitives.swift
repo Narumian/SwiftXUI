@@ -116,12 +116,21 @@ public enum PointerPhase: Sendable, Equatable {
 }
 
 public struct PointerEvent: Sendable, Equatable {
+    public var id: Int
     public var phase: PointerPhase
     public var position: RenderPoint
+    public var timestamp: Double
 
-    public init(phase: PointerPhase, position: RenderPoint) {
+    public init(
+        id: Int = 0,
+        phase: PointerPhase,
+        position: RenderPoint,
+        timestamp: Double = 0
+    ) {
+        self.id = id
         self.phase = phase
         self.position = position
+        self.timestamp = timestamp
     }
 }
 

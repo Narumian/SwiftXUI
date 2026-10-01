@@ -14,6 +14,7 @@ public final class XUIHost {
     public var images: [ImageSource: TextureID]
 
     private let store = StateStore()
+    private var gestureRuntime = GestureRuntime()
 
     public init(
         size: RenderSize,
@@ -53,6 +54,34 @@ public final class XUIHost {
         ).render(view, into: surface, store: store)
 
         return XUIFrame(scene: surface.scene, layout: layout)
+    }
+
+    /// Routes a renderer-neutral pointer sample through the current frame's
+    /// XUI gesture regions.
+    @discardableResult
+    @XUIActor
+    public func pointer(_ event: PointerEvent, in frame: XUIFrame) -> Bool {
+        gestureRuntime.handle(
+            PointerInput(
+                id: event.id,
+                phase: Self.pointerPhase(event.phase),
+                position: Point(
+                    x: Double(event.position.x),
+                    y: Double(event.position.y)
+                ),
+                timestamp: event.timestamp
+            ),
+            in: frame.layout
+        )
+    }
+
+    private static func pointerPhase(_ phase: PointerPhase) -> PointerInputPhase {
+        switch phase {
+        case .began: .began
+        case .moved: .moved
+        case .ended: .ended
+        case .cancelled: .cancelled
+        }
     }
 }
 
