@@ -1,20 +1,13 @@
 import Foundation
 
-/// A key for a value threaded down the view tree. Conform a type and give it a
-/// `defaultValue`; read it in a primitive via `context.environment[MyKey.self]`.
 public protocol EnvironmentKey {
     associatedtype Value
     static var defaultValue: Value { get }
 }
 
-/// The bag of values available to every node during layout and render.
-///
-/// v1 is deliberately thin: there is no dependency tracking and no `@Environment`
-/// property wrapper. Primitives and `DrawLayer` closures read it through the
-/// `RenderContext`. Apps inject their own values (animation clock, effects
-/// state, theme tokens) via custom `EnvironmentKey`s.
 public struct EnvironmentValues {
     private var storage: [ObjectIdentifier: Any] = [:]
+    private var environmentObjects: [ObjectIdentifier: AnyObject] = [:]
 
     public init() {}
 
@@ -22,9 +15,47 @@ public struct EnvironmentValues {
         get { storage[ObjectIdentifier(key)] as? K.Value ?? K.defaultValue }
         set { storage[ObjectIdentifier(key)] = newValue }
     }
+    
+    public mutating func environmentObject<Object: AnyObject>(_ object: Object) {
+        environmentObjects[ObjectIdentifier(Object.self)] = object
+    }
+
+    func _environmentObjectContext() -> _EnvironmentObjectContext.Values {
+        _EnvironmentObjectContext.Values(environmentObjects)
+    }
 }
 
-/// The reading direction. Leading maps to the left edge under `.leftToRight`.
+enum _EnvironmentObjectContext {
+    final class Values: @unchecked Sendable {
+        private let storage: [ObjectIdentifier: AnyObject]
+
+        init(_ storage: [ObjectIdentifier: AnyObject]) {
+            self.storage = storage
+        }
+
+        func object<Object: AnyObject>(_ type: Object.Type) -> Object? {
+            storage[ObjectIdentifier(type)] as? Object
+        }
+    }
+
+    @TaskLocal static var current: Values?
+}
+
+@propertyWrapper
+public struct EnvironmentObject<Object: AnyObject> {
+    public init() {}
+
+    public var wrappedValue: Object {
+        guard let value = _EnvironmentObjectContext.current?.object(Object.self) else {
+            fatalError(
+                "No environment object of type \(Object.self) was found. " +
+                "Inject it with EnvironmentValues.environmentObject(_:)."
+            )
+        }
+        return value
+    }
+}
+
 public enum LayoutDirection: Hashable, Sendable {
     case leftToRight
     case rightToLeft
@@ -35,7 +66,6 @@ private enum LayoutDirectionKey: EnvironmentKey {
 }
 
 public extension EnvironmentValues {
-    /// The host's monotonic presentation clock, used by implicit FX playback.
     var fxTime: Double {
         get { self[FXTimeKey.self] }
         set { self[FXTimeKey.self] = newValue }
@@ -52,9 +82,6 @@ private enum SafeAreaInsetsKey: EnvironmentKey {
 }
 
 public extension EnvironmentValues {
-    /// The parts of the canvas the host says are obscured (status bar, notch,
-    /// rounded corners, window title bar), in canvas units. `.safeAreaPadding`
-    /// reads it; hosts set it before `LayoutHost.render`.
     var safeAreaInsets: EdgeInsets {
         get { self[SafeAreaInsetsKey.self] }
         set { self[SafeAreaInsetsKey.self] = newValue }
@@ -65,9 +92,6 @@ private enum FXTimeKey: EnvironmentKey {
     static let defaultValue: Double = 0
 }
 
-/// How `Text` measures itself. `LayoutHost.render` wires this to the canvas's
-/// `measureText`, so atlas metrics reach the layout pass; the default is a crude
-/// monospace estimate for canvas-free tests.
 public typealias TextMeasurer = (_ string: String, _ fontSize: Double, _ font: TextFont) -> Size
 
 private enum TextMeasurerKey: EnvironmentKey {

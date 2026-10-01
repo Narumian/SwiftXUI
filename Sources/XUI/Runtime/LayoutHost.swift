@@ -17,6 +17,15 @@ public struct LayoutHost {
         self.environment = environment
     }
 
+    /// Returns a host with an exact-type environment object injected.
+    /// Convenient when constructing a host inline:
+    /// `LayoutHost(canvas: size).environmentObject(model)`.
+    public func environmentObject<Object: AnyObject>(_ object: Object) -> LayoutHost {
+        var copy = self
+        copy.environment.environmentObject(object)
+        return copy
+    }
+
     @discardableResult
     @XUIActor
     public func render(_ view: some XView, into surface: any XCanvas, store: StateStore = StateStore()) async -> RenderResult {
@@ -28,23 +37,26 @@ public struct LayoutHost {
         var layoutContext = LayoutContext(environment: env, referenceSize: canvas)
         layoutContext.pass = LayoutPass.next()
 
-        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
-        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+        return await _EnvironmentObjectContext.$current.withValue(env._environmentObjectContext()) {
+            let children = await lower(view, id: .root, store: store)
+            let root = LayoutNode(layout: RootLayout(), children: children)
+            await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
 
-        let renderContext = RenderContext(canvas: surface, environment: env)
-        LayoutEngine.render(root, into: renderContext)
-        if let sink = surface as? ShaderSink {
-            sink.submit(shaders: renderContext.shaders)
+            let renderContext = RenderContext(canvas: surface, environment: env)
+            LayoutEngine.render(root, into: renderContext)
+            if let sink = surface as? ShaderSink {
+                sink.submit(shaders: renderContext.shaders)
+            }
+
+            return RenderResult(
+                regions: renderContext.regions,
+                shaders: renderContext.shaders,
+                controls: renderContext.controls,
+                tapGestures: renderContext.tapGestures,
+                dragGestures: renderContext.dragGestures,
+                anchors: renderContext.anchors
+            )
         }
-
-        return RenderResult(
-            regions: renderContext.regions,
-            shaders: renderContext.shaders,
-            controls: renderContext.controls,
-            tapGestures: renderContext.tapGestures,
-            dragGestures: renderContext.dragGestures,
-            anchors: renderContext.anchors
-        )
     }
 
     /// Layout only — no painting. Useful for parity tests that just want the
@@ -57,11 +69,14 @@ public struct LayoutHost {
 
         var layoutContext = LayoutContext(environment: environment, referenceSize: canvas)
         layoutContext.pass = LayoutPass.next()
-        let root = LayoutNode(layout: RootLayout(), children: await lower(view, id: .root, store: store))
-        await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
-        var anchors: [AnchorID: Rect] = [:]
-        collectAnchors(root, into: &anchors)
-        return anchors
+        return await _EnvironmentObjectContext.$current.withValue(environment._environmentObjectContext()) {
+            let children = await lower(view, id: .root, store: store)
+            let root = LayoutNode(layout: RootLayout(), children: children)
+            await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+            var anchors: [AnchorID: Rect] = [:]
+            collectAnchors(root, into: &anchors)
+            return anchors
+        }
     }
 
     private func collectAnchors(_ node: LayoutNode, into anchors: inout [AnchorID: Rect]) {
