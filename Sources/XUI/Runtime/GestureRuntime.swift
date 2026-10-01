@@ -24,22 +24,28 @@ public struct ResolvedDragGesture: @unchecked Sendable {
     }
 }
 
-/// The minimal state machine for one active drag sequence.
+/// The minimal state machine for one active tap/drag sequence.
 ///
 /// This intentionally handles one pointer at a time. Pointer capture begins
-/// when a pointer-down hits a drag region and remains with that region until
-/// ended or cancelled.
+/// when a pointer-down hits a tap or drag region and remains with that
+/// sequence until ended or cancelled. Tap and drag compete for the same
+/// sequence: a recognized drag suppresses the tap.
 public struct GestureRuntime: Sendable {
-    private struct ActiveDrag: @unchecked Sendable {
+    private struct ActiveSequence: @unchecked Sendable {
         let pointerID: Int
-        let gesture: ResolvedDragGesture
         let startLocation: Point
-        var hasExceededMinimumDistance: Bool
+        let tap: ResolvedTapGesture?
+        let drag: ResolvedDragGesture?
+        var tapEligible: Bool
+        var dragStarted: Bool
     }
 
-    private var activeDrag: ActiveDrag?
+    private let tapSlop: Double
+    private var activeSequence: ActiveSequence?
 
-    public init() {}
+    public init(tapSlop: Double = 10) {
+        self.tapSlop = max(0, tapSlop)
+    }
 
     /// Feeds one normalized pointer sample to the drag recognizer.
     /// Returns `true` when the sample belongs to an active or newly captured
@@ -51,53 +57,60 @@ public struct GestureRuntime: Sendable {
     ) -> Bool {
         switch input.phase {
         case .began:
-            guard activeDrag == nil else { return false }
-            guard let gesture = render.dragGestures.first(where: { $0.rect.contains(input.position) }) else {
+            guard activeSequence == nil else { return false }
+            let tap = render.tapGestures.first(where: { $0.rect.contains(input.position) })
+            let drag = render.dragGestures.first(where: { $0.rect.contains(input.position) })
+            guard tap != nil || drag != nil else {
                 return false
             }
-            activeDrag = ActiveDrag(
+            activeSequence = ActiveSequence(
                 pointerID: input.id,
-                gesture: gesture,
                 startLocation: input.position,
-                hasExceededMinimumDistance: gesture.minimumDistance == 0
+                tap: tap,
+                drag: drag,
+                tapEligible: true,
+                dragStarted: drag?.minimumDistance == 0
             )
             return true
 
         case .moved:
-            guard var active = activeDrag, active.pointerID == input.id else {
+            guard var active = activeSequence, active.pointerID == input.id else {
                 return false
             }
 
-            let value = makeValue(
-                input: input,
-                startLocation: active.startLocation
-            )
-            if !active.hasExceededMinimumDistance {
-                guard distance(from: active.startLocation, to: input.position) >= active.gesture.minimumDistance else {
-                    return true
-                }
-                active.hasExceededMinimumDistance = true
-                activeDrag = active
+            let distance = distance(from: active.startLocation, to: input.position)
+            if distance > tapSlop {
+                active.tapEligible = false
             }
-            active.gesture.performChanged(value)
+            if let drag = active.drag, !active.dragStarted, distance >= drag.minimumDistance {
+                active.dragStarted = true
+            }
+            activeSequence = active
+            if active.dragStarted, let drag = active.drag {
+                drag.performChanged(
+                    makeValue(input: input, startLocation: active.startLocation)
+                )
+            }
             return true
 
         case .ended:
-            guard let active = activeDrag, active.pointerID == input.id else {
+            guard let active = activeSequence, active.pointerID == input.id else {
                 return false
             }
-            defer { activeDrag = nil }
-            guard active.hasExceededMinimumDistance else { return true }
-            active.gesture.performEnded(
-                makeValue(input: input, startLocation: active.startLocation)
-            )
+            defer { activeSequence = nil }
+            let value = makeValue(input: input, startLocation: active.startLocation)
+            if active.dragStarted, let drag = active.drag {
+                drag.performEnded(value)
+            } else if active.tapEligible, let tap = active.tap {
+                tap.perform()
+            }
             return true
 
         case .cancelled:
-            guard let active = activeDrag, active.pointerID == input.id else {
+            guard let active = activeSequence, active.pointerID == input.id else {
                 return false
             }
-            activeDrag = nil
+            activeSequence = nil
             return true
         }
     }
