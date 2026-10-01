@@ -7,11 +7,11 @@ import Foundation
 /// When the node stops being declared, `StateStore.endPass()` drops its box,
 /// the held `Subscription` deinitializes, and `Signal` un-subscribes it —
 /// no explicit teardown code needed.
-public struct _OnReceiveModifier<Content: XView, Value>: XView, _PrimitiveXView {
+public struct _OnReceiveModifier<Content: XView, Value: Sendable>: XView, _PrimitiveXView {
     public typealias Body = Never
     let content: Content
     let signal: Signal<Value>
-    let action: (Value) -> Void
+    let action: @Sendable (Value) -> Void
 
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
@@ -28,7 +28,7 @@ public extension XView {
     /// tree. `action` runs synchronously, on whatever thread called
     /// `signal.send` — for a `Signal` fed only from the render thread, that's
     /// during the same walk or between walks, never mid-layout.
-    func onReceive<Value>(_ signal: Signal<Value>, perform action: @escaping (Value) -> Void) -> _OnReceiveModifier<Self, Value> {
+    func onReceive<Value: Sendable>(_ signal: Signal<Value>, perform action: @escaping @Sendable (Value) -> Void) -> _OnReceiveModifier<Self, Value> {
         _OnReceiveModifier(content: self, signal: signal, action: action)
     }
 }

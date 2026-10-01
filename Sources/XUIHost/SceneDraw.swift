@@ -46,12 +46,12 @@ public extension ScenePrimitive {
 public struct SceneDraw: ScenePrimitive {
     public typealias Body = Never
 
-    let sizing: ((XUI.ProposedSize) -> XUI.Size)?
-    let paint: (XUI.Rect, inout SceneBuilder, RenderContext) -> Void
+    let sizing: (@Sendable (XUI.ProposedSize) -> XUI.Size)?
+    let paint: @Sendable (XUI.Rect, inout SceneBuilder, RenderContext) -> Void
 
     /// Fills the offered space.
     public init(
-        _ draw: @escaping (_ rect: XUI.Rect, _ builder: inout SceneBuilder, _ context: RenderContext) -> Void
+        _ draw: @escaping @Sendable (_ rect: XUI.Rect, _ builder: inout SceneBuilder, _ context: RenderContext) -> Void
     ) {
         self.sizing = nil
         self.paint = draw
@@ -59,8 +59,8 @@ public struct SceneDraw: ScenePrimitive {
 
     /// Reports an explicit size.
     public init(
-        size: @escaping (XUI.ProposedSize) -> XUI.Size,
-        draw: @escaping (_ rect: XUI.Rect, _ builder: inout SceneBuilder, _ context: RenderContext) -> Void
+        size: @escaping @Sendable (XUI.ProposedSize) -> XUI.Size,
+        draw: @escaping @Sendable (_ rect: XUI.Rect, _ builder: inout SceneBuilder, _ context: RenderContext) -> Void
     ) {
         self.sizing = size
         self.paint = draw

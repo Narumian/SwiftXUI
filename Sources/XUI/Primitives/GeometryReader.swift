@@ -23,9 +23,9 @@ public struct GeometryProxy: Sendable {
 /// where a real pixel number is unavoidable; prefer stacks and `.frame`.
 public struct GeometryReader<Content: XView>: XView, _PrimitiveXView {
     public typealias Body = Never
-    let content: (GeometryProxy) -> Content
+    let content: @Sendable (GeometryProxy) -> Content
 
-    public init(@XViewBuilder content: @escaping (GeometryProxy) -> Content) {
+    public init(@XViewBuilder content: @escaping @Sendable (GeometryProxy) -> Content) {
         self.content = content
     }
 
@@ -33,10 +33,13 @@ public struct GeometryReader<Content: XView>: XView, _PrimitiveXView {
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: GeometryReaderLayout())
         let build = content
+        let environmentObjects = _EnvironmentObjectContext.current
         // `lazyChildren` fires later, from `LayoutEngine.place` — capture `id`/
         // `store` now since they aren't available at that call site.
         node.lazyChildren = { rect, _ in
-            await lower(build(GeometryProxy(frame: rect)), id: id, store: store)
+            await _EnvironmentObjectContext.$current.withValue(environmentObjects) {
+                await lower(build(GeometryProxy(frame: rect)), id: id, store: store)
+            }
         }
         return [node]
     }

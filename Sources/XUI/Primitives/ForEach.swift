@@ -2,12 +2,12 @@ import Foundation
 
 /// Expand a collection into sibling views. v1 has no identity / diffing — the
 /// tree is rebuilt every frame — so no `id:` parameter; order is positional.
-public struct ForEach<Data: RandomAccessCollection, Content: XView>: XView, _PrimitiveXView {
+public struct ForEach<Data: RandomAccessCollection & Sendable, Content: XView>: XView, _PrimitiveXView where Data.Element: Sendable {
     public typealias Body = Never
     let data: Data
-    let content: (Data.Element) -> Content
+    let content: @Sendable (Data.Element) -> Content
 
-    public init(_ data: Data, @XViewBuilder content: @escaping (Data.Element) -> Content) {
+    public init(_ data: Data, @XViewBuilder content: @escaping @Sendable (Data.Element) -> Content) {
         self.data = data
         self.content = content
     }
@@ -23,7 +23,7 @@ public struct ForEach<Data: RandomAccessCollection, Content: XView>: XView, _Pri
 }
 
 public extension ForEach where Data == Range<Int> {
-    init(_ range: Range<Int>, @XViewBuilder content: @escaping (Int) -> Content) {
+    init(_ range: Range<Int>, @XViewBuilder content: @escaping @Sendable (Int) -> Content) {
         self.data = range
         self.content = content
     }

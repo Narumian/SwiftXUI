@@ -33,15 +33,15 @@ public struct AsyncView<
     public typealias Body = Never
 
     private let operation: @Sendable () async throws -> Value
-    private let content: (Value) -> Content
-    private let placeholder: () -> Placeholder
-    private let failure: (String) -> Failure
+    private let content: @Sendable (Value) -> Content
+    private let placeholder: @Sendable () -> Placeholder
+    private let failure: @Sendable (String) -> Failure
 
     public init(
         operation: @escaping @Sendable () async throws -> Value,
-        @XViewBuilder content: @escaping (Value) -> Content,
-        @XViewBuilder placeholder: @escaping () -> Placeholder,
-        @XViewBuilder failure: @escaping (String) -> Failure
+        @XViewBuilder content: @escaping @Sendable (Value) -> Content,
+        @XViewBuilder placeholder: @escaping @Sendable () -> Placeholder,
+        @XViewBuilder failure: @escaping @Sendable (String) -> Failure
     ) {
         self.operation = operation
         self.content = content

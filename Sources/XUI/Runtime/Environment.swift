@@ -36,9 +36,19 @@ enum _EnvironmentObjectContext {
         func object<Object: AnyObject>(_ type: Object.Type) -> Object? {
             storage[ObjectIdentifier(type)] as? Object
         }
+
+        func inserting<Object: AnyObject>(_ object: Object) -> Values {
+            var next = storage
+            next[ObjectIdentifier(Object.self)] = object
+            return Values(next)
+        }
     }
 
     @TaskLocal static var current: Values?
+
+    static var currentOrEmpty: Values {
+        current ?? Values([:])
+    }
 }
 
 @propertyWrapper

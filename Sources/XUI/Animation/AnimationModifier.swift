@@ -3,7 +3,7 @@ import Foundation
 /// `View.animation(_:value:)`: when `value` changes, animatable values inside
 /// move with `animation` instead of jumping. Pass `nil` to make everything
 /// inside jump.
-public struct _AnimationModifier<Content: XView, Value: Equatable>: XView, _PrimitiveXView {
+public struct _AnimationModifier<Content: XView, Value: Equatable & Sendable>: XView, _PrimitiveXView {
     public typealias Body = Never
     let content: Content
     let animation: Animation?
@@ -30,7 +30,7 @@ public extension XView {
     ///     RoundedRectangle(cornerRadius: 6, fill: .red)
     ///         .frame(width: barWidth * fraction, height: 14)
     ///         .animation(.easeOut(duration: 0.4), value: health)
-    func animation<Value: Equatable>(_ animation: Animation?, value: Value) -> _AnimationModifier<Self, Value> {
+    func animation<Value: Equatable & Sendable>(_ animation: Animation?, value: Value) -> _AnimationModifier<Self, Value> {
         _AnimationModifier(content: self, animation: animation, value: value)
     }
 }

@@ -7,7 +7,7 @@ struct _SheetLayer<Content: XView>: XView, _PrimitiveXView {
     typealias Body = Never
     let scrim: Color
     let scope: FocusScopeID
-    let onDismiss: () -> Void
+    let onDismiss: @Sendable () -> Void
     let content: Content
 
     @XUIActor
@@ -32,7 +32,7 @@ public struct _SheetModifier<Content: XView, Sheet: XView>: XView, _PrimitiveXVi
     let isPresented: Bool
     let scope: FocusScopeID
     let scrim: Color
-    let onDismiss: () -> Void
+    let onDismiss: @Sendable () -> Void
     let sheet: Sheet
 
     @XUIActor
@@ -60,7 +60,7 @@ public extension XView {
         isPresented: Bool,
         scope: FocusScopeID = "sheet",
         scrim: Color = Color(red: 0, green: 0, blue: 0, opacity: 0.6),
-        onDismiss: @escaping () -> Void,
+        onDismiss: @escaping @Sendable () -> Void,
         @XViewBuilder content: () -> Sheet
     ) -> _SheetModifier<Self, Sheet> {
         _SheetModifier(content: self, isPresented: isPresented, scope: scope, scrim: scrim,

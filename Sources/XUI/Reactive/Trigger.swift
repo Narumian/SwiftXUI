@@ -7,11 +7,11 @@ import Foundation
 /// game's per-frame `ft`), so this counts walks instead of seconds. Built on
 /// `Signal`: the subscription persists the same identity-keyed way
 /// `.onReceive` uses, plus one more box for the countdown itself.
-public struct _TriggerPulseModifier<Content: XView, Value>: XView, _PrimitiveXView {
+public struct _TriggerPulseModifier<Content: XView, Value: Sendable>: XView, _PrimitiveXView {
     public typealias Body = Never
     let content: Content
     let signal: Signal<Value>
-    let matches: (Value) -> Bool
+    let matches: @Sendable (Value) -> Bool
     let peakScale: Double
     let frames: Int
 
@@ -37,14 +37,14 @@ public struct _TriggerPulseModifier<Content: XView, Value>: XView, _PrimitiveXVi
 public extension XView {
     /// Pulse this subtree's scale up to `peakScale` and back over `frames`
     /// walks whenever `signal` sends a value `matching` accepts.
-    func trigger<Value>(_ signal: Signal<Value>, matching: @escaping (Value) -> Bool,
+    func trigger<Value: Sendable>(_ signal: Signal<Value>, matching: @escaping @Sendable (Value) -> Bool,
                          peakScale: Double = 1.15, frames: Int = 10) -> _TriggerPulseModifier<Self, Value> {
         _TriggerPulseModifier(content: self, signal: signal, matches: matching, peakScale: peakScale, frames: frames)
     }
 
     /// `trigger(_:matching:)` for an `Equatable` payload — react to one exact
     /// value.
-    func trigger<Value: Equatable>(_ signal: Signal<Value>, on value: Value,
+    func trigger<Value: Equatable & Sendable>(_ signal: Signal<Value>, on value: Value,
                                     peakScale: Double = 1.15, frames: Int = 10) -> _TriggerPulseModifier<Self, Value> {
         trigger(signal, matching: { $0 == value }, peakScale: peakScale, frames: frames)
     }

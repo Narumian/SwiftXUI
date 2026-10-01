@@ -13,7 +13,7 @@ public struct _AnchorModifier<Content: XView>: XView, _PrimitiveXView {
     }
 }
 
-public struct _RegionModifier<Content: XView>: XView, _PrimitiveXView {
+public struct _RegionModifier<Content: XView>: @unchecked Sendable, XView, _PrimitiveXView {
     public typealias Body = Never
     let content: Content
     let payload: AnyHashable
@@ -44,7 +44,7 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
     let content: Content
     let id: String?
     let label: String?
-    let action: () -> Void
+    let action: @Sendable () -> Void
 
     @XUIActor
     func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
@@ -110,13 +110,13 @@ public extension XView {
     /// Declarative tap entry point for static views. The action is collected
     /// into `RenderResult.tapGestures` and performed by the app after hit
     /// testing a pointer/touch against the resolved frame.
-    func onTapGesture(_ action: @escaping () -> Void) -> _TapGestureModifier<Self> {
-        _TapGestureModifier(content: self, id: nil, label: nil, action: action)
+    func onTapGesture(_ action: @escaping @Sendable () -> Void) -> _TapGestureModifier<Self> {
+        gesture(TapGesture().onEnded(action))
     }
 
     /// Declarative tap entry point with semantic metadata for accessibility,
     /// automation, and app-side interaction region export.
-    func onTapGesture(id: String, label: String, _ action: @escaping () -> Void) -> _TapGestureModifier<Self> {
+    func onTapGesture(id: String, label: String, _ action: @escaping @Sendable () -> Void) -> _TapGestureModifier<Self> {
         _TapGestureModifier(content: self, id: id, label: label, action: action)
     }
 
