@@ -13,6 +13,7 @@ let package = Package(
     products: [
         .library(name: "XShader", targets: ["XShader"]),
         .library(name: "XRender", targets: ["XRender"]),
+        .library(name: "XRenderWGPU", targets: ["XRenderWGPU"]),
         .library(name: "XUI", targets: ["XUI"]),
         .library(name: "XUIHost", targets: ["XUIHost"]),
         .executable(name: "xview-bench", targets: ["xview-bench"]),
@@ -21,6 +22,10 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
+        .binaryTarget(
+            name: "CWGPU",
+            path: "Vendor/CWGPU.xcframework"
+        ),
         .macro(
             name: "XUIMacros",
             dependencies: [
@@ -35,6 +40,21 @@ let package = Package(
         .target(
             name: "XRender",
             dependencies: ["XShader"]
+        ),
+        .target(
+            name: "XRenderWGPU",
+            dependencies: [
+                "XRender",
+                "XShader",
+                "CWGPU",
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedFramework("Metal"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("IOSurface", .when(platforms: [.iOS])),
+                .linkedLibrary("c++"),
+            ]
         ),
         .target(
             name: "XUI",

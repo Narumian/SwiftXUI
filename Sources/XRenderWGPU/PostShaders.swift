@@ -1,0 +1,115 @@
+/// Fullscreen post pass: ordered dither + understated VHS (edge chromatic
+/// aberration, faint scanlines, fine grain). Bind group 0 = { scene texture,
+/// sampler, uniforms }. No vertex buffer — a 3-vertex fullscreen triangle.
+let postWGSL = """
+struct Effect {
+    rect: vec4<f32>,
+    params: vec4<f32>,
+    kind: f32,
+};
+
+struct Uniforms {
+    resolution: vec2<f32>,
+    time: f32,
+    intensity: f32,
+    effectCount: f32,
+    // 0 = final opaque post pass; 1 = alpha-composite a transparent view layer.
+    composition: f32,
+    effects: array<Effect, 16>,
+};
+
+@group(0) @binding(0) var sceneTexture: texture_2d<f32>;
+@group(0) @binding(1) var sceneSampler: sampler;
+@group(0) @binding(2) var<uniform> u: Uniforms;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
+    var p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    return vec4<f32>(p[vertexIndex], 0.0, 1.0);
+}
+
+fn bayer(p: vec2<u32>) -> f32 {
+    var m = array<f32, 16>(
+        0.0, 8.0, 2.0, 10.0,
+        12.0, 4.0, 14.0, 6.0,
+        3.0, 11.0, 1.0, 9.0,
+        15.0, 7.0, 13.0, 5.0
+    );
+    return m[(p.y & 3u) * 4u + (p.x & 3u)] / 16.0 - 0.5;
+}
+
+@fragment
+fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
+    let uv = fragCoord.xy / u.resolution;
+    let source = textureSample(sceneTexture, sceneSampler, uv);
+    // A layer capture is transparent outside the actual subtree. Never let an
+    // effect's tint/rim paint those empty pixels: doing so turns the layer's
+    // rectangular bounds into a visible, corrupted-looking slab on composite.
+    let layerMask = select(1.0, source.a, u.composition == 1.0);
+    let edge = abs(uv.x - 0.5) * 2.0;
+    let shift = edge * edge * 1.8 * u.intensity / u.resolution.x;
+
+    var col: vec3<f32>;
+    col.r = textureSample(sceneTexture, sceneSampler, uv + vec2<f32>(shift, 0.0)).r;
+    col.g = textureSample(sceneTexture, sceneSampler, uv).g;
+    col.b = textureSample(sceneTexture, sceneSampler, uv - vec2<f32>(shift, 0.0)).b;
+
+    let scan = 1.0 - u.intensity * 0.05 * step(2.0, (fragCoord.y - floor(fragCoord.y / 3.0) * 3.0));
+    col = col * scan;
+
+    let d = bayer(vec2<u32>(u32(fragCoord.x), u32(fragCoord.y))) * (2.5 / 255.0);
+    let n = fract(sin(dot(fragCoord.xy + vec2<f32>(u.time), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let grain = (n - 0.5) * (3.0 / 255.0);
+    col = col + vec3<f32>((d + grain) * u.intensity);
+
+    // Region effects are deliberately small and bounded: the CPU supplies up
+    // to sixteen rects, while unknown shader keys are encoded as kind 0 and
+    // become no-ops. This keeps the post pipeline portable and predictable.
+    for (var i = 0u; i < 16u; i = i + 1u) {
+        if (f32(i) >= u.effectCount) { break; }
+        let effect = u.effects[i];
+        let minUV = effect.rect.xy / u.resolution;
+        let maxUV = (effect.rect.xy + effect.rect.zw) / u.resolution;
+        let inside = step(minUV.x, uv.x) * step(minUV.y, uv.y)
+                   * step(uv.x, maxUV.x) * step(uv.y, maxUV.y);
+        let local = clamp((uv - minUV) / max(effect.rect.zw / u.resolution, vec2<f32>(0.001)),
+                          vec2<f32>(0.0), vec2<f32>(1.0));
+
+        if (effect.kind == 1.0) {
+            // Cell glow: a soft border plus a small accent tint.
+            let edge = min(min(local.x, 1.0 - local.x), min(local.y, 1.0 - local.y));
+            let glow = (1.0 - smoothstep(0.0, 0.18, edge)) * effect.params.w * inside * layerMask;
+            col = col + effect.params.rgb * glow * 0.45;
+        } else if (effect.kind == 2.0) {
+            // Cell shine: a diagonal band travelling across the cell.
+            let band = 1.0 - smoothstep(0.0, 0.16,
+                abs(local.x + local.y - 1.8 - effect.params.w * 2.4));
+            col = col + effect.params.rgb * band * inside * layerMask * 0.7;
+        } else if (effect.kind == 3.0) {
+            // Hit flash: preserve alpha while biasing the source toward white.
+            let flash = clamp(effect.params.x, 0.0, 1.0) * inside * layerMask;
+            col = mix(col, vec3<f32>(1.0), flash * 0.8);
+        } else if (effect.kind == 4.0) {
+            // Glass: a restrained cool tint, animated refraction, and a bright
+            // rim. It is intentionally local so the whole reel panel can read
+            // as one surface without affecting the rest of the battle scene.
+            let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;
+            let rim = (1.0 - smoothstep(0.015, 0.14,
+                min(min(local.x, 1.0 - local.x), min(local.y, 1.0 - local.y)))) * amount;
+            let wave = 0.5 + 0.5 * sin((local.x + local.y) * 18.0 + u.time * 1.8);
+            let offset = vec2<f32>(
+                sin(local.y * 9.0 + u.time * 1.4),
+                cos(local.x * 11.0 - u.time * 1.1)
+            ) * (0.0025 * amount);
+            let refracted = textureSample(sceneTexture, sceneSampler,
+                clamp(uv + offset, vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+            col = mix(col, refracted, amount * 0.28);
+            col = mix(col, col * 0.72 + effect.params.rgb * 0.28, amount * 0.24);
+            col = col + effect.params.rgb * (rim * 0.72 + wave * amount * 0.035);
+        }
+    }
+
+    let alpha = select(1.0, source.a, u.composition == 1.0);
+    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
+}
+"""
