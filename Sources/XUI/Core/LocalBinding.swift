@@ -1,5 +1,5 @@
 /// A synchronous binding used by state owned by the XUI declaration walk.
-/// Actor-owned models use `Binding` instead.
+/// Actor-owned models use `ActorBinding` instead.
 @propertyWrapper
 @dynamicMemberLookup
 public struct LocalBinding<Value> {

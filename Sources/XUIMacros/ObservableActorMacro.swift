@@ -17,8 +17,8 @@ public struct ObservableActorMacro: MemberMacro {
         return storedProperties(in: actor).flatMap { field in
             [
                 """
-                var $\(raw: field.name): Binding<\(raw: field.type)> {
-                    Binding(
+                var $\(raw: field.name): ActorBinding<\(raw: field.type)> {
+                    ActorBinding(
                         get: { await self.\(raw: field.name) },
                         set: { await self._set_\(raw: field.name)($0) }
                     )
