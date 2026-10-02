@@ -11,6 +11,7 @@ let package = Package(
         .macOS(.v13),
     ],
     products: [
+        .library(name: "X", targets: ["X"]),
         .library(name: "XShader", targets: ["XShader"]),
         .library(name: "XRender", targets: ["XRender"]),
         .library(name: "XRenderWGPU", targets: ["XRenderWGPU"]),
@@ -32,6 +33,17 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]
+        ),
+        .macro(
+            name: "XMacros",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        ),
+        .target(
+            name: "X",
+            dependencies: ["XMacros"]
         ),
         .target(
             name: "XShader",
@@ -59,6 +71,7 @@ let package = Package(
         .target(
             name: "XUI",
             dependencies: [
+                "X",
                 "XShader",
                 "XUIMacros",
             ]
@@ -73,6 +86,7 @@ let package = Package(
         ),
         .executableTarget(name: "xview-bench", dependencies: ["XUI"]),
         .testTarget(name: "XShaderTests", dependencies: ["XShader"]),
+        .testTarget(name: "XTests", dependencies: ["X"]),
         .testTarget(name: "XRenderTests", dependencies: ["XRender", "XShader"]),
         .testTarget(name: "XUITests", dependencies: ["XUI"]),
         .testTarget(
