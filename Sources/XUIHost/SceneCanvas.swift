@@ -128,7 +128,11 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
         alignment: HorizontalAlignment,
         outline: TextOutline?
     ) {
-        let scale = Float(fontSize)
+        // XRender's text scale uses a seven-unit cap-height em, while XUI's
+        // public Text API expresses sizes in logical points. Keep the bridge
+        // in one place so a Text(size: 20) is a 20-point label rather than a
+        // 140-point label when a font atlas is installed.
+        let scale = Self.renderScale(for: fontSize)
         let font = font.render
         let width = builder.textWidth(string, scale: scale, font: font, fonts: fonts)
         let originX: Float
@@ -166,7 +170,7 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     }
 
     public func measureText(_ string: String, fontSize: Double, font: TextFont) -> XUI.Size {
-        let scale = Float(fontSize)
+        let scale = Self.renderScale(for: fontSize)
         let font = font.render
         let width = builder.textWidth(string, scale: scale, font: font, fonts: fonts)
         // One line: atlas line-height in logical units when a font is loaded,
@@ -178,6 +182,10 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
             height = scale * 9
         }
         return XUI.Size(width: Double(width), height: Double(height))
+    }
+
+    private static func renderScale(for fontSize: Double) -> Float {
+        Float(max(0, fontSize) / 7)
     }
 
     private func roundedRectStrokePoints(in rect: XUI.Rect, cornerRadius: Double) -> [XUI.Point] {
