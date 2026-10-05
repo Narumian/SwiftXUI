@@ -106,6 +106,19 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
             col = mix(col, refracted, amount * 0.28);
             col = mix(col, col * 0.72 + effect.params.rgb * 0.28, amount * 0.24);
             col = col + effect.params.rgb * (rim * 0.72 + wave * amount * 0.035);
+        } else if (effect.kind == 5.0) {
+            // VHS: edge chromatic aberration, faint scanlines, fine grain.
+            let amount = clamp(effect.params.w, 0.0, 4.0) * inside * layerMask;
+            let localEdge = abs(local.x - 0.5) * 2.0;
+            let localShift = localEdge * localEdge * 1.8 * amount / u.resolution.x;
+            let shifted = vec3<f32>(
+                textureSample(sceneTexture, sceneSampler, uv + vec2<f32>(localShift, 0.0)).r,
+                col.g,
+                textureSample(sceneTexture, sceneSampler, uv - vec2<f32>(localShift, 0.0)).b
+            );
+            let lineScan = 1.0 - amount * 0.05 * step(2.0, (fragCoord.y - floor(fragCoord.y / 3.0) * 3.0));
+            let lineNoise = fract(sin(dot(fragCoord.xy + vec2<f32>(u.time), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+            col = shifted * lineScan + vec3<f32>((lineNoise - 0.5) * (3.0 / 255.0) * amount);
         }
     }
 

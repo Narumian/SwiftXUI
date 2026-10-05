@@ -89,6 +89,11 @@ public enum ShaderLibrary {
     public static let cellShineKey: ShaderKey = "swiftx.cellShine"
     public static let hitFlashKey: ShaderKey = "swiftx.hitFlash"
     public static let glassKey: ShaderKey = "swiftx.glass"
+    public static let vhsKey: ShaderKey = "swiftx.vhs"
+
+    public static func vhs(intensity: Float = 1) -> VHSShader {
+        VHSShader(intensity: intensity)
+    }
 
     public static func cellGlow(color: SIMD3<Float>, intensity: Float = 1) -> CellGlowShader {
         CellGlowShader(color: color, intensity: intensity)
@@ -177,6 +182,24 @@ public struct GlassShader: Shader {
 
     public func encode(into uniforms: inout ShaderUniforms) {
         uniforms.write(tint)
+        uniforms.write(intensity)
+    }
+}
+
+/// Understated VHS for a view subtree: edge chromatic aberration, faint
+/// scanlines, and fine grain. `intensity` scales all three.
+public struct VHSShader: Shader {
+    public static let key = ShaderLibrary.vhsKey
+    public static let scope: ShaderScope = .layer
+
+    public var intensity: Float
+
+    public init(intensity: Float = 1) {
+        self.intensity = intensity
+    }
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD3<Float>(0, 0, 0))
         uniforms.write(intensity)
     }
 }

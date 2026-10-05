@@ -50,7 +50,7 @@ public final class WGPURenderer: XRenderer {
 
     /// Fullscreen post pass (dither + VHS). 0 disables it; the scene renders
     /// straight to the surface.
-    public var postIntensity: Float = 1.0
+    public var postIntensity: Float = 0.0
     private var postShader: WGPUShaderModule?
     private var postPipeline: WGPURenderPipeline?
     private var postBindGroupLayout: WGPUBindGroupLayout?
@@ -812,6 +812,7 @@ public final class WGPURenderer: XRenderer {
         case ShaderLibrary.cellShineKey: return 2
         case ShaderLibrary.hitFlashKey: return 3
         case ShaderLibrary.glassKey: return 4
+        case ShaderLibrary.vhsKey: return 5
         default: return 0
         }
     }

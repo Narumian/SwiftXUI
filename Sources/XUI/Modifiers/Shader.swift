@@ -25,3 +25,9 @@ public extension XView {
         _ShaderModifier(content: self, shader: shader)
     }
 }
+
+public extension XView {
+    func vhsEffect(intensity: Float = 1) -> _ShaderModifier<Self, VHSShader> {
+        shader(ShaderLibrary.vhs(intensity: intensity))
+    }
+}
