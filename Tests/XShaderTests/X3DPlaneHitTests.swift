@@ -15,6 +15,19 @@ import XShader
     #expect(abs(point.y - 10) < 0.5)
 }
 
+@Test func planeProjectRoundTripsCentre() throws {
+    let camera = X3DCamera(position: SIMD3(0, 0, 3))
+    let screen = try #require(X3DPlaneHit.project(
+        local: SIMD2(20, 10),
+        viewSize: SIMD2(100, 50),
+        planeSize: SIMD2(40, 20),
+        camera: camera,
+        model: .identity
+    ))
+    #expect(abs(screen.x - 50) < 0.5)
+    #expect(abs(screen.y - 25) < 0.5)
+}
+
 @Test func planeHitMissesOutsideThePanel() {
     let camera = X3DCamera(position: SIMD3(0, 0, 3))
     let miss = X3DPlaneHit.hit(
@@ -27,7 +40,7 @@ import XShader
     #expect(miss == nil)
 }
 
-@Test func planeHitTracksTranslatedAxisAlignedPanel() {
+@Test func planeHitTracksTranslatedAxisAlignedPanel() throws {
     let camera = X3DCamera(position: SIMD3(0, 0, 3))
     let model = X3DTransform.translation(SIMD3(0.2, 0, 0))
     let hit = X3DPlaneHit.hit(
@@ -42,7 +55,7 @@ import XShader
     #expect(point.x < 20)
 }
 
-@Test func screenBoundsContainTheProjectedCentre() {
+@Test func screenBoundsContainTheProjectedCentre() throws {
     let camera = X3DCamera(position: SIMD3(0, 0, 3))
     let bounds = try #require(X3DPlaneHit.screenBounds(
         viewSize: SIMD2(100, 50),

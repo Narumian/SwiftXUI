@@ -182,7 +182,10 @@ extension WGPURenderer {
     func encodeX3D(_ x3d: CompiledX3D, parent: WGPUTextureView, encoder: WGPUCommandEncoder, depth: Int) {
         #if DEBUG
         let registered = Set(x3dShaderSources.keys).union(X3DDiagnostics.builtinShaders)
-        X3DDiagnostics.assertValid(x3d.graph, registeredShaders: registered)
+        let issues = X3DDiagnostics.issues(in: x3d.graph, registeredShaders: registered)
+        for issue in issues {
+            rendererLog("[X3D] \(issue)")
+        }
         #endif
         let probe = X3DCostProbe.shared
         let encodeStarted = probe.begin(.encode)

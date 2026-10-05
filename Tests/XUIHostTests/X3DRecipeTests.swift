@@ -7,19 +7,17 @@ import XUI
 // Official mini-recipes (§4.1). Each program is a copy-paste starting point;
 // assertions lock the lowering contract so sugar and docs stay honest.
 
-/// Particle buffer → fade trail pass → blit to output.
+/// Particle buffer → fade trail pass → blit to output (via `FeedbackTrail`).
 private struct ParticleTrailRecipe: X3DProgram {
     var energy: Float
     var body: some X3DProgram {
         Buffer("particles", stride: 16, count: 4)
-        Texture("trail")
         Compute("flow", entry: "step", threads: 4, uniforms: [energy])
             .bind("particles")
-        Pass(into: "trail", load: .fade(0.1)) {
+        FeedbackTrail("trail", fade: 0.1) {
             Draw("flow", vertices: 6, instances: 4, blend: .additive)
                 .bind("particles")
         }
-        Blit("trail")
     }
 }
 
@@ -43,16 +41,11 @@ private struct Plane2DIn3DRecipe: X3DProgram {
     }
 }
 
-/// Instanced draw (declares transform buffer) plus a fullscreen post pass item.
-private struct FullscreenAndInstancedRecipe: X3DProgram {
+/// Instanced mesh copies via `MeshDraw.instanced` (preferred mesh path).
+private struct InstancedMeshRecipe: X3DProgram {
     var body: some X3DProgram {
-        Instanced(
-            "sprites",
-            transforms: [.identity, .translation(SIMD3(1, 0, 0))],
-            vertices: 6,
-            blend: .additive
-        )
-        Fullscreen("post", blend: .opaque)
+        MeshDraw("lit", mesh: X3DMesh.icosphere(subdivisions: 0), blend: .opaque)
+            .instanced(transforms: [.identity, .translation(SIMD3(1, 0, 0))])
     }
 }
 
@@ -137,33 +130,42 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
     #expect(model == .translation(SIMD3(0, 1, 0)))
 }
 
-@Test @XUIActor func recipeFullscreenAndInstancedLower() async throws {
-    let scene = await render(X3DView { FullscreenAndInstancedRecipe() })
+@Test @XUIActor func recipeMeshDrawInstancedUploadsMeshAndTransforms() async throws {
+    let mesh = X3DMesh.icosphere(subdivisions: 0)
+    let scene = await render(X3DView { InstancedMeshRecipe() })
     guard case .x3d(let command) = try #require(scene.commands.first) else {
         Issue.record("Expected an x3d command")
         return
     }
-    #expect(command.graph.resources.count == 1)
-    guard case .buffer(let id, let byteCount, let contents) = command.graph.resources[0],
-          case .render(let pass) = try #require(command.graph.passes.first) else {
-        Issue.record("Expected instance buffer + one pass")
+    #expect(command.graph.resources.count == 2)
+    guard case .buffer(let meshID, let meshBytes, let meshContents) = command.graph.resources[0],
+          case .buffer(let instanceID, let instanceBytes, let instanceContents) = command.graph.resources[1],
+          case .render(let pass) = try #require(command.graph.passes.first),
+          case .draw(let draw) = try #require(pass.items.first) else {
+        Issue.record("Expected mesh + instance buffers and one draw")
         return
     }
-    #expect(id.name == "instances")
-    #expect(byteCount == 128)
-    #expect(contents?.count == 32)
-    #expect(pass.items.count == 2)
-    guard case .draw(let instanced) = pass.items[0],
-          case .draw(let fullscreen) = pass.items[1] else {
-        Issue.record("Expected instanced then fullscreen draws")
+    #expect(meshID.name == "mesh")
+    #expect(instanceID.name == "instances")
+    #expect(meshBytes == mesh.count * MemoryLayout<Float>.stride)
+    #expect(meshContents == mesh)
+    #expect(instanceBytes == 128)
+    #expect(instanceContents?.count == 32)
+    #expect(draw.vertexCount == mesh.count / X3DMesh.floatsPerVertex)
+    #expect(draw.instanceCount == 2)
+    #expect(draw.bindings.map(\.resource.name) == ["mesh", "instances"])
+}
+
+@Test @XUIActor func fullscreenDrawUsesThreeVertices() async throws {
+    let scene = await render(X3DView { Fullscreen("post", blend: .opaque) })
+    guard case .x3d(let command) = try #require(scene.commands.first),
+          case .render(let pass) = try #require(command.graph.passes.first),
+          case .draw(let draw) = try #require(pass.items.first) else {
+        Issue.record("Expected a fullscreen draw")
         return
     }
-    #expect(instanced.vertexCount == 6)
-    #expect(instanced.instanceCount == 2)
-    #expect(instanced.bindings.map(\.resource.name) == ["instances"])
-    #expect(fullscreen.vertexCount == 3)
-    #expect(fullscreen.instanceCount == 1)
-    #expect(fullscreen.bindings.isEmpty)
+    #expect(draw.vertexCount == 3)
+    #expect(draw.bindings.isEmpty)
 }
 
 @Test @XUIActor func meshDrawExtraBindsAppendAfterMesh() async throws {
@@ -185,17 +187,24 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
 }
 
 @Test @XUIActor func recipeDiagnoseFlagsUnregisteredShader() async throws {
-    let scene = await render(X3DView { ParticleTrailRecipe(energy: 0.25) })
-    guard case .x3d(let command) = try #require(scene.commands.first) else {
-        Issue.record("Expected an x3d command")
-        return
-    }
-    let missing = command.graph.diagnose(registeredShaders: [])
-    #expect(missing.contains { diagnostic in
+    var env = EnvironmentValues()
+    env.x3dRegisteredShaders = []
+    let surface = SceneCanvas(size: RenderSize(width: 100, height: 50))
+    let layout = await LayoutHost(canvas: XUI.Size(width: 100, height: 50), environment: env)
+        .render(X3DView { ParticleTrailRecipe(energy: 0.25) }, into: surface)
+    #expect(layout.x3dDiagnostics.contains { diagnostic in
         if case .unregisteredShader(let key) = diagnostic.kind { return key == "flow" }
         return false
     })
-    #expect(command.graph.diagnose(registeredShaders: ["flow"]).isEmpty)
+
+    env.x3dRegisteredShaders = ["flow"]
+    let okSurface = SceneCanvas(size: RenderSize(width: 100, height: 50))
+    let ok = await LayoutHost(canvas: XUI.Size(width: 100, height: 50), environment: env)
+        .render(X3DView { ParticleTrailRecipe(energy: 0.25) }, into: okSurface)
+    #expect(ok.x3dDiagnostics.filter {
+        if case .unregisteredShader = $0.kind { return true }
+        return false
+    }.isEmpty)
 }
 
 @Test @XUIActor func recipeTiltCardExposesInteractivePlaneHits() async throws {
@@ -207,6 +216,24 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
     #expect(plane.planeSize == Size(width: 40, height: 20))
     #expect(layout.hit(Point(x: 50, y: 25), as: String.self) == "card")
     #expect(layout.hit(Point(x: 2, y: 2), as: String.self) == nil)
+}
+
+@Test @XUIActor func interactivePlanePromotesControlsToScreenSpace() async throws {
+    let layout = await renderLayout(
+        X3DView {
+            Camera(position: SIMD3(0, 0, 3), acceptsInput: true) {
+                Color.green.frame(width: 40, height: 20)
+                    .control(XControl(id: "panel", label: "Panel"))
+            }
+        }
+    )
+    #expect(layout.x3dPlanes.count == 1)
+    #expect(layout.controls.count == 1)
+    let control = try #require(layout.controls.first)
+    #expect(control.control.id == "panel")
+    // Promoted into the X3DView's screen space (not stuck at local 0,0).
+    #expect(control.rect.midX > 20)
+    #expect(control.rect.midY > 5)
 }
 
 @Test @XUIActor func recipeTiltCardLowersRotatedPlane() async throws {

@@ -1,4 +1,5 @@
 import Foundation
+import XShader
 
 public protocol EnvironmentKey {
     associatedtype Value
@@ -85,6 +86,13 @@ public extension EnvironmentValues {
         get { self[LayoutDirectionKey.self] }
         set { self[LayoutDirectionKey.self] = newValue }
     }
+
+    /// Shader keys the host has registered for X3D. When non-`nil`,
+    /// `LayoutHost` reports unregistered keys on `RenderResult.x3dDiagnostics`.
+    var x3dRegisteredShaders: Set<ShaderKey>? {
+        get { self[X3DRegisteredShadersKey.self] }
+        set { self[X3DRegisteredShadersKey.self] = newValue }
+    }
 }
 
 private enum SafeAreaInsetsKey: EnvironmentKey {
@@ -100,6 +108,10 @@ public extension EnvironmentValues {
 
 private enum FXTimeKey: EnvironmentKey {
     static let defaultValue: Double = 0
+}
+
+private enum X3DRegisteredShadersKey: EnvironmentKey {
+    static let defaultValue: Set<ShaderKey>? = nil
 }
 
 public typealias TextMeasurer = (_ string: String, _ fontSize: Double, _ font: TextFont) -> Size

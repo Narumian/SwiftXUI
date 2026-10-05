@@ -1,4 +1,5 @@
 import Foundation
+import XRender
 
 /// The render entry point. Give it a canvas size and an environment, hand it a
 /// root view and a concrete `XCanvas`, get back the layout-derived metadata.
@@ -48,6 +49,16 @@ public struct LayoutHost {
                 sink.submit(shaders: renderContext.shaders)
             }
 
+            var diagnostics = renderContext.x3dDiagnostics
+            if let canvas = surface as? X3DDiagnosticSource {
+                for graph in canvas.x3dGraphs {
+                    diagnostics += X3DDiagnostics.issues(
+                        in: graph,
+                        registeredShaders: env.x3dRegisteredShaders
+                    )
+                }
+            }
+
             return RenderResult(
                 regions: renderContext.regions,
                 shaders: renderContext.shaders,
@@ -55,6 +66,7 @@ public struct LayoutHost {
                 tapGestures: renderContext.tapGestures,
                 dragGestures: renderContext.dragGestures,
                 x3dPlanes: renderContext.x3dPlanes,
+                x3dDiagnostics: diagnostics,
                 anchors: renderContext.anchors,
                 x3dTime: 0
             )

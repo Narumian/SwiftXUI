@@ -43,6 +43,64 @@ public enum X3DPlaneHit {
         )
     }
 
+    /// Maps a plane-local layout point (origin top-left, y down) into the
+    /// hosting `X3DView` (same convention). Returns `nil` when the point is
+    /// behind the camera or outside the clip volume.
+    public static func project(
+        local: SIMD2<Float>,
+        viewSize: SIMD2<Float>,
+        planeSize: SIMD2<Float>,
+        camera: X3DCamera,
+        model: X3DTransform,
+        time: Float = 0
+    ) -> SIMD2<Float>? {
+        guard viewSize.x > 0, viewSize.y > 0, planeSize.x > 0, planeSize.y > 0 else { return nil }
+        let half = planeSize / (2 * pointsPerWorldUnit)
+        let modelPoint = SIMD3(
+            (local.x / planeSize.x * 2 - 1) * half.x,
+            (1 - local.y / planeSize.y * 2) * half.y,
+            0
+        )
+        let aspect = viewSize.x / viewSize.y
+        let vp = camera.viewProjection(aspect: aspect, time: time)
+        let mvp = multiply(vp, model.matrix)
+        let clip = mul4(mvp, SIMD4(modelPoint.x, modelPoint.y, modelPoint.z, 1))
+        guard clip.w > 1e-6 else { return nil }
+        let ndc = SIMD2(clip.x / clip.w, clip.y / clip.w)
+        return SIMD2(
+            (ndc.x * 0.5 + 0.5) * viewSize.x,
+            (0.5 - ndc.y * 0.5) * viewSize.y
+        )
+    }
+
+    /// Screen-space axis-aligned bounds of a plane-local layout rect.
+    public static func projectRect(
+        _ rect: (min: SIMD2<Float>, max: SIMD2<Float>),
+        viewSize: SIMD2<Float>,
+        planeSize: SIMD2<Float>,
+        camera: X3DCamera,
+        model: X3DTransform,
+        time: Float = 0
+    ) -> (min: SIMD2<Float>, max: SIMD2<Float>)? {
+        let corners = [
+            SIMD2(rect.min.x, rect.min.y), SIMD2(rect.max.x, rect.min.y),
+            SIMD2(rect.max.x, rect.max.y), SIMD2(rect.min.x, rect.max.y),
+        ]
+        var minS = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
+        var maxS = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
+        var visible = false
+        for corner in corners {
+            guard let screen = project(
+                local: corner, viewSize: viewSize, planeSize: planeSize,
+                camera: camera, model: model, time: time
+            ) else { continue }
+            minS = SIMD2(min(minS.x, screen.x), min(minS.y, screen.y))
+            maxS = SIMD2(max(maxS.x, screen.x), max(maxS.y, screen.y))
+            visible = true
+        }
+        return visible ? (minS, maxS) : nil
+    }
+
     /// Screen-space axis-aligned bounds of the panel inside the hosting view.
     /// Useful for broad-phase hit tests; may be empty when the panel is edge-on.
     public static func screenBounds(
