@@ -10,7 +10,7 @@ public final class WGPURenderer: XRenderer {
     // 16 Effect structs (rect, params, kind + trailing padding). The array's
     // 16-byte alignment places it at float offset 8.
     private static let postUniformFloatCount = 8 + maxShaderRegions * 12
-    private let instance: WGPUInstance
+    let instance: WGPUInstance
     /// nil for a headless renderer (`init(headless:)`), which only draws to
     /// offscreen textures via `renderToImage`.
     private let surface: WGPUSurface?
@@ -86,8 +86,12 @@ public final class WGPURenderer: XRenderer {
     var x3dShaderSources: [ShaderKey: String] = [:]
     var x3dModules: [ShaderKey: WGPUShaderModule] = [:]
     var x3dPipelines: [String: WGPURenderPipeline] = [:]
-    var x3dGroupLayout: WGPUBindGroupLayout?
-    var x3dPipelineLayout: WGPUPipelineLayout?
+    var x3dComputePipelines: [String: WGPUComputePipeline] = [:]
+    var x3dGroupLayouts: [String: WGPUBindGroupLayout] = [:]
+    var x3dPipelineLayouts: [String: WGPUPipelineLayout] = [:]
+    var x3dResources: [X3DResourceID: X3DResourceRecord] = [:]
+    var x3dSampler: WGPUSampler?
+    var x3dFailures: Set<String> = []
     var x3dFrameIndex: UInt32 = 0
     var x3dLastTime: Float?
     var x3dTime: Float = 0
@@ -539,6 +543,33 @@ public final class WGPURenderer: XRenderer {
             }
         }
         return out
+    }
+
+    /// Encodes and submits `frame` offscreen without reading it back, so
+    /// headless callers can advance stateful X3D programs cheaply.
+    public func advanceOffscreen(_ frame: CompiledFrame, width: Int, height: Int, time: Float) {
+        guard width > 0, height > 0 else { return }
+        _ = ensureSpriteResources()
+        configure(width: UInt32(width), height: UInt32(height))
+        var descriptor = WGPUTextureDescriptor()
+        descriptor.usage = WGPUTextureUsage_RenderAttachment
+        descriptor.dimension = WGPUTextureDimension_2D
+        descriptor.size = WGPUExtent3D(width: UInt32(width), height: UInt32(height), depthOrArrayLayers: 1)
+        descriptor.format = surfaceFormat
+        descriptor.mipLevelCount = 1
+        descriptor.sampleCount = 1
+        guard let target = wgpuDeviceCreateTexture(device, &descriptor) else { return }
+        defer { wgpuTextureRelease(target) }
+        guard let view = wgpuTextureCreateView(target, nil) else { return }
+        defer { wgpuTextureViewRelease(view) }
+        guard let encoder = wgpuDeviceCreateCommandEncoder(device, nil) else { return }
+        defer { wgpuCommandEncoderRelease(encoder) }
+        encodeFrame(frame, time: time, into: view, encoder: encoder)
+        guard let commandBuffer = wgpuCommandEncoderFinish(encoder, nil) else { return }
+        var submitted: WGPUCommandBuffer? = commandBuffer
+        withUnsafePointer(to: &submitted) { wgpuQueueSubmit(queue, 1, $0) }
+        wgpuCommandBufferRelease(commandBuffer)
+        _ = wgpuDevicePoll(device, 1, nil)
     }
 
     private final class MapBox { var status = WGPUMapAsyncStatus_Error; var done = false }
