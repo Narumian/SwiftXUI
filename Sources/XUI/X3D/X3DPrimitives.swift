@@ -172,22 +172,28 @@ public struct Pass<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
 public struct Camera<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
     public typealias Body = Never
     let camera: X3DCamera
+    let acceptsInput: Bool
     let content: Content
 
     public init(position: SIMD3<Float>, target: SIMD3<Float> = .zero, fieldOfView: Float = .pi / 3,
                 near: Float = 0.05, far: Float = 100, orbit: Float = 0,
+                acceptsInput: Bool = false,
                 @XViewBuilder content: () -> Content) {
         self.camera = X3DCamera(position: position, target: target, fieldOfView: fieldOfView,
                                 near: near, far: far, orbit: orbit)
+        self.acceptsInput = acceptsInput
         self.content = content()
     }
 
     @XUIActor
     func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
-        let outer = walk.camera
+        let outerCamera = walk.camera
+        let outerInput = walk.acceptsPlaneInput
         walk.camera = camera
+        walk.acceptsPlaneInput = acceptsInput
         await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
-        walk.camera = outer
+        walk.camera = outerCamera
+        walk.acceptsPlaneInput = outerInput
     }
 }
 

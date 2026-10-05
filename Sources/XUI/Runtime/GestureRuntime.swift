@@ -58,8 +58,8 @@ public struct GestureRuntime: Sendable {
         switch input.phase {
         case .began:
             guard activeSequence == nil else { return false }
-            let tap = render.tapGestures.first(where: { $0.rect.contains(input.position) })
-            let drag = render.dragGestures.first(where: { $0.rect.contains(input.position) })
+            let tap = render.tapGesture(at: input.position)
+            let drag = render.dragGesture(at: input.position)
             guard tap != nil || drag != nil else {
                 return false
             }

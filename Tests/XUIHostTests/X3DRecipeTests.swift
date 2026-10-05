@@ -56,11 +56,32 @@ private struct FullscreenAndInstancedRecipe: X3DProgram {
     }
 }
 
+/// Shallow tilt card with interactive plane input (M2 product focus).
+private struct TiltCardRecipe: X3DProgram {
+    var tilt: Float
+    var body: some X3DProgram {
+        Camera(position: SIMD3(0, 0, 3), acceptsInput: true) {
+            Color.blue.frame(width: 40, height: 20)
+                .region("card")
+                .transform3D(
+                    .rotation(axis: SIMD3(0, 1, 0), angle: tilt)
+                    * .rotation(axis: SIMD3(1, 0, 0), angle: tilt * 0.25)
+                )
+        }
+    }
+}
+
 @XUIActor
 private func render<V: XView>(_ view: V) async -> Scene {
     let surface = SceneCanvas(size: RenderSize(width: 100, height: 50))
     _ = await LayoutHost(canvas: XUI.Size(width: 100, height: 50)).render(view, into: surface)
     return surface.scene
+}
+
+@XUIActor
+private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
+    let surface = SceneCanvas(size: RenderSize(width: 100, height: 50))
+    return await LayoutHost(canvas: XUI.Size(width: 100, height: 50)).render(view, into: surface)
 }
 
 @Test @XUIActor func recipeParticleTrailLowersLikeFlow() async throws {
@@ -175,4 +196,28 @@ private func render<V: XView>(_ view: V) async -> Scene {
         return false
     })
     #expect(command.graph.diagnose(registeredShaders: ["flow"]).isEmpty)
+}
+
+@Test @XUIActor func recipeTiltCardExposesInteractivePlaneHits() async throws {
+    let layout = await renderLayout(X3DView { TiltCardRecipe(tilt: 0.15) })
+    #expect(layout.regions.isEmpty)
+    #expect(layout.x3dPlanes.count == 1)
+    let plane = try #require(layout.x3dPlanes.first)
+    #expect(plane.regions.count == 1)
+    #expect(plane.planeSize == Size(width: 40, height: 20))
+    #expect(layout.hit(Point(x: 50, y: 25), as: String.self) == "card")
+    #expect(layout.hit(Point(x: 2, y: 2), as: String.self) == nil)
+}
+
+@Test @XUIActor func recipeTiltCardLowersRotatedPlane() async throws {
+    let scene = await render(X3DView { TiltCardRecipe(tilt: 0.2) })
+    guard case .x3d(let command) = try #require(scene.commands.first),
+          case .render(let pass) = try #require(command.graph.passes.first),
+          case .plane(let size, _, let camera, let model) = try #require(pass.items.first) else {
+        Issue.record("Expected a tilted plane")
+        return
+    }
+    #expect(size == RenderSize(width: 40, height: 20))
+    #expect(camera.position == SIMD3(0, 0, 3))
+    #expect(model != .identity)
 }

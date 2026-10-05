@@ -54,7 +54,9 @@ public struct LayoutHost {
                 controls: renderContext.controls,
                 tapGestures: renderContext.tapGestures,
                 dragGestures: renderContext.dragGestures,
-                anchors: renderContext.anchors
+                x3dPlanes: renderContext.x3dPlanes,
+                anchors: renderContext.anchors,
+                x3dTime: 0
             )
         }
     }
