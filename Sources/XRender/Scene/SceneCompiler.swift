@@ -114,11 +114,25 @@ public struct CompiledX3D: Sendable, Equatable {
     public var rect: PixelRect
     public var graph: X3DGraph
     public var views: [CompiledFrame]
+    public var planes: [CompiledX3DPlane]
 
-    public init(rect: PixelRect, graph: X3DGraph, views: [CompiledFrame]) {
+    public init(rect: PixelRect, graph: X3DGraph, views: [CompiledFrame], planes: [CompiledX3DPlane] = []) {
         self.rect = rect
         self.graph = graph
         self.views = views
+        self.planes = planes
+    }
+}
+
+/// A plane's view compiled aspect-fit into the full framebuffer; `uv` is the
+/// `(minU, minV, maxU, maxV)` of the region it occupies there.
+public struct CompiledX3DPlane: Sendable, Equatable {
+    public var frame: CompiledFrame
+    public var uv: SIMD4<Float>
+
+    public init(frame: CompiledFrame, uv: SIMD4<Float>) {
+        self.frame = frame
+        self.uv = uv
     }
 }
 
@@ -282,17 +296,37 @@ public enum SceneCompiler {
             case .x3d(let x3d):
                 flushShapes()
                 var views: [CompiledFrame] = []
+                var planes: [CompiledX3DPlane] = []
                 for case .render(let pass) in x3d.graph.passes {
-                    for case .view(_, let commands) in pass.items {
-                        let nested = Scene(
-                            background: RenderColor(0, 0, 0, 0), commands: commands,
-                            authoringCanvas: scene.authoringCanvas
-                        )
-                        views.append(compile(nested, canvas: canvas, framebuffer: framebuffer, fit: fit, fonts: fonts))
+                    for item in pass.items {
+                        switch item {
+                        case .view(_, let commands):
+                            let nested = Scene(
+                                background: RenderColor(0, 0, 0, 0), commands: commands,
+                                authoringCanvas: scene.authoringCanvas
+                            )
+                            views.append(compile(nested, canvas: canvas, framebuffer: framebuffer, fit: fit, fonts: fonts))
+                        case .plane(let size, let commands, _, _):
+                            guard size.width > 0, size.height > 0 else { continue }
+                            let nested = Scene(background: RenderColor(0, 0, 0, 0), commands: commands,
+                                               authoringCanvas: size)
+                            let planeBox = Letterbox(canvas: size, framebuffer: framebuffer, fit: true)
+                            let uv = SIMD4(
+                                planeBox.offsetX / framebuffer.width, planeBox.offsetY / framebuffer.height,
+                                (planeBox.offsetX + size.width * planeBox.scale) / framebuffer.width,
+                                (planeBox.offsetY + size.height * planeBox.scale) / framebuffer.height
+                            )
+                            planes.append(CompiledX3DPlane(
+                                frame: compile(nested, canvas: size, framebuffer: framebuffer, fit: true, fonts: fonts),
+                                uv: uv
+                            ))
+                        case .draw, .blit:
+                            continue
+                        }
                     }
                 }
                 let index = frame.x3d.count
-                frame.x3d.append(CompiledX3D(rect: box.pixels(x3d.rect), graph: x3d.graph, views: views))
+                frame.x3d.append(CompiledX3D(rect: box.pixels(x3d.rect), graph: x3d.graph, views: views, planes: planes))
                 frame.draws.append(.x3d(index: index))
             }
         }

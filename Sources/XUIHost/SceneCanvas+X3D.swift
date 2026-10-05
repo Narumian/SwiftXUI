@@ -19,6 +19,14 @@ extension SceneCanvas: XUI.X3DSink {
         builder.endX3DView()
     }
 
+    public func beginX3DPlane(size: XUI.Size) {
+        builder.beginX3DPlane(size: RenderSize(width: Float(size.width), height: Float(size.height)))
+    }
+
+    public func endX3DPlane(camera: X3DCamera, model: X3DTransform) {
+        builder.endX3DPlane(camera: camera, model: model)
+    }
+
     public func endX3D() {
         builder.endX3D()
     }

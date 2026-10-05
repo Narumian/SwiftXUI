@@ -23,11 +23,19 @@ public struct X3DView<Content: X3DProgram>: XView, _PrimitiveXView {
             if case .view(let node) = step { return node }
             return nil
         }
+        let planes = steps.compactMap { step -> LayoutNode? in
+            if case .plane(let node, _, _) = step { return node }
+            return nil
+        }
         let node = LayoutNode(layout: X3DViewLayout())
         node.lazyChildren = { rect, context in
             for child in embedded {
                 let size = child.measure(ProposedSize(rect.size), context)
                 await LayoutEngine.place(child, in: Alignment.center.position(size, in: rect), context)
+            }
+            for plane in planes {
+                let size = plane.measure(ProposedSize(width: nil, height: nil), context)
+                await LayoutEngine.place(plane, in: Rect(x: 0, y: 0, width: size.width, height: size.height), context)
             }
             return []
         }
@@ -45,6 +53,10 @@ public struct X3DView<Content: X3DProgram>: XView, _PrimitiveXView {
                     sink.beginX3DView(in: child.frame)
                     LayoutEngine.render(child, into: context)
                     sink.endX3DView()
+                case .plane(let child, let camera, let model):
+                    sink.beginX3DPlane(size: child.frame.size)
+                    LayoutEngine.render(child, into: context)
+                    sink.endX3DPlane(camera: camera, model: model)
                 }
             }
             sink.endX3D()

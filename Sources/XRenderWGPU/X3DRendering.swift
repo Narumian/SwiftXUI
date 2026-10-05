@@ -42,6 +42,21 @@ fn x3d_fullscreen(@builtin(vertex_index) index: u32) -> X3DFullscreen {
     return out;
 }
 
+@vertex
+fn x3d_plane(@builtin(vertex_index) index: u32) -> X3DFullscreen {
+    var corners = array<vec2<f32>, 6>(
+        vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
+        vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0)
+    );
+    let c = corners[index];
+    let local = vec4(c.x * x3dParams[0], c.y * x3dParams[1], 0.0, 1.0);
+    let t = vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
+    var out: X3DFullscreen;
+    out.position = x3d.viewProjection * x3d.model * local;
+    out.uv = vec2(mix(x3dParams[2], x3dParams[4], t.x), mix(x3dParams[3], x3dParams[5], t.y));
+    return out;
+}
+
 @group(1) @binding(0) var x3dSource: texture_2d<f32>;
 
 @fragment
@@ -142,6 +157,11 @@ extension WGPURenderer {
         for record in x3dResources.values { record.release() }
         if let x3dSampler { wgpuSamplerRelease(x3dSampler) }
         releaseX3DDepthTargets()
+        for target in x3dPlaneTargets {
+            wgpuTextureViewRelease(target.view)
+            wgpuTextureRelease(target.texture)
+        }
+        x3dPlaneTargets.removeAll()
         x3dPipelines.removeAll()
         x3dComputePipelines.removeAll()
         x3dModules.removeAll()
@@ -167,6 +187,7 @@ extension WGPURenderer {
         beginX3DPass(target.view, load: .clear(SIMD4(0, 0, 0, 0)), depth: nil, encoder: encoder).map(endX3DPass)
 
         var viewIndex = 0
+        var planeIndex = 0
         for pass in x3d.graph.passes {
             switch pass {
             case .compute(let compute):
@@ -181,7 +202,13 @@ extension WGPURenderer {
                     viewport?.depth = x3dDepthView(width: attached.attachmentWidth, height: attached.attachmentHeight)
                 }
                 guard let viewport else {
-                    viewIndex += render.items.filter { if case .view = $0 { return true } else { return false } }.count
+                    for item in render.items {
+                        switch item {
+                        case .view: viewIndex += 1
+                        case .plane: planeIndex += 1
+                        case .draw, .blit: break
+                        }
+                    }
                     continue
                 }
                 var active = beginX3DPass(viewport.view, load: render.load, depth: viewport.depth, encoder: encoder)
@@ -208,6 +235,33 @@ extension WGPURenderer {
                                   encoder: encoder, clear: nil, time: x3dTime, depth: depth + 1)
                         active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
                                               clearDepth: false, encoder: encoder)
+                    case .plane(let size, _, let camera, let model):
+                        defer { planeIndex += 1 }
+                        guard x3d.planes.indices.contains(planeIndex),
+                              let planeTarget = x3dPlaneTarget(planeIndex) else { continue }
+                        active.map(endX3DPass)
+                        active = nil
+                        let plane = x3d.planes[planeIndex]
+                        drawScene(plane.frame, geometry: makeTransientGeometryBuffers(for: plane.frame),
+                                  into: planeTarget.view, encoder: encoder, clear: RenderColor(0, 0, 0, 0),
+                                  time: x3dTime, depth: depth + 1)
+                        active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
+                                              clearDepth: false, encoder: encoder)
+                        let id = X3DResourceID(scope: .min, name: "plane\(planeIndex)")
+                        x3dResources[id] = X3DResourceRecord(
+                            kind: .texture(planeTarget.texture, planeTarget.view, format: .rgba8Unorm,
+                                           width: planeTarget.width, height: planeTarget.height),
+                            lastFrame: x3dFrameIndex
+                        )
+                        let draw = X3DDraw(
+                            shader: x3dBuiltinKey, vertexEntry: "x3d_plane", fragmentEntry: "x3d_blit",
+                            vertexCount: 6, bindings: [X3DBinding(resource: id, access: .read)],
+                            uniforms: [size.width / 200, size.height / 200,
+                                       plane.uv.x, plane.uv.y, plane.uv.z, plane.uv.w],
+                            camera: camera, model: model
+                        )
+                        if let active { encodeX3DDraw(draw, blend: .alpha, viewport: viewport, pass: active) }
+                        x3dResources[id] = nil
                     }
                 }
                 active.map(endX3DPass)
@@ -325,6 +379,35 @@ extension WGPURenderer {
         }
         x3dDepthTargets[key] = (texture, view)
         return view
+    }
+
+    private func x3dPlaneTarget(_ index: Int) -> (texture: WGPUTexture, view: WGPUTextureView,
+                                                  width: UInt32, height: UInt32)? {
+        if x3dPlaneTargets.indices.contains(index) {
+            let existing = x3dPlaneTargets[index]
+            if existing.width == configuredWidth && existing.height == configuredHeight { return existing }
+            wgpuTextureViewRelease(existing.view)
+            wgpuTextureRelease(existing.texture)
+        }
+        var descriptor = WGPUTextureDescriptor()
+        descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
+        descriptor.dimension = WGPUTextureDimension_2D
+        descriptor.size = WGPUExtent3D(width: configuredWidth, height: configuredHeight, depthOrArrayLayers: 1)
+        descriptor.format = surfaceFormat
+        descriptor.mipLevelCount = 1
+        descriptor.sampleCount = 1
+        guard let texture = wgpuDeviceCreateTexture(device, &descriptor) else { return nil }
+        guard let view = wgpuTextureCreateView(texture, nil) else {
+            wgpuTextureRelease(texture)
+            return nil
+        }
+        let target = (texture: texture, view: view, width: configuredWidth, height: configuredHeight)
+        if x3dPlaneTargets.indices.contains(index) {
+            x3dPlaneTargets[index] = target
+        } else {
+            x3dPlaneTargets.append(target)
+        }
+        return target
     }
 
     func releaseX3DDepthTargets() {
@@ -676,10 +759,10 @@ extension WGPURenderer {
                             guard depth else { return wgpuDeviceCreateRenderPipeline(device, &descriptor) }
                             var depthState = WGPUDepthStencilState()
                             depthState.format = WGPUTextureFormat_Depth32Float
-                            let builtin = draw.shader == x3dBuiltinKey
-                            depthState.depthWriteEnabled = mode == .opaque && !builtin
+                            let overlay = draw.vertexEntry == "x3d_fullscreen"
+                            depthState.depthWriteEnabled = mode == .opaque && !overlay
                                 ? WGPUOptionalBool_True : WGPUOptionalBool_False
-                            depthState.depthCompare = builtin ? WGPUCompareFunction_Always : WGPUCompareFunction_Less
+                            depthState.depthCompare = overlay ? WGPUCompareFunction_Always : WGPUCompareFunction_Less
                             for face in [\WGPUDepthStencilState.stencilFront, \WGPUDepthStencilState.stencilBack] {
                                 depthState[keyPath: face].compare = WGPUCompareFunction_Always
                                 depthState[keyPath: face].failOp = WGPUStencilOperation_Keep

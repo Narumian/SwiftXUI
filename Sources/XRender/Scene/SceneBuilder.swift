@@ -211,6 +211,23 @@ public struct SceneBuilder {
         x3dStack[x3dStack.count - 1].pass?.items.append(.view(rect: rect, commands: commands))
     }
 
+    public mutating func beginX3DPlane(size: RenderSize) {
+        beginX3DView(in: RenderRect(x: 0, y: 0, width: size.width, height: size.height))
+    }
+
+    public mutating func endX3DPlane(camera: X3DCamera, model: X3DTransform) {
+        guard !x3dStack.isEmpty, let outer = x3dStack[x3dStack.count - 1].outerScene,
+              let rect = x3dStack[x3dStack.count - 1].viewRect else { return }
+        let commands = scene.commands
+        scene = outer
+        x3dStack[x3dStack.count - 1].outerScene = nil
+        x3dStack[x3dStack.count - 1].viewRect = nil
+        x3dStack[x3dStack.count - 1].pass?.items.append(.plane(
+            size: RenderSize(width: rect.width, height: rect.height),
+            commands: commands, camera: camera, model: model
+        ))
+    }
+
     public mutating func endX3D() {
         guard let assembly = x3dStack.popLast() else { return }
         scene.append(.x3d(X3DCommand(rect: assembly.rect, graph: assembly.graph)))

@@ -27,8 +27,10 @@ public struct X3DGraph: Sendable, Equatable {
         passes.flatMap { pass -> [DrawCommand] in
             guard case .render(let render) = pass else { return [] }
             return render.items.flatMap { item -> [DrawCommand] in
-                guard case .view(_, let commands) = item else { return [] }
-                return commands
+                switch item {
+                case .view(_, let commands), .plane(_, let commands, _, _): return commands
+                case .draw, .blit: return []
+                }
             }
         }
     }
@@ -57,6 +59,9 @@ public enum X3DRenderItem: Sendable, Equatable {
     case draw(X3DDraw)
     case blit(X3DResourceID, blend: X3DBlend)
     case view(rect: RenderRect, commands: [DrawCommand])
+    /// A view rasterised at `size` points and drawn as a plane centred on the
+    /// model origin, `size / 100` world units across.
+    case plane(size: RenderSize, commands: [DrawCommand], camera: X3DCamera, model: X3DTransform)
 }
 
 /// Assembles an `X3DGraph` from the `X3DOp` stream a sink receives.

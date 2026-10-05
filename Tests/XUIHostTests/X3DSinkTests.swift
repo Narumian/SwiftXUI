@@ -132,3 +132,29 @@ private func render<V: XView>(_ view: V) async -> Scene {
     #expect(draw.camera?.position == SIMD3(0, 0, 3))
     #expect(draw.model == .translation(SIMD3(1, 0, 0)) * .scale(2))
 }
+
+@Test @XUIActor func viewsInsideACameraBecomePlanesOfTheirOwnSize() async throws {
+    let scene = await render(
+        X3DView {
+            Camera(position: SIMD3(0, 0, 3)) {
+                Color.red.frame(width: 40, height: 20)
+                    .transform3D(.translation(SIMD3(0, 1, 0)))
+            }
+        }
+    )
+    guard case .x3d(let command) = try #require(scene.commands.first),
+          case .render(let pass) = try #require(command.graph.passes.first),
+          case .plane(let size, let commands, let camera, let model) = try #require(pass.items.first) else {
+        Issue.record("Expected a plane")
+        return
+    }
+    #expect(size == RenderSize(width: 40, height: 20))
+    #expect(commands.count == 1)
+    #expect(camera.position == SIMD3(0, 0, 3))
+    #expect(model == .translation(SIMD3(0, 1, 0)))
+
+    let frame = SceneCompiler.compile(scene, canvas: RenderSize(width: 100, height: 50),
+                                      framebuffer: RenderSize(width: 100, height: 50))
+    #expect(frame.x3d[0].planes.count == 1)
+    #expect(frame.x3d[0].planes[0].uv == SIMD4(0, 0, 1, 1))
+}

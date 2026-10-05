@@ -4,6 +4,7 @@ import XShader
 enum X3DStep {
     case op(X3DOp)
     case view(LayoutNode)
+    case plane(LayoutNode, camera: X3DCamera, model: X3DTransform)
 }
 
 /// The flattened form of a program tree. Draws, blits and views written
@@ -39,7 +40,12 @@ struct X3DWalk {
 
     mutating func view(_ node: LayoutNode) {
         openImplicitPassIfNeeded()
-        steps.append(.view(node))
+        if let camera {
+            node.blocksInput = true
+            steps.append(.plane(node, camera: camera, model: model))
+        } else {
+            steps.append(.view(node))
+        }
     }
 
     mutating func finish() {
