@@ -29,11 +29,15 @@ public struct TupleView: XView, _PrimitiveXView {
     }
 }
 
-/// The output of an `if` with no `else` in a builder block.
-public struct OptionalView<Wrapped: XView>: XView, _PrimitiveXView {
+/// The output of an `if` with no `else` in a builder block. A view when its
+/// content is a view; otherwise an `X3DProgram`.
+public struct OptionalView<Wrapped: X3DProgram>: X3DProgram {
     public typealias Body = Never
     let wrapped: Wrapped?
     init(_ wrapped: Wrapped?) { self.wrapped = wrapped }
+}
+
+extension OptionalView: XView, _PrimitiveXView where Wrapped: XView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         guard let wrapped else { return [] }
@@ -42,7 +46,7 @@ public struct OptionalView<Wrapped: XView>: XView, _PrimitiveXView {
 }
 
 /// The output of an `if / else` in a builder block.
-public struct ConditionalView<TrueContent: XView, FalseContent: XView>: XView, _PrimitiveXView {
+public struct ConditionalView<TrueContent: X3DProgram, FalseContent: X3DProgram>: X3DProgram {
     public typealias Body = Never
     enum Storage {
         case first(TrueContent)
@@ -50,7 +54,9 @@ public struct ConditionalView<TrueContent: XView, FalseContent: XView>: XView, _
     }
     let storage: Storage
     init(storage: Storage) { self.storage = storage }
+}
 
+extension ConditionalView: XView, _PrimitiveXView where TrueContent: XView, FalseContent: XView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         switch storage {
@@ -62,10 +68,13 @@ public struct ConditionalView<TrueContent: XView, FalseContent: XView>: XView, _
 
 /// The output of `buildArray` — a `for` loop in a builder block, and the backing
 /// for `ForEach`.
-public struct ArrayView<Element: XView>: XView, _PrimitiveXView {
+public struct ArrayView<Element: X3DProgram>: X3DProgram {
     public typealias Body = Never
     let elements: [Element]
     init(_ elements: [Element]) { self.elements = elements }
+}
+
+extension ArrayView: XView, _PrimitiveXView where Element: XView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         var nodes: [LayoutNode] = []
