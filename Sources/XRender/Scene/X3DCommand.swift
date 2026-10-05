@@ -42,11 +42,13 @@ public enum X3DPass: Sendable, Equatable {
 public struct X3DRenderPass: Sendable, Equatable {
     public var target: X3DTarget
     public var load: X3DLoad
+    public var depth: Bool
     public var items: [X3DRenderItem]
 
-    public init(target: X3DTarget, load: X3DLoad, items: [X3DRenderItem] = []) {
+    public init(target: X3DTarget, load: X3DLoad, depth: Bool = false, items: [X3DRenderItem] = []) {
         self.target = target
         self.load = load
+        self.depth = depth
         self.items = items
     }
 }
@@ -75,8 +77,8 @@ struct X3DGraphAssembly {
             }
         case .compute(let compute):
             graph.passes.append(.compute(compute))
-        case .beginPass(let target, let load):
-            pass = X3DRenderPass(target: target, load: load)
+        case .beginPass(let target, let load, let depth):
+            pass = X3DRenderPass(target: target, load: load, depth: depth)
         case .draw(let draw):
             pass?.items.append(.draw(draw))
         case .blit(let id, let blend):

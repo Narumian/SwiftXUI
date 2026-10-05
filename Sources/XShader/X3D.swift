@@ -84,6 +84,77 @@ public enum X3DBlend: Sendable, Equatable {
     case additive
 }
 
+/// A right-handed perspective camera. `orbit` turns the eye around `target`
+/// about `up` at that many radians per second of renderer time.
+public struct X3DCamera: Sendable, Equatable {
+    public var position: SIMD3<Float>
+    public var target: SIMD3<Float>
+    public var up: SIMD3<Float>
+    public var fieldOfView: Float
+    public var near: Float
+    public var far: Float
+    public var orbit: Float
+
+    public init(position: SIMD3<Float>, target: SIMD3<Float> = .zero, up: SIMD3<Float> = SIMD3(0, 1, 0),
+                fieldOfView: Float = .pi / 3, near: Float = 0.05, far: Float = 100, orbit: Float = 0) {
+        self.position = position
+        self.target = target
+        self.up = up
+        self.fieldOfView = fieldOfView
+        self.near = near
+        self.far = far
+        self.orbit = orbit
+    }
+
+    public func eye(at time: Float) -> SIMD3<Float> {
+        guard orbit != 0 else { return position }
+        let axis = up / max(length(up), 1e-6)
+        let offset = position - target
+        let angle = orbit * time
+        let parallel = axis * dot(axis, offset)
+        let radial = offset - parallel
+        let rotated = radial * cos(angle) + cross(axis, radial) * sin(angle)
+        return target + parallel + rotated
+    }
+
+    /// Column-major view-projection with WebGPU's 0…1 clip depth.
+    public func viewProjection(aspect: Float, time: Float) -> [Float] {
+        let eye = eye(at: time)
+        let z = normalized(eye - target)
+        let x = normalized(cross(up, z))
+        let y = cross(z, x)
+        let view: [Float] = [
+            x.x, y.x, z.x, 0,
+            x.y, y.y, z.y, 0,
+            x.z, y.z, z.z, 0,
+            -dot(x, eye), -dot(y, eye), -dot(z, eye), 1,
+        ]
+        let f = 1 / tan(fieldOfView / 2)
+        let projection: [Float] = [
+            f / max(aspect, 1e-6), 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, far / (near - far), -1,
+            0, 0, near * far / (near - far), 0,
+        ]
+        var result = [Float](repeating: 0, count: 16)
+        for column in 0..<4 {
+            for row in 0..<4 {
+                var sum: Float = 0
+                for k in 0..<4 { sum += projection[k * 4 + row] * view[column * 4 + k] }
+                result[column * 4 + row] = sum
+            }
+        }
+        return result
+    }
+}
+
+private func dot(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float { (a * b).sum() }
+private func length(_ a: SIMD3<Float>) -> Float { dot(a, a).squareRoot() }
+private func normalized(_ a: SIMD3<Float>) -> SIMD3<Float> { a / max(length(a), 1e-6) }
+private func cross(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float> {
+    SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+}
+
 public struct X3DDraw: Sendable, Equatable {
     public var shader: ShaderKey
     public var vertexEntry: String
@@ -94,11 +165,12 @@ public struct X3DDraw: Sendable, Equatable {
     public var blend: X3DBlend
     public var bindings: [X3DBinding]
     public var uniforms: [Float]
+    public var camera: X3DCamera?
 
     public init(shader: ShaderKey, vertexEntry: String, fragmentEntry: String,
                 vertexCount: Int, instanceCount: Int = 1,
                 topology: X3DTopology = .triangleList, blend: X3DBlend = .alpha,
-                bindings: [X3DBinding] = [], uniforms: [Float] = []) {
+                bindings: [X3DBinding] = [], uniforms: [Float] = [], camera: X3DCamera? = nil) {
         self.shader = shader
         self.vertexEntry = vertexEntry
         self.fragmentEntry = fragmentEntry
@@ -108,6 +180,7 @@ public struct X3DDraw: Sendable, Equatable {
         self.blend = blend
         self.bindings = bindings
         self.uniforms = uniforms
+        self.camera = camera
     }
 }
 
@@ -129,7 +202,7 @@ public enum X3DLoad: Sendable, Equatable {
 public enum X3DOp: Sendable, Equatable {
     case resource(X3DResource)
     case compute(X3DCompute)
-    case beginPass(target: X3DTarget, load: X3DLoad)
+    case beginPass(target: X3DTarget, load: X3DLoad, depth: Bool)
     case draw(X3DDraw)
     case blit(X3DResourceID, blend: X3DBlend)
     case endPass

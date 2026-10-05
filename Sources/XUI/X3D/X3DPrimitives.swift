@@ -100,7 +100,7 @@ public struct Draw: X3DProgram, _PrimitiveX3D {
         let resolved = bindings.map { X3DBinding(resource: walk.resource($0.name), access: $0.access) }
         walk.emit(.draw(X3DDraw(shader: shader, vertexEntry: vertexEntry, fragmentEntry: fragmentEntry,
                                 vertexCount: vertices, instanceCount: instances, topology: topology,
-                                blend: blend, bindings: resolved, uniforms: uniforms)))
+                                blend: blend, bindings: resolved, uniforms: uniforms, camera: walk.camera)))
     }
 }
 
@@ -131,12 +131,14 @@ public struct Pass<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
     public typealias Body = Never
     let target: PassTarget
     let load: X3DLoad
+    let depth: Bool
     let content: Content
 
-    public init(into target: PassTarget = .output, load: X3DLoad = .load,
+    public init(into target: PassTarget = .output, load: X3DLoad = .load, depth: Bool = false,
                 @XViewBuilder content: () -> Content) {
         self.target = target
         self.load = load
+        self.depth = depth
         self.content = content()
     }
 
@@ -147,8 +149,31 @@ public struct Pass<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
         case .output: resolved = .output
         case .texture(let name): resolved = .texture(walk.resource(name))
         }
-        walk.emit(.beginPass(target: resolved, load: load))
+        walk.emit(.beginPass(target: resolved, load: load, depth: depth))
         await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
         walk.emit(.endPass)
+    }
+}
+
+/// Draws inside see this camera's view-projection as `x3d.viewProjection`.
+public struct Camera<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
+    public typealias Body = Never
+    let camera: X3DCamera
+    let content: Content
+
+    public init(position: SIMD3<Float>, target: SIMD3<Float> = .zero, fieldOfView: Float = .pi / 3,
+                near: Float = 0.05, far: Float = 100, orbit: Float = 0,
+                @XViewBuilder content: () -> Content) {
+        self.camera = X3DCamera(position: position, target: target, fieldOfView: fieldOfView,
+                                near: near, far: far, orbit: orbit)
+        self.content = content()
+    }
+
+    @XUIActor
+    func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
+        let outer = walk.camera
+        walk.camera = camera
+        await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
+        walk.camera = outer
     }
 }

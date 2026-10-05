@@ -14,6 +14,8 @@ struct X3DFrame {
     dt: f32,
     frame: u32,
     pad: u32,
+    viewProjection: mat4x4<f32>,
+    cameraPosition: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> x3d: X3DFrame;
 @group(0) @binding(1) var<storage, read> x3dParams: array<f32>;
@@ -93,6 +95,8 @@ private struct X3DViewport {
     var view: WGPUTextureView
     var format: WGPUTextureFormat
     var x: UInt32, y: UInt32, width: UInt32, height: UInt32
+    var attachmentWidth: UInt32, attachmentHeight: UInt32
+    var depth: WGPUTextureView?
 }
 
 extension WGPURenderer {
@@ -135,6 +139,7 @@ extension WGPURenderer {
         for layout in x3dGroupLayouts.values { wgpuBindGroupLayoutRelease(layout) }
         for record in x3dResources.values { record.release() }
         if let x3dSampler { wgpuSamplerRelease(x3dSampler) }
+        releaseX3DDepthTargets()
         x3dPipelines.removeAll()
         x3dComputePipelines.removeAll()
         x3dModules.removeAll()
@@ -151,12 +156,13 @@ extension WGPURenderer {
         let x = min(x3d.rect.x, configuredWidth), y = min(x3d.rect.y, configuredHeight)
         let output = X3DViewport(view: target.view, format: surfaceFormat, x: x, y: y,
                                  width: min(x3d.rect.width, configuredWidth - x),
-                                 height: min(x3d.rect.height, configuredHeight - y))
+                                 height: min(x3d.rect.height, configuredHeight - y),
+                                 attachmentWidth: configuredWidth, attachmentHeight: configuredHeight)
         guard output.width > 0, output.height > 0 else { return }
         for resource in x3d.graph.resources {
             ensureX3DResource(resource, outputWidth: output.width, outputHeight: output.height)
         }
-        beginX3DPass(target.view, load: .clear(SIMD4(0, 0, 0, 0)), encoder: encoder).map(endX3DPass)
+        beginX3DPass(target.view, load: .clear(SIMD4(0, 0, 0, 0)), depth: nil, encoder: encoder).map(endX3DPass)
 
         var viewIndex = 0
         for pass in x3d.graph.passes {
@@ -164,16 +170,19 @@ extension WGPURenderer {
             case .compute(let compute):
                 encodeX3DCompute(compute, width: output.width, height: output.height, encoder: encoder)
             case .render(let render):
-                let viewport: X3DViewport?
+                var viewport: X3DViewport?
                 switch render.target {
                 case .output: viewport = output
                 case .texture(let id): viewport = x3dTextureViewport(id)
+                }
+                if render.depth, let attached = viewport {
+                    viewport?.depth = x3dDepthView(width: attached.attachmentWidth, height: attached.attachmentHeight)
                 }
                 guard let viewport else {
                     viewIndex += render.items.filter { if case .view = $0 { return true } else { return false } }.count
                     continue
                 }
-                var active = beginX3DPass(viewport.view, load: render.load, encoder: encoder)
+                var active = beginX3DPass(viewport.view, load: render.load, depth: viewport.depth, encoder: encoder)
                 if case .fade(let amount) = render.load, let active {
                     let fade = X3DDraw(shader: x3dBuiltinKey, vertexEntry: "x3d_fullscreen", fragmentEntry: "x3d_fade",
                                        vertexCount: 3, uniforms: [amount])
@@ -195,7 +204,8 @@ extension WGPURenderer {
                         let frame = x3d.views[viewIndex]
                         drawScene(frame, geometry: makeTransientGeometryBuffers(for: frame), into: target.view,
                                   encoder: encoder, clear: nil, time: x3dTime, depth: depth + 1)
-                        active = beginX3DPass(viewport.view, load: .load, encoder: encoder)
+                        active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
+                                              clearDepth: false, encoder: encoder)
                     }
                 }
                 active.map(endX3DPass)
@@ -275,7 +285,8 @@ extension WGPURenderer {
             rendererLog("[X3D] pass target \(id.name) is not a declared texture")
             return nil
         }
-        return X3DViewport(view: view, format: Self.textureFormat(format), x: 0, y: 0, width: width, height: height)
+        return X3DViewport(view: view, format: Self.textureFormat(format), x: 0, y: 0, width: width, height: height,
+                           attachmentWidth: width, attachmentHeight: height)
     }
 
     private static func textureFormat(_ format: X3DFormat) -> WGPUTextureFormat {
@@ -288,8 +299,36 @@ extension WGPURenderer {
 
     // MARK: passes
 
-    private func beginX3DPass(_ view: WGPUTextureView, load: X3DLoad,
-                              encoder: WGPUCommandEncoder) -> WGPURenderPassEncoder? {
+    private func x3dDepthView(width: UInt32, height: UInt32) -> WGPUTextureView? {
+        let key = "\(width)x\(height)"
+        if let target = x3dDepthTargets[key] { return target.view }
+        if x3dDepthTargets.count >= 4 { releaseX3DDepthTargets() }
+        var descriptor = WGPUTextureDescriptor()
+        descriptor.usage = WGPUTextureUsage_RenderAttachment
+        descriptor.dimension = WGPUTextureDimension_2D
+        descriptor.size = WGPUExtent3D(width: width, height: height, depthOrArrayLayers: 1)
+        descriptor.format = WGPUTextureFormat_Depth32Float
+        descriptor.mipLevelCount = 1
+        descriptor.sampleCount = 1
+        guard let texture = wgpuDeviceCreateTexture(device, &descriptor) else { return nil }
+        guard let view = wgpuTextureCreateView(texture, nil) else {
+            wgpuTextureRelease(texture)
+            return nil
+        }
+        x3dDepthTargets[key] = (texture, view)
+        return view
+    }
+
+    func releaseX3DDepthTargets() {
+        for target in x3dDepthTargets.values {
+            wgpuTextureViewRelease(target.view)
+            wgpuTextureRelease(target.texture)
+        }
+        x3dDepthTargets.removeAll()
+    }
+
+    private func beginX3DPass(_ view: WGPUTextureView, load: X3DLoad, depth: WGPUTextureView?,
+                              clearDepth: Bool = true, encoder: WGPUCommandEncoder) -> WGPURenderPassEncoder? {
         var attachment = WGPURenderPassColorAttachment()
         attachment.view = view
         attachment.depthSlice = UInt32.max
@@ -302,11 +341,19 @@ extension WGPURenderer {
         case .load, .fade:
             attachment.loadOp = WGPULoadOp_Load
         }
+        var depthAttachment = WGPURenderPassDepthStencilAttachment()
+        depthAttachment.view = depth
+        depthAttachment.depthLoadOp = clearDepth ? WGPULoadOp_Clear : WGPULoadOp_Load
+        depthAttachment.depthStoreOp = WGPUStoreOp_Store
+        depthAttachment.depthClearValue = 1
         return withUnsafePointer(to: &attachment) { pointer in
-            var descriptor = WGPURenderPassDescriptor()
-            descriptor.colorAttachmentCount = 1
-            descriptor.colorAttachments = pointer
-            return wgpuCommandEncoderBeginRenderPass(encoder, &descriptor)
+            withUnsafePointer(to: &depthAttachment) { depthPointer in
+                var descriptor = WGPURenderPassDescriptor()
+                descriptor.colorAttachmentCount = 1
+                descriptor.colorAttachments = pointer
+                descriptor.depthStencilAttachment = depth == nil ? nil : depthPointer
+                return wgpuCommandEncoderBeginRenderPass(encoder, &descriptor)
+            }
         }
     }
 
@@ -319,9 +366,11 @@ extension WGPURenderer {
                                pass: WGPURenderPassEncoder) {
         guard let layout = x3dLayout(for: draw.bindings, compute: false),
               let pipeline = x3dRenderPipeline(for: draw, blend: blend, format: viewport.format,
+                                               depth: viewport.depth != nil,
                                                signature: layout.signature, layout: layout.pipeline),
               let frameGroup = x3dFrameGroup(width: viewport.width, height: viewport.height,
-                                             x: viewport.x, y: viewport.y, params: draw.uniforms) else { return }
+                                             x: viewport.x, y: viewport.y, params: draw.uniforms,
+                                             camera: draw.camera) else { return }
         wgpuRenderPassEncoderSetPipeline(pass, pipeline)
         wgpuRenderPassEncoderSetBindGroup(pass, 0, frameGroup, 0, nil)
         if let resourceLayout = layout.resources {
@@ -339,7 +388,8 @@ extension WGPURenderer {
         guard compute.threads > 0,
               let layout = x3dLayout(for: compute.bindings, compute: true),
               let pipeline = x3dComputePipeline(for: compute, signature: layout.signature, layout: layout.pipeline),
-              let frameGroup = x3dFrameGroup(width: width, height: height, x: 0, y: 0, params: compute.uniforms)
+              let frameGroup = x3dFrameGroup(width: width, height: height, x: 0, y: 0, params: compute.uniforms,
+                                             camera: nil)
         else { return }
         var resourceGroup: WGPUBindGroup?
         if let resourceLayout = layout.resources {
@@ -358,7 +408,7 @@ extension WGPURenderer {
     // MARK: bind groups
 
     private func x3dFrameGroup(width: UInt32, height: UInt32, x: UInt32, y: UInt32,
-                               params: [Float]) -> WGPUBindGroup? {
+                               params: [Float], camera: X3DCamera?) -> WGPUBindGroup? {
         guard let layout = x3dFrameLayout(), let sampler = ensureX3DSampler() else { return nil }
         var frame: [UInt32] = [
             Float(width).bitPattern, Float(height).bitPattern,
@@ -366,6 +416,11 @@ extension WGPURenderer {
             x3dTime.bitPattern, x3dDeltaTime.bitPattern,
             x3dFrameIndex, 0,
         ]
+        let identity: [Float] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        let aspect = Float(width) / Float(max(height, 1))
+        frame += (camera?.viewProjection(aspect: aspect, time: x3dTime) ?? identity).map(\.bitPattern)
+        let eye = camera?.eye(at: x3dTime) ?? .zero
+        frame += [eye.x.bitPattern, eye.y.bitPattern, eye.z.bitPattern, Float(1).bitPattern]
         var values = params
         while values.count < 4 { values.append(0) }
         guard let frameBuffer = makeX3DTransientBuffer(&frame, usage: WGPUBufferUsage_Uniform),
@@ -558,9 +613,10 @@ extension WGPURenderer {
     }
 
     private func x3dRenderPipeline(for draw: X3DDraw, blend mode: X3DBlendState, format: WGPUTextureFormat,
-                                   signature: String, layout: WGPUPipelineLayout) -> WGPURenderPipeline? {
+                                   depth: Bool, signature: String,
+                                   layout: WGPUPipelineLayout) -> WGPURenderPipeline? {
         let key = "\(draw.shader.rawValue)|\(draw.vertexEntry)|\(draw.fragmentEntry)|\(draw.topology)"
-            + "|\(mode)|\(format.rawValue)|\(signature)"
+            + "|\(mode)|\(format.rawValue)|\(depth)|\(signature)"
         if let pipeline = x3dPipelines[key] { return pipeline }
         guard !x3dFailures.contains(key), let module = x3dModule(for: draw.shader) else { return nil }
         let pipeline = x3dChecked(key, release: { (pipeline: WGPURenderPipeline) in wgpuRenderPipelineRelease(pipeline) }) { withWGPUString(draw.vertexEntry) { vertexEntry in
@@ -608,7 +664,23 @@ extension WGPURenderer {
                             descriptor.multisample.count = 1
                             descriptor.multisample.mask = UInt32.max
                             descriptor.fragment = fragmentPointer
-                            return wgpuDeviceCreateRenderPipeline(device, &descriptor)
+                            guard depth else { return wgpuDeviceCreateRenderPipeline(device, &descriptor) }
+                            var depthState = WGPUDepthStencilState()
+                            depthState.format = WGPUTextureFormat_Depth32Float
+                            let builtin = draw.shader == x3dBuiltinKey
+                            depthState.depthWriteEnabled = mode == .opaque && !builtin
+                                ? WGPUOptionalBool_True : WGPUOptionalBool_False
+                            depthState.depthCompare = builtin ? WGPUCompareFunction_Always : WGPUCompareFunction_Less
+                            for face in [\WGPUDepthStencilState.stencilFront, \WGPUDepthStencilState.stencilBack] {
+                                depthState[keyPath: face].compare = WGPUCompareFunction_Always
+                                depthState[keyPath: face].failOp = WGPUStencilOperation_Keep
+                                depthState[keyPath: face].depthFailOp = WGPUStencilOperation_Keep
+                                depthState[keyPath: face].passOp = WGPUStencilOperation_Keep
+                            }
+                            return withUnsafePointer(to: &depthState) { depthPointer in
+                                descriptor.depthStencil = depthPointer
+                                return wgpuDeviceCreateRenderPipeline(device, &descriptor)
+                            }
                         }
                     }
                 }

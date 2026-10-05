@@ -11,6 +11,7 @@ enum X3DStep {
 struct X3DWalk {
     private(set) var steps: [X3DStep] = []
     var scope: Int
+    var camera: X3DCamera?
     private var explicitPassDepth = 0
     private var implicitPassOpen = false
 
@@ -47,7 +48,7 @@ struct X3DWalk {
     private mutating func openImplicitPassIfNeeded() {
         guard explicitPassDepth == 0, !implicitPassOpen else { return }
         implicitPassOpen = true
-        steps.append(.op(.beginPass(target: .output, load: .load)))
+        steps.append(.op(.beginPass(target: .output, load: .load, depth: false)))
     }
 
     private mutating func closeImplicitPass() {

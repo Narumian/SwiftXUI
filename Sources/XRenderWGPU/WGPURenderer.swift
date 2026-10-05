@@ -92,6 +92,7 @@ public final class WGPURenderer: XRenderer {
     var x3dResources: [X3DResourceID: X3DResourceRecord] = [:]
     var x3dSampler: WGPUSampler?
     var x3dFailures: Set<String> = []
+    var x3dDepthTargets: [String: (texture: WGPUTexture, view: WGPUTextureView)] = [:]
     var x3dFrameIndex: UInt32 = 0
     var x3dLastTime: Float?
     var x3dTime: Float = 0
