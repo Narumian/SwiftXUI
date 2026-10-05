@@ -21,6 +21,8 @@ public enum X3DFormat: String, Sendable, Equatable {
 
 public enum X3DSize: Sendable, Equatable {
     case target
+    /// The target size times `factor`, at least one pixel.
+    case scaled(Float)
     case fixed(width: Int, height: Int)
 }
 

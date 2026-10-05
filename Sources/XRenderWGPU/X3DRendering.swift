@@ -263,6 +263,9 @@ extension WGPURenderer {
     private func x3dTextureSize(_ size: X3DSize, _ outputWidth: UInt32, _ outputHeight: UInt32) -> (UInt32, UInt32) {
         switch size {
         case .target: return (outputWidth, outputHeight)
+        case .scaled(let factor):
+            return (UInt32(max(1, (Float(outputWidth) * factor).rounded())),
+                    UInt32(max(1, (Float(outputHeight) * factor).rounded())))
         case .fixed(let width, let height): return (UInt32(max(1, width)), UInt32(max(1, height)))
         }
     }

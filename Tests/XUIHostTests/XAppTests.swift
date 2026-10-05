@@ -89,9 +89,10 @@ private final class RecordingRenderer: XRenderer {
         at: 4,
         framebuffer: RenderSize(width: 1280, height: 720)
     )
+    let next = await driver.frame(at: 4.5, framebuffer: RenderSize(width: 1280, height: 720))
 
-    #expect(renderer.frames == [compiled])
-    #expect(renderer.times == [4])
+    #expect(renderer.frames == [compiled, next])
+    #expect(renderer.times == [0, 0.5])
     #expect(compiled.draws.count == 1)
     #expect(compiled.shapeVertices.count == 36)
 }

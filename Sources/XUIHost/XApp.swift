@@ -77,6 +77,8 @@ public final class XAppDriver<App: XApp> {
         self.renderer = renderer
     }
 
+    private var epoch: Double?
+
     @discardableResult
     public func frame(
         at time: Double,
@@ -93,7 +95,9 @@ public final class XAppDriver<App: XApp> {
             fit: fit,
             fonts: session.host.fonts
         )
-        renderer.render(compiled, time: Float(time))
+        let start = epoch ?? time
+        epoch = start
+        renderer.render(compiled, time: Float(time - start))
         return compiled
     }
 }
