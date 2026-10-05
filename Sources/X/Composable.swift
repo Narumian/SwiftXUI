@@ -6,22 +6,24 @@
 //
 
 
-
+protocol ComposableDomain<Domain> {
+    associatedtype Domain
+}
 
 public protocol Composable<Domain>: Sendable {
     associatedtype Domain
     associatedtype Body: Composable<Domain>
 
-    var body: Body { get }
+    @ComposableBuilder<Domain> var body: Body { get }
 
-    func lower(into output: inout Domain)
+    func process(into output: inout Domain)
 }
 
 
 
 public extension Composable {
-    func lower(into output: inout Domain) {
-        body.lower(into: &output)
+    func process(into output: inout Domain) {
+        body.process(into: &output)
     }
 }
 
@@ -32,7 +34,7 @@ public struct Empty<Domain>: Composable {
 
     public var body: Empty<Domain> { self }
 
-    public func lower(into output: inout Domain) {
+    public func process(into output: inout Domain) {
     }
 }
 
@@ -53,9 +55,9 @@ public struct Tuple2<
 
     public var body: Empty<Domain> { Empty() }
 
-    public func lower(into output: inout Domain) {
-        first.lower(into: &output)
-        second.lower(into: &output)
+    public func process(into output: inout Domain) {
+        first.process(into: &output)
+        second.process(into: &output)
     }
 }
 
@@ -70,8 +72,8 @@ public struct OptionalPart<Domain, Part: Composable<Domain>>: Composable {
 
     public var body: Empty<Domain> { Empty() }
 
-    public func lower(into output: inout Domain) {
-        part?.lower(into: &output)
+    public func process(into output: inout Domain) {
+        part?.process(into: &output)
     }
 }
 
@@ -87,12 +89,12 @@ public enum EitherPart<
 
     public var body: Empty<Domain> { Empty() }
 
-    public func lower(into output: inout Domain) {
+    public func process(into output: inout Domain) {
         switch self {
         case .first(let value):
-            value.lower(into: &output)
+            value.process(into: &output)
         case .second(let value):
-            value.lower(into: &output)
+            value.process(into: &output)
         }
     }
 }
@@ -108,9 +110,9 @@ public struct Group<Domain>: Composable {
 
     public var body: Empty<Domain> { Empty() }
 
-    public func lower(into output: inout Domain) {
+    public func process(into output: inout Domain) {
         for child in children {
-            child.lower(into: &output)
+            child.process(into: &output)
         }
     }
 }

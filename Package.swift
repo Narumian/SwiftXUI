@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "XShader", targets: ["XShader"]),
         .library(name: "XRender", targets: ["XRender"]),
         .library(name: "XRenderWGPU", targets: ["XRenderWGPU"]),
+        .library(name: "XRenderApple", targets: ["XRenderApple"]),
         .library(name: "XUI", targets: ["XUI"]),
         .library(name: "XUIHost", targets: ["XUIHost"]),
         .executable(name: "xview-bench", targets: ["xview-bench"]),
@@ -61,6 +62,18 @@ let package = Package(
                 "CWGPU",
             ],
             swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedFramework("Metal"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("IOSurface", .when(platforms: [.iOS])),
+                .linkedLibrary("c++"),
+            ]
+        ),
+        .target(
+            name: "XRenderApple",
+            dependencies: ["CWGPU"],
+            path: "Sources/XRenderApple",
+            publicHeadersPath: "include",
             linkerSettings: [
                 .linkedFramework("Metal"),
                 .linkedFramework("QuartzCore"),

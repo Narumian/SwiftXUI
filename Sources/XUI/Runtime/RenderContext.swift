@@ -121,6 +121,15 @@ public final class RenderContext {
         guard acceptsInput else { return }
         let scoped = focusScopeStack.last.map { XControl(id: control.id, label: control.label, scope: $0) } ?? control
         controls.append(ResolvedControl(control: scoped, rect: rect))
+        _EnvironmentObjectContext.currentOrEmpty
+            .object(FocusStore.self)?
+            .recordControl(scoped, rect: rect)
+    }
+
+    func addScrollViewport(id: String, rect: Rect) {
+        _EnvironmentObjectContext.currentOrEmpty
+            .object(FocusStore.self)?
+            .recordScrollView(id: id, rect: rect)
     }
 
     func addTapGesture(_ rect: Rect, id: String?, label: String?, action: @escaping () -> Void) {

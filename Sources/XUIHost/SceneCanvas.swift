@@ -15,6 +15,9 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     public var fonts: FontBook?
     /// Resolves renderer-agnostic `XUI.Image` sources into XRender textures.
     public var images: [ImageSource: TextureID]
+    /// Optional non-blocking resolver for sources that are not ready yet.
+    /// The resolver may return a placeholder and schedule the real upload.
+    public var imageResolver: (@Sendable (ImageSource) -> TextureID?)?
     /// Layer every XUI primitive paints into unless a leaf overrides it.
     public var layer: RenderLayer
 
@@ -23,11 +26,13 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
         background: RenderColor = RenderColor(0, 0, 0, 0),
         fonts: FontBook? = nil,
         images: [ImageSource: TextureID] = [:],
+        imageResolver: (@Sendable (ImageSource) -> TextureID?)? = nil,
         layer: RenderLayer = .ui
     ) {
         self.builder = SceneBuilder(size: size, background: background)
         self.fonts = fonts
         self.images = images
+        self.imageResolver = imageResolver
         self.layer = layer
     }
 
@@ -115,7 +120,7 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     }
 
     public func drawImage(_ source: ImageSource, in rect: XUI.Rect, opacity: Double) {
-        guard let texture = images[source] ?? source.textureID else { return }
+        guard let texture = imageResolver?(source) ?? images[source] ?? source.textureID else { return }
         builder.sprite(texture, in: rect.render, opacity: Float(opacity), layer: layer)
     }
 
@@ -149,7 +154,8 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
         } else {
             outlineColor = RenderColor(0, 0, 0, 0)
         }
-        builder.text(string, at: origin, scale: scale, color: color.render, layer: layer, font: font,
+        builder.text(string, at: origin, scale: scale, color: color.render,
+                     centeredHeight: Float(rect.height), layer: layer, font: font,
                      outline: outlineWidth, outlineColor: outlineColor)
     }
 

@@ -18,7 +18,7 @@ public enum TextMesher {
         // path data below), so their ink center is always exactly 3.5 — this
         // mirrors the atlas path's real-ink-bounds centering with VectorFont's
         // own known metric instead of a measured one.
-        let originY = command.centeredHeight.map { command.origin.y + $0 * 0.5 - 3.5 * scale } ?? command.origin.y
+        let originY = command.origin.y + (command.centeredHeight ?? 9 * scale) * 0.5 - 3.5 * scale
 
         var out: [Float] = []
         var cursor = startX

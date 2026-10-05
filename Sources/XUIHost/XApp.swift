@@ -44,6 +44,7 @@ public extension XApp {
 public final class XAppSession<App: XApp> {
     public let app: App
     public let host: XUIHost
+    public private(set) var lastFrame: XUIFrame?
 
     public init(_ app: App) {
         self.app = app
@@ -57,7 +58,15 @@ public final class XAppSession<App: XApp> {
 
     @discardableResult
     public func render(time: Double? = nil) async -> XUIFrame {
-        await host.render(app.body, time: time)
+        let frame = await host.render(app.body, time: time)
+        lastFrame = frame
+        return frame
+    }
+
+    @discardableResult
+    public func pointer(_ event: PointerEvent) -> Bool {
+        guard let lastFrame else { return false }
+        return host.pointer(event, in: lastFrame)
     }
 }
 

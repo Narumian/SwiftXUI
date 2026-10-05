@@ -23,6 +23,7 @@ public protocol XAppDelegate: AnyObject, Sendable {
     func applicationWillResignActive()
     func applicationDidEnterBackground()
     func applicationWillTerminate()
+    @XUIActor func update(dt: Double) async
 }
 
 public extension XAppDelegate {
@@ -31,6 +32,7 @@ public extension XAppDelegate {
     func applicationWillResignActive() {}
     func applicationDidEnterBackground() {}
     func applicationWillTerminate() {}
+    @XUIActor func update(dt: Double) async {}
 }
 
 /// Owns an app driver and translates platform lifecycle events into
@@ -45,6 +47,7 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public private(set) var isInBackground = false
 
     private var hasLaunched = false
+    private var lastFrameTime: Double?
 
     public init(
         _ app: App,
@@ -103,6 +106,14 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) async -> CompiledFrame {
-        await driver.frame(at: time, framebuffer: framebuffer, fit: fit)
+        let dt = lastFrameTime.map { min(max(0, time - $0), 0.1) } ?? 0
+        lastFrameTime = time
+        if isActive { await app.delegate.update(dt: dt) }
+        return await driver.frame(at: time, framebuffer: framebuffer, fit: fit)
+    }
+
+    @discardableResult
+    public func pointer(_ event: PointerEvent) -> Bool {
+        driver.session.pointer(event)
     }
 }

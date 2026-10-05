@@ -46,6 +46,9 @@ enum LayoutEngine {
         if let control = node.control {
             context.addControl(control, rect: node.frame)
         }
+        if let scrollViewportID = node.scrollViewportID {
+            context.addScrollViewport(id: scrollViewportID, rect: node.frame)
+        }
         if let action = node.tapGesture, !node.tapGestureAfterChildren {
             context.addTapGesture(node.frame, id: node.tapGestureID, label: node.tapGestureLabel, action: action)
         }

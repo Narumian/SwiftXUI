@@ -75,6 +75,8 @@ final class LayoutNode {
     var shader: AnyShader?
     /// Render-only clipping scoped to this node's resolved frame.
     var clipsToBounds = false
+    /// A scrolling viewport exported for focus-driven auto-scrolling.
+    var scrollViewportID: String?
     /// Content that can only be built once the node's resolved frame is known
     /// (`GeometryReader`). The engine runs this during `place`.
     var lazyChildren: (@XUIActor (Rect, LayoutContext) async -> [LayoutNode])?

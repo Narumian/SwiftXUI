@@ -374,12 +374,9 @@ public enum SceneCompiler {
             lineWidth += (page.glyphs[chars[i]]?.advance ?? page.glyphs[" "]?.advance ?? page.pixelSize * 0.5) * s
         }
         var penX = text.centeredWidth.map { text.origin.x + ($0 - lineWidth) * 0.5 } ?? text.origin.x
-        // origin.y is the top of the em (matches VectorFont); baseline sits a
-        // cap-height below it — unless `centeredHeight` asks for true
-        // vertical centering, in which case the baseline is derived from
-        // this string's actual measured ink bounds so it lands dead-center
-        // regardless of the font's real ascent/descent/cap-height shape.
-        let baselineY: Float
+        // Always ink-centred: the baseline comes from this string's measured
+        // ink bounds inside the box starting at origin.y. Without an explicit
+        // centeredHeight the box is one atlas line, matching measureText.
         var inkTop: Float?
         var inkBottom: Float?
         for i in chars.indices {
@@ -388,12 +385,9 @@ public enum SceneCompiler {
             inkTop = max(inkTop ?? g.top, g.top)
             inkBottom = min(inkBottom ?? bottom, bottom)
         }
-        if let boxHeight = text.centeredHeight, let top = inkTop, let bottom = inkBottom {
-            let inkCenterAboveBaseline = (top + bottom) * 0.5 * s
-            baselineY = text.origin.y + boxHeight * 0.5 + inkCenterAboveBaseline
-        } else {
-            baselineY = text.origin.y + 7 * text.scale
-        }
+        let boxHeight = text.centeredHeight ?? atlas.lineHeight * s
+        let inkCenterAboveBaseline = ((inkTop ?? 0) + (inkBottom ?? 0)) * 0.5 * s
+        let baselineY = text.origin.y + boxHeight * 0.5 + inkCenterAboveBaseline
         let a = text.color.alpha
         let tint = (text.color.red * a, text.color.green * a, text.color.blue * a, a)
         let outlineAlpha = text.outlineColor.alpha

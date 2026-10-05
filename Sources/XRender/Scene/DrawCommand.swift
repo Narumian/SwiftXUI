@@ -144,13 +144,8 @@ public struct TextCommand: Sendable, Equatable {
     public var outline: Float
     public var outlineColor: RenderColor
     public var centeredWidth: Float?
-    /// When set, the baseline is derived from this string's *actual measured
-    /// ink bounds* (via the font atlas, or `TextMesher`'s known fixed glyph
-    /// span) so its true vertical center lands at `origin.y + centeredHeight
-    /// / 2` — instead of the fixed "baseline sits one nominal cap-height
-    /// below origin.y" rule, which only happens to look centered for the one
-    /// font/script mix it was eyeballed against. `origin.y` is this box's top
-    /// edge, mirroring how `centeredWidth` treats `origin.x` as the left edge.
+    /// Height of the box starting at `origin.y` that the text is vertically
+    /// centred in, by its actual ink bounds. Defaults to one line when nil.
     public var centeredHeight: Float?
     public var transform: Transform2D
     public var layer: RenderLayer
