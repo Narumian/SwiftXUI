@@ -15,14 +15,14 @@ public final class WGPURenderer: XRenderer {
     /// offscreen textures via `renderToImage`.
     private let surface: WGPUSurface?
     private let adapter: WGPUAdapter
-    private let device: WGPUDevice
-    private let queue: WGPUQueue
+    let device: WGPUDevice
+    let queue: WGPUQueue
     private let shader: WGPUShaderModule
     private let pipeline: WGPURenderPipeline
 
-    private let surfaceFormat = WGPUTextureFormat_BGRA8Unorm
-    private var configuredWidth: UInt32 = 0
-    private var configuredHeight: UInt32 = 0
+    let surfaceFormat = WGPUTextureFormat_BGRA8Unorm
+    var configuredWidth: UInt32 = 0
+    var configuredHeight: UInt32 = 0
     private var vertexBuffer: WGPUBuffer?
     private var vertexBufferCapacity = 0
 
@@ -62,11 +62,11 @@ public final class WGPURenderer: XRenderer {
     private var sceneTextureWidth: UInt32 = 0
     private var sceneTextureHeight: UInt32 = 0
 
-    private struct LayerTarget {
+    struct LayerTarget {
         var texture: WGPUTexture
         var view: WGPUTextureView
     }
-    private struct GeometryBuffers {
+    struct GeometryBuffers {
         var shapes: WGPUBuffer?
         var sprites: WGPUBuffer?
         var fonts: WGPUBuffer?
@@ -76,12 +76,22 @@ public final class WGPURenderer: XRenderer {
     private var shaderLayerTargets: [LayerTarget] = []
     /// Layer composites need independent uniforms/bind groups because several
     /// passes can be encoded before the command buffer is submitted.
-    private var transientPostBindGroups: [WGPUBindGroup] = []
-    private var transientPostUniformBuffers: [WGPUBuffer] = []
+    var transientPostBindGroups: [WGPUBindGroup] = []
+    var transientPostUniformBuffers: [WGPUBuffer] = []
     /// Layer geometry cannot reuse the root frame's buffers: all passes run
     /// after command-buffer submission, so a later CPU upload would otherwise
     /// overwrite vertices referenced by an earlier encoded pass.
     private var transientGeometryBuffers: [WGPUBuffer] = []
+
+    var x3dShaderSources: [ShaderKey: String] = [:]
+    var x3dModules: [ShaderKey: WGPUShaderModule] = [:]
+    var x3dPipelines: [String: WGPURenderPipeline] = [:]
+    var x3dGroupLayout: WGPUBindGroupLayout?
+    var x3dPipelineLayout: WGPUPipelineLayout?
+    var x3dFrameIndex: UInt32 = 0
+    var x3dLastTime: Float?
+    var x3dTime: Float = 0
+    var x3dDeltaTime: Float = 0
 
     /// The closure is the sole vendor seam. It receives the WebGPU instance
     /// and creates a surface from the vendor window/layer handle.
@@ -166,6 +176,7 @@ public final class WGPURenderer: XRenderer {
         releaseShaderLayerTargets()
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
+        releaseX3DResources()
         if let vertexBuffer { wgpuBufferRelease(vertexBuffer) }
         wgpuRenderPipelineRelease(pipeline)
         wgpuShaderModuleRelease(shader)
@@ -438,12 +449,13 @@ public final class WGPURenderer: XRenderer {
                              into surfaceView: WGPUTextureView, encoder: WGPUCommandEncoder) {
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
+        advanceX3DClock(time)
         _ = upload(frame.shapeVertices, into: &vertexBuffer, capacity: &vertexBufferCapacity)
         _ = upload(frame.spriteVertices, into: &spriteVertexBuffer, capacity: &spriteVertexBufferCapacity)
         _ = upload(frame.fontVertices, into: &fontVertexBuffer, capacity: &fontVertexBufferCapacity)
 
         let effectiveIntensity = postIntensity * frame.postIntensity
-        let usePost = (effectiveIntensity > 0 || !frame.shaderRegions.isEmpty || !frame.shaderLayers.isEmpty)
+        let usePost = (effectiveIntensity > 0 || !frame.shaderRegions.isEmpty || !frame.shaderLayers.isEmpty || !frame.x3d.isEmpty)
             && ensurePostResources()
         let sceneTarget = usePost ? (sceneView ?? surfaceView) : surfaceView
 
@@ -553,12 +565,12 @@ public final class WGPURenderer: XRenderer {
         return box.done && box.status == WGPUMapAsyncStatus_Success
     }
 
-    private func drawScene(
+    func drawScene(
         _ frame: CompiledFrame,
         geometry: GeometryBuffers,
         into targetView: WGPUTextureView,
         encoder: WGPUCommandEncoder,
-        clear: RenderColor,
+        clear: RenderColor?,
         time: Float,
         depth: Int
     ) {
@@ -569,9 +581,10 @@ public final class WGPURenderer: XRenderer {
             attachment.depthSlice = UInt32.max
             attachment.loadOp = load ? WGPULoadOp_Load : WGPULoadOp_Clear
             attachment.storeOp = WGPUStoreOp_Store
+            let clearColor = clear ?? RenderColor(0, 0, 0, 0)
             attachment.clearValue = WGPUColor(
-                r: Double(clear.red), g: Double(clear.green),
-                b: Double(clear.blue), a: Double(clear.alpha)
+                r: Double(clearColor.red), g: Double(clearColor.green),
+                b: Double(clearColor.blue), a: Double(clearColor.alpha)
             )
             return withUnsafePointer(to: &attachment) { attachmentPointer in
                 var descriptor = WGPURenderPassDescriptor()
@@ -580,7 +593,7 @@ public final class WGPURenderer: XRenderer {
                 return wgpuCommandEncoderBeginRenderPass(encoder, &descriptor)
             }
         }
-        var pass = beginPass(load: false)
+        var pass = beginPass(load: clear == nil)
         guard pass != nil else { return }
         for draw in frame.draws {
             guard let activePass = pass else { return }
@@ -614,8 +627,13 @@ public final class WGPURenderer: XRenderer {
                 // The command path preserves material order now. Execution
                 // belongs to the forthcoming XUI-native material renderer.
                 continue
-            case .x3d:
-                continue
+            case .x3d(let index):
+                guard frame.x3d.indices.contains(index), let activePass = pass else { continue }
+                wgpuRenderPassEncoderEnd(activePass)
+                pass = nil
+                encodeX3D(frame.x3d[index], parent: targetView, encoder: encoder, depth: depth)
+                pass = beginPass(load: true)
+                guard pass != nil else { return }
             case .shaderLayer(let index):
                 guard frame.shaderLayers.indices.contains(index), let activePass = pass else { continue }
                 wgpuRenderPassEncoderEnd(activePass)
@@ -687,7 +705,7 @@ public final class WGPURenderer: XRenderer {
 
     /// Apply one `.layer` shader to an isolated transparent texture and alpha
     /// composite it over the already-painted parent target.
-    private func runLayerPost(
+    func runLayerPost(
         into targetView: WGPUTextureView,
         sourceView: WGPUTextureView,
         time: Float,
@@ -750,7 +768,7 @@ public final class WGPURenderer: XRenderer {
         }
     }
 
-    private func ensureShaderLayerTarget(at depth: Int) -> LayerTarget? {
+    func ensureShaderLayerTarget(at depth: Int) -> LayerTarget? {
         while shaderLayerTargets.count <= depth {
             var descriptor = WGPUTextureDescriptor()
             descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
@@ -784,7 +802,7 @@ public final class WGPURenderer: XRenderer {
         transientPostUniformBuffers.removeAll(keepingCapacity: true)
     }
 
-    private func makeTransientGeometryBuffers(for frame: CompiledFrame) -> GeometryBuffers {
+    func makeTransientGeometryBuffers(for frame: CompiledFrame) -> GeometryBuffers {
         GeometryBuffers(
             shapes: makeTransientVertexBuffer(frame.shapeVertices),
             sprites: makeTransientVertexBuffer(frame.spriteVertices),
@@ -819,7 +837,7 @@ public final class WGPURenderer: XRenderer {
         }
     }
 
-    private func applyScissor(_ pass: WGPURenderPassEncoder, _ rect: PixelRect?) {
+    func applyScissor(_ pass: WGPURenderPassEncoder, _ rect: PixelRect?) {
         guard let rect else {
             wgpuRenderPassEncoderSetScissorRect(pass, 0, 0, configuredWidth, configuredHeight)
             return
@@ -1016,7 +1034,7 @@ public final class WGPURenderer: XRenderer {
         return postPipeline != nil && postBindGroup != nil
     }
 
-    private static func makeShaderModule(device: WGPUDevice, wgsl: String) -> WGPUShaderModule? {
+    static func makeShaderModule(device: WGPUDevice, wgsl: String) -> WGPUShaderModule? {
         withWGPUString(wgsl) { code in
             var source = WGPUShaderSourceWGSL()
             source.chain.sType = WGPUSType_ShaderSourceWGSL
