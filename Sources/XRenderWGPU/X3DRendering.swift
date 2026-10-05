@@ -143,9 +143,14 @@ extension WGPURenderer {
         }
         x3dLastTime = time
         x3dTime = time
+        var released = 0
         for (id, record) in x3dResources where x3dFrameIndex &- record.lastFrame > 120 {
             record.release()
             x3dResources[id] = nil
+            released += 1
+        }
+        if released > 0 {
+            X3DCostProbe.shared.record(churn: X3DResourceChurn(released: released))
         }
     }
 
@@ -179,6 +184,9 @@ extension WGPURenderer {
         let registered = Set(x3dShaderSources.keys).union(X3DDiagnostics.builtinShaders)
         X3DDiagnostics.assertValid(x3d.graph, registeredShaders: registered)
         #endif
+        let probe = X3DCostProbe.shared
+        let encodeStarted = probe.begin(.encode)
+        defer { probe.end(.encode, started: encodeStarted) }
         guard let target = ensureShaderLayerTarget(at: depth) else { return }
         let x = min(x3d.rect.x, configuredWidth), y = min(x3d.rect.y, configuredHeight)
         let output = X3DViewport(view: target.view, format: surfaceFormat, x: x, y: y,
@@ -186,9 +194,12 @@ extension WGPURenderer {
                                  height: min(x3d.rect.height, configuredHeight - y),
                                  attachmentWidth: configuredWidth, attachmentHeight: configuredHeight)
         guard output.width > 0, output.height > 0 else { return }
+        var churn = X3DResourceChurn()
         for resource in x3d.graph.resources {
-            ensureX3DResource(resource, outputWidth: output.width, outputHeight: output.height)
+            churn += ensureX3DResource(resource, outputWidth: output.width, outputHeight: output.height)
         }
+        probe.record(churn: churn)
+        probe.record(metrics: x3d.graph.metrics)
         beginX3DPass(target.view, load: .clear(SIMD4(0, 0, 0, 0)), depth: nil, encoder: encoder).map(endX3DPass)
 
         var viewIndex = 0
@@ -280,28 +291,40 @@ extension WGPURenderer {
 
     // MARK: resources
 
-    private func ensureX3DResource(_ resource: X3DResource, outputWidth: UInt32, outputHeight: UInt32) {
+    @discardableResult
+    private func ensureX3DResource(_ resource: X3DResource, outputWidth: UInt32, outputHeight: UInt32)
+        -> X3DResourceChurn
+    {
         let id = resource.id
         if var record = x3dResources[id], x3dRecord(record, matches: resource, outputWidth, outputHeight) {
             record.lastFrame = x3dFrameIndex
             x3dResources[id] = record
-            return
+            return X3DResourceChurn(reused: 1)
         }
-        x3dResources.removeValue(forKey: id)?.release()
+        var released = 0
+        if let old = x3dResources.removeValue(forKey: id) {
+            old.release()
+            released = 1
+        }
         switch resource {
         case .buffer(_, let byteCount, let contents):
             let size = max(16, (byteCount + 3) / 4 * 4)
             var descriptor = WGPUBufferDescriptor()
             descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst
             descriptor.size = UInt64(size)
-            guard let buffer = wgpuDeviceCreateBuffer(device, &descriptor) else { return }
+            guard let buffer = wgpuDeviceCreateBuffer(device, &descriptor) else {
+                return X3DResourceChurn(released: released)
+            }
+            var uploaded = 0
             if let contents, !contents.isEmpty {
                 contents.prefix(size / 4).withUnsafeBytes {
                     wgpuQueueWriteBuffer(queue, buffer, 0, $0.baseAddress, $0.count)
+                    uploaded = $0.count
                 }
             }
             x3dResources[id] = X3DResourceRecord(kind: .buffer(buffer, byteCount: byteCount),
                                                  lastFrame: x3dFrameIndex, contents: contents)
+            return X3DResourceChurn(created: 1, released: released, bufferBytesUploaded: uploaded)
         case .texture(_, let format, let size):
             let (width, height) = x3dTextureSize(size, outputWidth, outputHeight)
             var descriptor = WGPUTextureDescriptor()
@@ -312,15 +335,18 @@ extension WGPURenderer {
             descriptor.format = Self.textureFormat(format)
             descriptor.mipLevelCount = 1
             descriptor.sampleCount = 1
-            guard let texture = wgpuDeviceCreateTexture(device, &descriptor) else { return }
+            guard let texture = wgpuDeviceCreateTexture(device, &descriptor) else {
+                return X3DResourceChurn(released: released)
+            }
             guard let view = wgpuTextureCreateView(texture, nil) else {
                 wgpuTextureRelease(texture)
-                return
+                return X3DResourceChurn(released: released)
             }
             x3dResources[id] = X3DResourceRecord(
                 kind: .texture(texture, view, format: format, width: width, height: height),
                 lastFrame: x3dFrameIndex
             )
+            return X3DResourceChurn(created: 1, released: released)
         }
     }
 
@@ -328,7 +354,12 @@ extension WGPURenderer {
                            _ outputWidth: UInt32, _ outputHeight: UInt32) -> Bool {
         switch (record.kind, resource) {
         case (.buffer(_, let have), .buffer(_, let want, let contents)):
-            return have == want && record.contents == contents
+            return !X3DBufferUploadPolicy.needsReupload(
+                existingByteCount: have,
+                existingContents: record.contents,
+                byteCount: want,
+                contents: contents
+            )
         case (.texture(_, _, let haveFormat, let width, let height), .texture(_, let format, let size)):
             let wanted = x3dTextureSize(size, outputWidth, outputHeight)
             return haveFormat == format && width == wanted.0 && height == wanted.1

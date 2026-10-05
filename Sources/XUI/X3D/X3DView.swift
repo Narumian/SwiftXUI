@@ -1,4 +1,5 @@
 import Foundation
+import XRender
 import XShader
 
 /// Hosts an `X3DProgram` in a view's layout slot. It takes the size its
@@ -15,9 +16,12 @@ public struct X3DView<Content: X3DProgram>: XView, _PrimitiveXView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let scope = id.child(type: X3DView.self)
+        let probe = X3DCostProbe.shared
+        let walkStarted = probe.begin(.walk)
         var walk = X3DWalk(scope: scope.hashValue)
         await walkX3D(content, id: scope, store: store, into: &walk)
         walk.finish()
+        probe.end(.walk, started: walkStarted)
         let steps = walk.steps
         let embedded = steps.compactMap { step -> LayoutNode? in
             if case .view(let node) = step { return node }

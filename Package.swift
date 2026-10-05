@@ -86,6 +86,7 @@ let package = Package(
             dependencies: [
                 "X",
                 "XShader",
+                "XRender",
                 "XUIMacros",
             ]
         ),

@@ -184,9 +184,11 @@ public struct SceneBuilder {
     }
 
     private var x3dStack: [X3DGraphAssembly] = []
+    private var x3dAssembleStarted: [ContinuousClock.Instant?] = []
 
     public mutating func beginX3D(in rect: RenderRect) {
         x3dStack.append(X3DGraphAssembly(rect: rect))
+        x3dAssembleStarted.append(X3DCostProbe.shared.begin(.assemble))
     }
 
     public mutating func emitX3D(_ op: X3DOp) {
@@ -230,6 +232,9 @@ public struct SceneBuilder {
 
     public mutating func endX3D() {
         guard let assembly = x3dStack.popLast() else { return }
+        let started = x3dAssembleStarted.isEmpty ? nil : x3dAssembleStarted.removeLast()
+        X3DCostProbe.shared.end(.assemble, started: started)
+        X3DCostProbe.shared.record(metrics: assembly.graph.metrics)
         scene.append(.x3d(X3DCommand(rect: assembly.rect, graph: assembly.graph)))
     }
 

@@ -95,6 +95,8 @@ public final class XAppDriver<App: XApp> {
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) async -> CompiledFrame {
+        let probe = X3DCostProbe.shared
+        probe.beginFrame()
         let gpuTime = timeSync.rendererTime(at: time)
         let xFrame = await session.render(time: timeSync.fxTime(at: time), x3dTime: gpuTime)
         let logicalSize = session.host.size
@@ -107,6 +109,7 @@ public final class XAppDriver<App: XApp> {
             fonts: session.host.fonts
         )
         renderer.render(compiled, time: gpuTime)
+        probe.endFrame()
         return compiled
     }
 }
