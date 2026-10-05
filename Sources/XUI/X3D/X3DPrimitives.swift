@@ -19,6 +19,11 @@ public struct Buffer: X3DProgram, _PrimitiveX3D {
         self.contents = contents
     }
 
+    /// One column-major `mat4x4<f32>` per instance, for `instance_index` lookups.
+    public init(_ name: String, transforms: [X3DTransform]) {
+        self.init(name, contents: transforms.flatMap(\.matrix))
+    }
+
     @XUIActor
     func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
         walk.emit(.resource(.buffer(id: walk.resource(name), byteCount: byteCount, contents: contents)))

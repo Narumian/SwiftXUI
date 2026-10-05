@@ -158,3 +158,17 @@ private func render<V: XView>(_ view: V) async -> Scene {
     #expect(frame.x3d[0].planes.count == 1)
     #expect(frame.x3d[0].planes[0].uv == SIMD4(0, 0, 1, 1))
 }
+
+@Test @XUIActor func transformBuffersFlattenOneMatrixPerInstance() async throws {
+    let scene = await render(
+        X3DView { Buffer("instances", transforms: [.identity, .translation(SIMD3(1, 2, 3))]) }
+    )
+    guard case .x3d(let command) = try #require(scene.commands.first),
+          case .buffer(_, let byteCount, let contents) = try #require(command.graph.resources.first) else {
+        Issue.record("Expected a buffer")
+        return
+    }
+    #expect(byteCount == 128)
+    #expect(contents?.count == 32)
+    #expect(contents?[28...30] == [1, 2, 3])
+}
