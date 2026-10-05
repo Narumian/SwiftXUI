@@ -21,6 +21,7 @@ public struct CompiledFrame: Sendable, Equatable {
     /// Static shader material metadata resolved to framebuffer coordinates.
     /// Backends can consume this list when material pipelines are available.
     public var materials: [CompiledMaterialCommand]
+    public var x3d: [CompiledX3D] = []
     public var background: RenderColor
     public var postIntensity: Float
 
@@ -103,6 +104,22 @@ public enum CompiledDraw: Sendable, Equatable {
     case material(index: Int)
     /// Composite the isolated subtree identified by `index` here.
     case shaderLayer(index: Int)
+    /// Run and composite `CompiledFrame.x3d[index]` here.
+    case x3d(index: Int)
+}
+
+/// An `X3DCommand` mapped to framebuffer pixels. `views` holds each embedded
+/// view's frame in the order its `.view` items appear in the graph.
+public struct CompiledX3D: Sendable, Equatable {
+    public var rect: PixelRect
+    public var graph: X3DGraph
+    public var views: [CompiledFrame]
+
+    public init(rect: PixelRect, graph: X3DGraph, views: [CompiledFrame]) {
+        self.rect = rect
+        self.graph = graph
+        self.views = views
+    }
 }
 
 /// Integer scissor in framebuffer pixels.
@@ -262,6 +279,21 @@ public enum SceneCompiler {
                     rect: box.pixels(layer.rect), shader: layer.shader, frame: child
                 ))
                 frame.draws.append(.shaderLayer(index: index))
+            case .x3d(let x3d):
+                flushShapes()
+                var views: [CompiledFrame] = []
+                for case .render(let pass) in x3d.graph.passes {
+                    for case .view(_, let commands) in pass.items {
+                        let nested = Scene(
+                            background: RenderColor(0, 0, 0, 0), commands: commands,
+                            authoringCanvas: scene.authoringCanvas
+                        )
+                        views.append(compile(nested, canvas: canvas, framebuffer: framebuffer, fit: fit, fonts: fonts))
+                    }
+                }
+                let index = frame.x3d.count
+                frame.x3d.append(CompiledX3D(rect: box.pixels(x3d.rect), graph: x3d.graph, views: views))
+                frame.draws.append(.x3d(index: index))
             }
         }
         flushShapes()

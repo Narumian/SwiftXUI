@@ -207,6 +207,7 @@ public indirect enum DrawCommand: Sendable, Equatable {
     case material(StaticShaderMaterialCommand)
     case text(TextCommand)
     case shaderLayer(ShaderLayerCommand)
+    case x3d(X3DCommand)
 
     public var layer: RenderLayer {
         switch self {
@@ -216,7 +217,7 @@ public indirect enum DrawCommand: Sendable, Equatable {
         case .text(let c): return c.layer
         // A layer has no intrinsic render layer: its placement in this ordered
         // command stream is its z-order.
-        case .shaderLayer: return .ui
+        case .shaderLayer, .x3d: return .ui
         }
     }
 }

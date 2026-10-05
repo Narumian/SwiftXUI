@@ -183,6 +183,39 @@ public struct SceneBuilder {
         scene.append(shaderLayer: ShaderLayerCommand(rect: rect, shader: shader, commands: commands))
     }
 
+    private var x3dStack: [X3DGraphAssembly] = []
+
+    public mutating func beginX3D(in rect: RenderRect) {
+        x3dStack.append(X3DGraphAssembly(rect: rect))
+    }
+
+    public mutating func emitX3D(_ op: X3DOp) {
+        guard !x3dStack.isEmpty else { return }
+        x3dStack[x3dStack.count - 1].apply(op)
+    }
+
+    public mutating func beginX3DView(in rect: RenderRect) {
+        guard !x3dStack.isEmpty else { return }
+        x3dStack[x3dStack.count - 1].viewRect = rect
+        x3dStack[x3dStack.count - 1].outerScene = scene
+        scene = Scene(background: RenderColor(0, 0, 0, 0), authoringCanvas: scene.authoringCanvas)
+    }
+
+    public mutating func endX3DView() {
+        guard !x3dStack.isEmpty, let outer = x3dStack[x3dStack.count - 1].outerScene,
+              let rect = x3dStack[x3dStack.count - 1].viewRect else { return }
+        let commands = scene.commands
+        scene = outer
+        x3dStack[x3dStack.count - 1].outerScene = nil
+        x3dStack[x3dStack.count - 1].viewRect = nil
+        x3dStack[x3dStack.count - 1].pass?.items.append(.view(rect: rect, commands: commands))
+    }
+
+    public mutating func endX3D() {
+        guard let assembly = x3dStack.popLast() else { return }
+        scene.append(.x3d(X3DCommand(rect: assembly.rect, graph: assembly.graph)))
+    }
+
     /// Advance width. Uses the atlas metrics when `fonts` is supplied (so
     /// centring matches what the compiler will draw), else the vector font.
     public func textWidth(_ string: String, scale: Float, font: FontRole = .ui, fonts: FontBook? = nil) -> Float {

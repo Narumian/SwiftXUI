@@ -614,6 +614,8 @@ public final class WGPURenderer: XRenderer {
                 // The command path preserves material order now. Execution
                 // belongs to the forthcoming XUI-native material renderer.
                 continue
+            case .x3d:
+                continue
             case .shaderLayer(let index):
                 guard frame.shaderLayers.indices.contains(index), let activePass = pass else { continue }
                 wgpuRenderPassEncoderEnd(activePass)
