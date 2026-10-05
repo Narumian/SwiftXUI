@@ -162,3 +162,17 @@ private func render<V: XView>(_ view: V) async -> Scene {
     #expect(draw.vertexCount == 3)
     #expect(draw.bindings.map(\.resource.name) == ["mesh", "albedo"])
 }
+
+@Test @XUIActor func recipeDiagnoseFlagsUnregisteredShader() async throws {
+    let scene = await render(X3DView { ParticleTrailRecipe(energy: 0.25) })
+    guard case .x3d(let command) = try #require(scene.commands.first) else {
+        Issue.record("Expected an x3d command")
+        return
+    }
+    let missing = command.graph.diagnose(registeredShaders: [])
+    #expect(missing.contains { diagnostic in
+        if case .unregisteredShader(let key) = diagnostic.kind { return key == "flow" }
+        return false
+    })
+    #expect(command.graph.diagnose(registeredShaders: ["flow"]).isEmpty)
+}

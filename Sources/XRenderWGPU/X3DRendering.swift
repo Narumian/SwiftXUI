@@ -24,6 +24,7 @@ struct X3DFrame {
 
 """
 
+/// Must stay listed in `X3DDiagnostics.builtinShaders`.
 private let x3dBuiltinKey: ShaderKey = "swiftx.x3d"
 
 private let x3dBuiltinWGSL = """
@@ -174,6 +175,10 @@ extension WGPURenderer {
     // MARK: graph
 
     func encodeX3D(_ x3d: CompiledX3D, parent: WGPUTextureView, encoder: WGPUCommandEncoder, depth: Int) {
+        #if DEBUG
+        let registered = Set(x3dShaderSources.keys).union(X3DDiagnostics.builtinShaders)
+        X3DDiagnostics.assertValid(x3d.graph, registeredShaders: registered)
+        #endif
         guard let target = ensureShaderLayerTarget(at: depth) else { return }
         let x = min(x3d.rect.x, configuredWidth), y = min(x3d.rect.y, configuredHeight)
         let output = X3DViewport(view: target.view, format: surfaceFormat, x: x, y: y,
