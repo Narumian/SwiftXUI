@@ -112,3 +112,23 @@ private func render<V: XView>(_ view: V) async -> Scene {
     #expect(frame.x3d[0].views.count == 1)
     #expect(!frame.x3d[0].views[0].shapeVertices.isEmpty)
 }
+
+@Test @XUIActor func drawsCarryTheirCameraAndComposedTransform() async throws {
+    let scene = await render(
+        X3DView {
+            Camera(position: SIMD3(0, 0, 3)) {
+                Draw("mesh", vertices: 3)
+                    .transform3D(.scale(2))
+                    .transform3D(.translation(SIMD3(1, 0, 0)))
+            }
+        }
+    )
+    guard case .x3d(let command) = try #require(scene.commands.first),
+          case .render(let pass) = try #require(command.graph.passes.first),
+          case .draw(let draw) = try #require(pass.items.first) else {
+        Issue.record("Expected one draw")
+        return
+    }
+    #expect(draw.camera?.position == SIMD3(0, 0, 3))
+    #expect(draw.model == .translation(SIMD3(1, 0, 0)) * .scale(2))
+}

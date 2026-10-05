@@ -5,15 +5,23 @@ public struct Buffer: X3DProgram, _PrimitiveX3D {
     public typealias Body = Never
     let name: String
     let byteCount: Int
+    let contents: [Float]?
 
     public init(_ name: String, stride: Int, count: Int) {
         self.name = name
         self.byteCount = stride * count
+        self.contents = nil
+    }
+
+    public init(_ name: String, contents: [Float]) {
+        self.name = name
+        self.byteCount = contents.count * MemoryLayout<Float>.stride
+        self.contents = contents
     }
 
     @XUIActor
     func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
-        walk.emit(.resource(.buffer(id: walk.resource(name), byteCount: byteCount)))
+        walk.emit(.resource(.buffer(id: walk.resource(name), byteCount: byteCount, contents: contents)))
     }
 }
 
@@ -100,7 +108,7 @@ public struct Draw: X3DProgram, _PrimitiveX3D {
         let resolved = bindings.map { X3DBinding(resource: walk.resource($0.name), access: $0.access) }
         walk.emit(.draw(X3DDraw(shader: shader, vertexEntry: vertexEntry, fragmentEntry: fragmentEntry,
                                 vertexCount: vertices, instanceCount: instances, topology: topology,
-                                blend: blend, bindings: resolved, uniforms: uniforms, camera: walk.camera)))
+                                blend: blend, bindings: resolved, uniforms: uniforms, camera: walk.camera, model: walk.model)))
     }
 }
 
@@ -175,5 +183,26 @@ public struct Camera<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
         walk.camera = camera
         await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
         walk.camera = outer
+    }
+}
+
+public struct Transform3D<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
+    public typealias Body = Never
+    let transform: X3DTransform
+    let content: Content
+
+    @XUIActor
+    func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
+        let outer = walk.model
+        walk.model = outer * transform
+        await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
+        walk.model = outer
+    }
+}
+
+public extension X3DProgram {
+    /// Applies `transform` to the draws inside, after any enclosing transform.
+    func transform3D(_ transform: X3DTransform) -> Transform3D<Self> {
+        Transform3D(transform: transform, content: self)
     }
 }

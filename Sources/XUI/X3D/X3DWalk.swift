@@ -12,6 +12,7 @@ struct X3DWalk {
     private(set) var steps: [X3DStep] = []
     var scope: Int
     var camera: X3DCamera?
+    var model: X3DTransform = .identity
     private var explicitPassDepth = 0
     private var implicitPassOpen = false
 

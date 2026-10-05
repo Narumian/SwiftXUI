@@ -16,6 +16,7 @@ struct X3DFrame {
     pad: u32,
     viewProjection: mat4x4<f32>,
     cameraPosition: vec4<f32>,
+    model: mat4x4<f32>,
 };
 @group(0) @binding(0) var<uniform> x3d: X3DFrame;
 @group(0) @binding(1) var<storage, read> x3dParams: array<f32>;
@@ -67,6 +68,7 @@ struct X3DResourceRecord {
     }
     var kind: Kind
     var lastFrame: UInt32
+    var contents: [Float]? = nil
 
     func release() {
         switch kind {
@@ -228,13 +230,19 @@ extension WGPURenderer {
         }
         x3dResources.removeValue(forKey: id)?.release()
         switch resource {
-        case .buffer(_, let byteCount):
+        case .buffer(_, let byteCount, let contents):
             let size = max(16, (byteCount + 3) / 4 * 4)
             var descriptor = WGPUBufferDescriptor()
             descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst
             descriptor.size = UInt64(size)
             guard let buffer = wgpuDeviceCreateBuffer(device, &descriptor) else { return }
-            x3dResources[id] = X3DResourceRecord(kind: .buffer(buffer, byteCount: byteCount), lastFrame: x3dFrameIndex)
+            if let contents, !contents.isEmpty {
+                contents.prefix(size / 4).withUnsafeBytes {
+                    wgpuQueueWriteBuffer(queue, buffer, 0, $0.baseAddress, $0.count)
+                }
+            }
+            x3dResources[id] = X3DResourceRecord(kind: .buffer(buffer, byteCount: byteCount),
+                                                 lastFrame: x3dFrameIndex, contents: contents)
         case .texture(_, let format, let size):
             let (width, height) = x3dTextureSize(size, outputWidth, outputHeight)
             var descriptor = WGPUTextureDescriptor()
@@ -260,8 +268,8 @@ extension WGPURenderer {
     private func x3dRecord(_ record: X3DResourceRecord, matches resource: X3DResource,
                            _ outputWidth: UInt32, _ outputHeight: UInt32) -> Bool {
         switch (record.kind, resource) {
-        case (.buffer(_, let have), .buffer(_, let want)):
-            return have == want
+        case (.buffer(_, let have), .buffer(_, let want, let contents)):
+            return have == want && record.contents == contents
         case (.texture(_, _, let haveFormat, let width, let height), .texture(_, let format, let size)):
             let wanted = x3dTextureSize(size, outputWidth, outputHeight)
             return haveFormat == format && width == wanted.0 && height == wanted.1
@@ -370,7 +378,7 @@ extension WGPURenderer {
                                                signature: layout.signature, layout: layout.pipeline),
               let frameGroup = x3dFrameGroup(width: viewport.width, height: viewport.height,
                                              x: viewport.x, y: viewport.y, params: draw.uniforms,
-                                             camera: draw.camera) else { return }
+                                             camera: draw.camera, model: draw.model) else { return }
         wgpuRenderPassEncoderSetPipeline(pass, pipeline)
         wgpuRenderPassEncoderSetBindGroup(pass, 0, frameGroup, 0, nil)
         if let resourceLayout = layout.resources {
@@ -389,7 +397,7 @@ extension WGPURenderer {
               let layout = x3dLayout(for: compute.bindings, compute: true),
               let pipeline = x3dComputePipeline(for: compute, signature: layout.signature, layout: layout.pipeline),
               let frameGroup = x3dFrameGroup(width: width, height: height, x: 0, y: 0, params: compute.uniforms,
-                                             camera: nil)
+                                             camera: nil, model: .identity)
         else { return }
         var resourceGroup: WGPUBindGroup?
         if let resourceLayout = layout.resources {
@@ -408,7 +416,7 @@ extension WGPURenderer {
     // MARK: bind groups
 
     private func x3dFrameGroup(width: UInt32, height: UInt32, x: UInt32, y: UInt32,
-                               params: [Float], camera: X3DCamera?) -> WGPUBindGroup? {
+                               params: [Float], camera: X3DCamera?, model: X3DTransform) -> WGPUBindGroup? {
         guard let layout = x3dFrameLayout(), let sampler = ensureX3DSampler() else { return nil }
         var frame: [UInt32] = [
             Float(width).bitPattern, Float(height).bitPattern,
@@ -421,6 +429,7 @@ extension WGPURenderer {
         frame += (camera?.viewProjection(aspect: aspect, time: x3dTime) ?? identity).map(\.bitPattern)
         let eye = camera?.eye(at: x3dTime) ?? .zero
         frame += [eye.x.bitPattern, eye.y.bitPattern, eye.z.bitPattern, Float(1).bitPattern]
+        frame += model.matrix.map(\.bitPattern)
         var values = params
         while values.count < 4 { values.append(0) }
         guard let frameBuffer = makeX3DTransientBuffer(&frame, usage: WGPUBufferUsage_Uniform),
