@@ -164,7 +164,7 @@ private func render<V: XView>(_ view: V) async -> Scene {
         X3DView { Buffer("instances", transforms: [.identity, .translation(SIMD3(1, 2, 3))]) }
     )
     guard case .x3d(let command) = try #require(scene.commands.first),
-          case .buffer(_, let byteCount, let contents) = try #require(command.graph.resources.first) else {
+          case .buffer(_, let byteCount, let contents, _) = try #require(command.graph.resources.first) else {
         Issue.record("Expected a buffer")
         return
     }

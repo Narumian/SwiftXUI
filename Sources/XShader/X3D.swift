@@ -27,13 +27,20 @@ public enum X3DSize: Sendable, Equatable {
 }
 
 public enum X3DResource: Sendable, Equatable {
-    /// `contents` is uploaded when the buffer is created or the contents change.
-    case buffer(id: X3DResourceID, byteCount: Int, contents: [Float]? = nil)
+    /// `contents` is uploaded when the buffer is created or its generation /
+    /// contents change. When `generation` is set, the renderer keys reuse on
+    /// that token and skips comparing `contents` byte-for-byte.
+    case buffer(
+        id: X3DResourceID,
+        byteCount: Int,
+        contents: [Float]? = nil,
+        generation: UInt64? = nil
+    )
     case texture(id: X3DResourceID, format: X3DFormat, size: X3DSize)
 
     public var id: X3DResourceID {
         switch self {
-        case .buffer(let id, _, _), .texture(let id, _, _): return id
+        case .buffer(let id, _, _, _), .texture(let id, _, _): return id
         }
     }
 }

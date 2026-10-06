@@ -12,7 +12,7 @@ High-level helpers exist for the 80% cases; they still lower 1:1 into those prim
 | `Instanced(shader, transforms:, vertices:)` | Vertex-index / sprite geometry without a mesh buffer |
 | `Fullscreen(shader)` | Three-vertex fullscreen triangle |
 | `FeedbackTrail("trail") { … }` | Fade-load offscreen pass + blit (particle trails) |
-| `Camera(..., acceptsInput: true)` | Interactive 2D-in-3D panels (axis-aligned pick via `X3DPlaneHit`) |
+| `Camera(..., acceptsInput: true)` | Interactive 2D-in-3D panels (precise ray-plane pick via `X3DPlaneHit`, including tilted models) |
 
 `Buffer(_:transforms:)` was already on main — instanced matrix upload is not new; the sugar is composing mesh + instances + draw.
 
@@ -42,7 +42,13 @@ WGPU DEBUG builds **log** the same issues at encode time; they no longer hard-as
 See contracts encoded by `X3DPlanePolicy` and `X3DBufferUploadPolicy`:
 
 - Plane world size = layout points / 100; offscreen target = full framebuffer; UV letterboxes content
-- Buffer reuse only when `byteCount` and `contents` are equal; otherwise full recreate + upload
+- Buffer reuse when `byteCount` matches and either `generation` matches (preferred) or `contents` are equal
+- Same-size content/generation change → in-place rewrite (`writeBuffer`); size change → recreate
+- Author tip: pass `Buffer(_:contents:generation:)` and bump the token when data changes to skip O(n) compares
+
+```swift
+Buffer("particles", contents: floats, generation: frameIndex)
+```
 
 ## Cost probe
 

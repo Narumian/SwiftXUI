@@ -101,7 +101,7 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
     let mesh = X3DMesh.icosphere(subdivisions: 1)
     let scene = await render(X3DView { IcosphereCameraRecipe() })
     guard case .x3d(let command) = try #require(scene.commands.first),
-          case .buffer(_, let byteCount, let contents) = try #require(command.graph.resources.first),
+          case .buffer(_, let byteCount, let contents, _) = try #require(command.graph.resources.first),
           case .render(let pass) = try #require(command.graph.passes.first),
           case .draw(let draw) = try #require(pass.items.first) else {
         Issue.record("Expected mesh buffer + draw")
@@ -138,8 +138,8 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
         return
     }
     #expect(command.graph.resources.count == 2)
-    guard case .buffer(let meshID, let meshBytes, let meshContents) = command.graph.resources[0],
-          case .buffer(let instanceID, let instanceBytes, let instanceContents) = command.graph.resources[1],
+    guard case .buffer(let meshID, let meshBytes, let meshContents, _) = command.graph.resources[0],
+          case .buffer(let instanceID, let instanceBytes, let instanceContents, _) = command.graph.resources[1],
           case .render(let pass) = try #require(command.graph.passes.first),
           case .draw(let draw) = try #require(pass.items.first) else {
         Issue.record("Expected mesh + instance buffers and one draw")
@@ -216,6 +216,22 @@ private func renderLayout<V: XView>(_ view: V) async -> RenderResult {
     #expect(plane.planeSize == Size(width: 40, height: 20))
     #expect(layout.hit(Point(x: 50, y: 25), as: String.self) == "card")
     #expect(layout.hit(Point(x: 2, y: 2), as: String.self) == nil)
+}
+
+@Test @XUIActor func recipeTiltCardPreciseHitSurvivesHeavyTilt() async throws {
+    let layout = await renderLayout(X3DView { TiltCardRecipe(tilt: 0.7) })
+    let plane = try #require(layout.x3dPlanes.first)
+    // Centre of the view still maps onto the panel.
+    #expect(layout.hit(Point(x: 50, y: 25), as: String.self) == "card")
+    // Well outside the projected AABB must miss.
+    let bounds = try #require(X3DPlaneHit.screenBounds(
+        viewSize: SIMD2(Float(plane.hostRect.width), Float(plane.hostRect.height)),
+        planeSize: SIMD2(Float(plane.planeSize.width), Float(plane.planeSize.height)),
+        camera: plane.camera,
+        model: plane.model
+    ))
+    let outside = Point(x: Double(bounds.min.x) - 20, y: Double(bounds.min.y) - 20)
+    #expect(layout.hit(outside, as: String.self) == nil)
 }
 
 @Test @XUIActor func interactivePlanePromotesControlsToScreenSpace() async throws {

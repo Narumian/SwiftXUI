@@ -63,6 +63,42 @@ private func sampleGraph() -> X3DGraph {
     ))
 }
 
+@Test func bufferUploadPolicyRewritesInPlaceWhenSizeMatches() {
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 16, existingContents: [1, 2, 3, 4], existingGeneration: nil,
+        byteCount: 16, contents: [9, 8, 7, 6], generation: nil
+    ) == .rewrite)
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 16, existingContents: [1], existingGeneration: nil,
+        byteCount: 32, contents: [1], generation: nil
+    ) == .recreate)
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 16, existingContents: [1, 2, 3, 4], existingGeneration: nil,
+        byteCount: 16, contents: [1, 2, 3, 4], generation: nil
+    ) == .reuse)
+}
+
+@Test func bufferUploadPolicyKeysReuseOnGeneration() {
+    // Matching generation skips contents compare.
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 64, existingContents: [1], existingGeneration: 7,
+        byteCount: 64, contents: [9, 9, 9], generation: 7
+    ) == .reuse)
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 64, existingContents: [1], existingGeneration: 7,
+        byteCount: 64, contents: [1], generation: 8
+    ) == .rewrite)
+    #expect(!X3DBufferUploadPolicy.needsReupload(
+        existingByteCount: 64, existingContents: [0],
+        byteCount: 64, contents: [1, 2, 3],
+        existingGeneration: 3, generation: 3
+    ))
+    #expect(X3DBufferUploadPolicy.decide(
+        existingByteCount: 64, existingContents: [1], existingGeneration: 1,
+        resource: .buffer(id: particles, byteCount: 64, contents: [2], generation: 2)
+    ) == .rewrite)
+}
+
 @Test func planePolicyMatchesWorldScaleContract() {
     #expect(X3DPlanePolicy.pointsPerWorldUnit == 100)
     #expect(X3DPlanePolicy.worldSize(layoutPoints: SIMD2(40, 20)) == SIMD2(0.4, 0.2))

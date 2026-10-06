@@ -39,7 +39,7 @@ import Testing
         descriptor: descriptor, values: ShaderParameterValues(descriptor: descriptor),
         outputSize: (320, 180), contentAspect: 16.0 / 9.0)
     #expect(payload.floats.count == 20)
-    #expect(payload.floats[0..<4].elementsEqual([320, 180, 16.0 / 9.0, 0]))
+    #expect(payload.floats[0..<4].elementsEqual([320, 180, Float(16.0 / 9.0), 0]))
     #expect(payload.floats[4..<8].elementsEqual([0.5, 1, 1, 0]))
     #expect(payload.floats[8] > 0 && payload.floats[9] > 0 && payload.floats[10] > 0)
     #expect(payload.floats[12] > 0 && payload.floats[13] > 0 && payload.floats[14] > 0)

@@ -1,8 +1,11 @@
 import Foundation
 
 /// Picking for X3D panels that live on the model-space `z = 0` plane
-/// (axis-aligned cards / sheets). World size matches the encoder:
-/// `planeSize / 100` units across (`half-extents = planeSize / 200`).
+/// (cards / sheets, including tilted / rotated models). World size matches
+/// the encoder: `planeSize / 100` units across (`half-extents = planeSize / 200`).
+///
+/// Hits use a world-space ray against the transformed plane so heavily tilted
+/// panels stay precise — not an axis-aligned screen box.
 public enum X3DPlaneHit {
     public static let pointsPerWorldUnit: Float = 100
 
@@ -19,20 +22,40 @@ public enum X3DPlaneHit {
         guard viewSize.x > 0, viewSize.y > 0, planeSize.x > 0, planeSize.y > 0 else { return nil }
         let aspect = viewSize.x / viewSize.y
         let vp = camera.viewProjection(aspect: aspect, time: time)
-        let mvp = multiply(vp, model.matrix)
-        guard let inv = invert(mvp) else { return nil }
+        guard let invVP = invert(vp) else { return nil }
 
         let ndc = SIMD2(
             screen.x / viewSize.x * 2 - 1,
             1 - screen.y / viewSize.y * 2
         )
-        let near = unproject(inv, ndc: ndc, clipZ: 0)
-        let far = unproject(inv, ndc: ndc, clipZ: 1)
+        let near = unproject(invVP, ndc: ndc, clipZ: 0)
+        let far = unproject(invVP, ndc: ndc, clipZ: 1)
         let dir = far - near
-        guard abs(dir.z) > 1e-6 else { return nil }
-        let t = -near.z / dir.z
+        let dirLen2 = dot3(dir, dir)
+        guard dirLen2 > 1e-12 else { return nil }
+
+        // Panel lies on model z = 0. Transform that plane into world space.
+        let m = model.matrix
+        let origin = SIMD3(m[12], m[13], m[14])
+        let axisX = SIMD3(m[0], m[1], m[2])
+        let axisY = SIMD3(m[4], m[5], m[6])
+        var normal = cross3(axisX, axisY)
+        let normalLen2 = dot3(normal, normal)
+        guard normalLen2 > 1e-12 else { return nil }
+        normal /= normalLen2.squareRoot()
+
+        let denom = dot3(normal, dir)
+        guard abs(denom) > 1e-6 else { return nil } // edge-on / parallel
+        let t = dot3(normal, origin - near) / denom
         guard t >= 0, t <= 1 else { return nil }
-        let local = near + dir * t
+        let world = near + dir * t
+
+        // World → model (affine inverse of the upper 3×3 + translation).
+        guard let invModel = invert(m) else { return nil }
+        let local4 = mul4(invModel, SIMD4(world.x, world.y, world.z, 1))
+        let w = max(abs(local4.w), 1e-6) * (local4.w < 0 ? -1 : 1)
+        let local = SIMD3(local4.x / w, local4.y / w, local4.z / w)
+        guard abs(local.z) <= 1e-3 else { return nil }
 
         let half = planeSize / (2 * pointsPerWorldUnit)
         guard abs(local.x) <= half.x + 1e-5, abs(local.y) <= half.y + 1e-5 else { return nil }
@@ -41,6 +64,21 @@ public enum X3DPlaneHit {
             (local.x / half.x * 0.5 + 0.5) * planeSize.x,
             (0.5 - local.y / half.y * 0.5) * planeSize.y
         )
+    }
+
+    /// `true` when the screen point lands on the panel (precise ray-plane hit).
+    public static func contains(
+        screen: SIMD2<Float>,
+        viewSize: SIMD2<Float>,
+        planeSize: SIMD2<Float>,
+        camera: X3DCamera,
+        model: X3DTransform,
+        time: Float = 0
+    ) -> Bool {
+        hit(
+            screen: screen, viewSize: viewSize, planeSize: planeSize,
+            camera: camera, model: model, time: time
+        ) != nil
     }
 
     /// Maps a plane-local layout point (origin top-left, y down) into the
@@ -74,6 +112,7 @@ public enum X3DPlaneHit {
     }
 
     /// Screen-space axis-aligned bounds of a plane-local layout rect.
+    /// Broad-phase only — use `hit` / `contains` for precise tilted picking.
     public static func projectRect(
         _ rect: (min: SIMD2<Float>, max: SIMD2<Float>),
         viewSize: SIMD2<Float>,
@@ -110,31 +149,14 @@ public enum X3DPlaneHit {
         model: X3DTransform,
         time: Float = 0
     ) -> (min: SIMD2<Float>, max: SIMD2<Float>)? {
-        guard viewSize.x > 0, viewSize.y > 0, planeSize.x > 0, planeSize.y > 0 else { return nil }
-        let aspect = viewSize.x / viewSize.y
-        let vp = camera.viewProjection(aspect: aspect, time: time)
-        let mvp = multiply(vp, model.matrix)
-        let half = planeSize / (2 * pointsPerWorldUnit)
-        let corners: [SIMD3<Float>] = [
-            SIMD3(-half.x, -half.y, 0), SIMD3(half.x, -half.y, 0),
-            SIMD3(half.x, half.y, 0), SIMD3(-half.x, half.y, 0),
-        ]
-        var minS = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
-        var maxS = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
-        var visible = false
-        for corner in corners {
-            let clip = mul4(mvp, SIMD4(corner.x, corner.y, corner.z, 1))
-            guard clip.w > 1e-6 else { continue }
-            let ndc = SIMD2(clip.x / clip.w, clip.y / clip.w)
-            let screen = SIMD2(
-                (ndc.x * 0.5 + 0.5) * viewSize.x,
-                (0.5 - ndc.y * 0.5) * viewSize.y
-            )
-            minS = SIMD2(min(minS.x, screen.x), min(minS.y, screen.y))
-            maxS = SIMD2(max(maxS.x, screen.x), max(maxS.y, screen.y))
-            visible = true
-        }
-        return visible ? (minS, maxS) : nil
+        projectRect(
+            (min: .zero, max: planeSize),
+            viewSize: viewSize,
+            planeSize: planeSize,
+            camera: camera,
+            model: model,
+            time: time
+        )
     }
 }
 
@@ -163,6 +185,12 @@ private func unproject(_ inv: [Float], ndc: SIMD2<Float>, clipZ: Float) -> SIMD3
     let world = mul4(inv, clip)
     let w = max(abs(world.w), 1e-6) * (world.w < 0 ? -1 : 1)
     return SIMD3(world.x / w, world.y / w, world.z / w)
+}
+
+private func dot3(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float { (a * b).sum() }
+
+private func cross3(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float> {
+    SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
 }
 
 private func invert(_ m: [Float]) -> [Float]? {

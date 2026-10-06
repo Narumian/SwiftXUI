@@ -41,7 +41,7 @@ public struct X3DGraphMetrics: Sendable, Equatable {
         metrics.resources = graph.resources.count
         for resource in graph.resources {
             switch resource {
-            case .buffer(_, let byteCount, _):
+            case .buffer(_, let byteCount, _, _):
                 metrics.bufferBytes += byteCount
             case .texture:
                 metrics.textures += 1
@@ -186,33 +186,92 @@ public enum X3DPlanePolicy {
     public static let offscreenMatchesFramebuffer = true
 }
 
-/// When a declared buffer must be recreated / reuploaded on the GPU.
+/// Outcome of comparing a declared buffer against the GPU record from last frame.
+public enum X3DBufferUploadDecision: Sendable, Equatable {
+    /// Keep the GPU buffer; no `writeBuffer`.
+    case reuse
+    /// Keep the GPU allocation; rewrite the full payload in place.
+    case rewrite
+    /// Destroy and recreate (size changed, or no usable buffer yet).
+    case recreate
+}
+
+/// When a declared buffer must be recreated / rewritten on the GPU.
 public enum X3DBufferUploadPolicy {
-    /// `true` when the existing GPU buffer cannot be reused as-is.
+    /// Decide reuse / in-place rewrite / recreate for one buffer declaration.
     ///
-    /// Reuse requires equal `byteCount` and equal `contents` (including both
-    /// `nil`). Any contents change triggers a full recreate + upload — there
-    /// is no partial or hashed delta path yet.
+    /// - Differing `byteCount` → `.recreate`.
+    /// - Both sides declare `generation` and they match → `.reuse` (contents
+    ///   are not compared; the author owns the token).
+    /// - Both sides declare `generation` and they differ → `.rewrite` (full
+    ///   `writeBuffer`; no sub-range diff yet).
+    /// - Otherwise compare `contents` (including both `nil`): equal → `.reuse`,
+    ///   unequal → `.rewrite`.
+    public static func decide(
+        existingByteCount: Int,
+        existingContents: [Float]?,
+        existingGeneration: UInt64?,
+        byteCount: Int,
+        contents: [Float]?,
+        generation: UInt64?
+    ) -> X3DBufferUploadDecision {
+        guard existingByteCount == byteCount else { return .recreate }
+        if let generation, let existingGeneration {
+            return generation == existingGeneration ? .reuse : .rewrite
+        }
+        if existingContents == contents { return .reuse }
+        return .rewrite
+    }
+
+    public static func decide(
+        existingByteCount: Int,
+        existingContents: [Float]?,
+        existingGeneration: UInt64?,
+        resource: X3DResource
+    ) -> X3DBufferUploadDecision {
+        guard case .buffer(_, let byteCount, let contents, let generation) = resource else {
+            return .recreate
+        }
+        return decide(
+            existingByteCount: existingByteCount,
+            existingContents: existingContents,
+            existingGeneration: existingGeneration,
+            byteCount: byteCount,
+            contents: contents,
+            generation: generation
+        )
+    }
+
+    /// `true` when the existing GPU buffer cannot be left untouched.
     public static func needsReupload(
         existingByteCount: Int,
         existingContents: [Float]?,
         byteCount: Int,
-        contents: [Float]?
+        contents: [Float]?,
+        existingGeneration: UInt64? = nil,
+        generation: UInt64? = nil
     ) -> Bool {
-        existingByteCount != byteCount || existingContents != contents
+        decide(
+            existingByteCount: existingByteCount,
+            existingContents: existingContents,
+            existingGeneration: existingGeneration,
+            byteCount: byteCount,
+            contents: contents,
+            generation: generation
+        ) != .reuse
     }
 
     public static func needsReupload(
         existingByteCount: Int,
         existingContents: [Float]?,
-        resource: X3DResource
+        resource: X3DResource,
+        existingGeneration: UInt64? = nil
     ) -> Bool {
-        guard case .buffer(_, let byteCount, let contents) = resource else { return true }
-        return needsReupload(
+        decide(
             existingByteCount: existingByteCount,
             existingContents: existingContents,
-            byteCount: byteCount,
-            contents: contents
-        )
+            existingGeneration: existingGeneration,
+            resource: resource
+        ) != .reuse
     }
 }

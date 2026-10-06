@@ -85,6 +85,7 @@ struct X3DResourceRecord {
     var kind: Kind
     var lastFrame: UInt32
     var contents: [Float]? = nil
+    var generation: UInt64? = nil
 
     func release() {
         switch kind {
@@ -299,10 +300,21 @@ extension WGPURenderer {
         -> X3DResourceChurn
     {
         let id = resource.id
-        if var record = x3dResources[id], x3dRecord(record, matches: resource, outputWidth, outputHeight) {
-            record.lastFrame = x3dFrameIndex
-            x3dResources[id] = record
-            return X3DResourceChurn(reused: 1)
+        if var record = x3dResources[id] {
+            switch x3dBufferDecision(record, resource, outputWidth, outputHeight) {
+            case .reuse:
+                record.lastFrame = x3dFrameIndex
+                x3dResources[id] = record
+                return X3DResourceChurn(reused: 1)
+            case .rewrite:
+                if let churn = rewriteX3DBuffer(id: id, record: record, resource: resource) {
+                    return churn
+                }
+                // Kind mismatch — fall through to recreate.
+                break
+            case .recreate:
+                break
+            }
         }
         var released = 0
         if let old = x3dResources.removeValue(forKey: id) {
@@ -310,7 +322,7 @@ extension WGPURenderer {
             released = 1
         }
         switch resource {
-        case .buffer(_, let byteCount, let contents):
+        case .buffer(_, let byteCount, let contents, let generation):
             let size = max(16, (byteCount + 3) / 4 * 4)
             var descriptor = WGPUBufferDescriptor()
             descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst
@@ -325,8 +337,12 @@ extension WGPURenderer {
                     uploaded = $0.count
                 }
             }
-            x3dResources[id] = X3DResourceRecord(kind: .buffer(buffer, byteCount: byteCount),
-                                                 lastFrame: x3dFrameIndex, contents: contents)
+            x3dResources[id] = X3DResourceRecord(
+                kind: .buffer(buffer, byteCount: byteCount),
+                lastFrame: x3dFrameIndex,
+                contents: contents,
+                generation: generation
+            )
             return X3DResourceChurn(created: 1, released: released, bufferBytesUploaded: uploaded)
         case .texture(_, let format, let size):
             let (width, height) = x3dTextureSize(size, outputWidth, outputHeight)
@@ -353,21 +369,54 @@ extension WGPURenderer {
         }
     }
 
-    private func x3dRecord(_ record: X3DResourceRecord, matches resource: X3DResource,
-                           _ outputWidth: UInt32, _ outputHeight: UInt32) -> Bool {
+    /// In-place full rewrite of an existing GPU buffer. Returns `nil` when the
+    /// record is not a buffer (caller should recreate).
+    private func rewriteX3DBuffer(id: X3DResourceID, record: X3DResourceRecord, resource: X3DResource)
+        -> X3DResourceChurn?
+    {
+        guard case .buffer(let buffer, let byteCount) = record.kind,
+              case .buffer(_, _, let contents, let generation) = resource else {
+            return nil
+        }
+        let size = max(16, (byteCount + 3) / 4 * 4)
+        var uploaded = 0
+        if let contents, !contents.isEmpty {
+            contents.prefix(size / 4).withUnsafeBytes {
+                wgpuQueueWriteBuffer(queue, buffer, 0, $0.baseAddress, $0.count)
+                uploaded = $0.count
+            }
+        }
+        x3dResources[id] = X3DResourceRecord(
+            kind: .buffer(buffer, byteCount: byteCount),
+            lastFrame: x3dFrameIndex,
+            contents: contents,
+            generation: generation
+        )
+        return X3DResourceChurn(reused: 1, bufferBytesUploaded: uploaded)
+    }
+
+    /// `.reuse` / `.rewrite` for buffers; texture mismatch or missing record → `.recreate`.
+    private func x3dBufferDecision(
+        _ record: X3DResourceRecord,
+        _ resource: X3DResource,
+        _ outputWidth: UInt32,
+        _ outputHeight: UInt32
+    ) -> X3DBufferUploadDecision {
         switch (record.kind, resource) {
-        case (.buffer(_, let have), .buffer(_, let want, let contents)):
-            return !X3DBufferUploadPolicy.needsReupload(
+        case (.buffer(_, let have), .buffer(_, let want, let contents, let generation)):
+            return X3DBufferUploadPolicy.decide(
                 existingByteCount: have,
                 existingContents: record.contents,
+                existingGeneration: record.generation,
                 byteCount: want,
-                contents: contents
+                contents: contents,
+                generation: generation
             )
         case (.texture(_, _, let haveFormat, let width, let height), .texture(_, let format, let size)):
             let wanted = x3dTextureSize(size, outputWidth, outputHeight)
-            return haveFormat == format && width == wanted.0 && height == wanted.1
+            return haveFormat == format && width == wanted.0 && height == wanted.1 ? .reuse : .recreate
         default:
-            return false
+            return .recreate
         }
     }
 
