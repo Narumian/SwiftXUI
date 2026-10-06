@@ -1,4 +1,5 @@
 import Foundation
+import XRender
 import XShader
 
 /// A named-rect export. `.anchor("screen")` on a view makes its resolved frame
@@ -86,6 +87,20 @@ public struct ResolvedTapGesture {
     }
 }
 
+/// Hit targets for one interactive Camera-hosted plane. Rects are in the
+/// plane's local layout space (`(0,0)`…`planeSize`); picking remaps screen
+/// points through `X3DPlaneHit`.
+public struct ResolvedX3DPlane {
+    public var hostRect: Rect
+    public var planeSize: Size
+    public var camera: X3DCamera
+    public var model: X3DTransform
+    public var regions: [ResolvedRegion]
+    public var tapGestures: [ResolvedTapGesture]
+    public var dragGestures: [ResolvedDragGesture]
+    public var controls: [ResolvedControl]
+}
+
 /// Everything a leaf needs while painting: the canvas, the environment, and the
 /// sinks for regions and anchors. Reference type — one instance per render.
 public final class RenderContext {
@@ -96,16 +111,95 @@ public final class RenderContext {
     public private(set) var controls: [ResolvedControl] = []
     public private(set) var tapGestures: [ResolvedTapGesture] = []
     public private(set) var dragGestures: [ResolvedDragGesture] = []
+    public private(set) var x3dPlanes: [ResolvedX3DPlane] = []
+    public private(set) var x3dDiagnostics: [X3DDiagnostic] = []
     public private(set) var anchors = AnchorMap()
     var inputSuspendedDepth = 0
     var focusScopeStack: [FocusScopeID] = []
     private var drawingOriginStack: [Point] = []
+    private var suppressFocusRecording = false
 
     private var acceptsInput: Bool { inputSuspendedDepth == 0 }
 
     init(canvas: any XCanvas, environment: EnvironmentValues) {
         self.canvas = canvas
         self.environment = environment
+    }
+
+    struct PlaneInputMarker {
+        let regions: Int
+        let taps: Int
+        let drags: Int
+        let controls: Int
+    }
+
+    func beginPlaneInputCapture() -> PlaneInputMarker {
+        suppressFocusRecording = true
+        return PlaneInputMarker(
+            regions: regions.count,
+            taps: tapGestures.count,
+            drags: dragGestures.count,
+            controls: controls.count
+        )
+    }
+
+    func endPlaneInputCapture(
+        _ marker: PlaneInputMarker,
+        hostRect: Rect,
+        planeSize: Size,
+        camera: X3DCamera,
+        model: X3DTransform
+    ) {
+        suppressFocusRecording = false
+        let plane = ResolvedX3DPlane(
+            hostRect: hostRect,
+            planeSize: planeSize,
+            camera: camera,
+            model: model,
+            regions: Array(regions[marker.regions...]),
+            tapGestures: Array(tapGestures[marker.taps...]),
+            dragGestures: Array(dragGestures[marker.drags...]),
+            controls: Array(controls[marker.controls...])
+        )
+        if regions.count > marker.regions { regions.removeSubrange(marker.regions...) }
+        if tapGestures.count > marker.taps { tapGestures.removeSubrange(marker.taps...) }
+        if dragGestures.count > marker.drags { dragGestures.removeSubrange(marker.drags...) }
+        if controls.count > marker.controls { controls.removeSubrange(marker.controls...) }
+        x3dPlanes.append(plane)
+        promotePlaneControls(plane)
+    }
+
+    /// Projects interactive plane controls into screen-space so gamepad / focus
+    /// navigation can target them with the same AABB hit path as 2D controls.
+    private func promotePlaneControls(_ plane: ResolvedX3DPlane) {
+        let viewSize = SIMD2(Float(plane.hostRect.width), Float(plane.hostRect.height))
+        let planeSize = SIMD2(Float(plane.planeSize.width), Float(plane.planeSize.height))
+        let focus = _EnvironmentObjectContext.currentOrEmpty.object(FocusStore.self)
+        for control in plane.controls {
+            let local = (
+                min: SIMD2(Float(control.rect.minX), Float(control.rect.minY)),
+                max: SIMD2(Float(control.rect.maxX), Float(control.rect.maxY))
+            )
+            guard let projected = X3DPlaneHit.projectRect(
+                local,
+                viewSize: viewSize,
+                planeSize: planeSize,
+                camera: plane.camera,
+                model: plane.model
+            ) else { continue }
+            let screen = Rect(
+                x: Double(projected.min.x) + plane.hostRect.x,
+                y: Double(projected.min.y) + plane.hostRect.y,
+                width: Double(max(0, projected.max.x - projected.min.x)),
+                height: Double(max(0, projected.max.y - projected.min.y))
+            )
+            controls.append(ResolvedControl(control: control.control, rect: screen))
+            focus?.recordControl(control.control, rect: screen)
+        }
+    }
+
+    func recordDiagnostics(_ issues: [X3DDiagnostic]) {
+        x3dDiagnostics.append(contentsOf: issues)
     }
 
     func addRegion(_ rect: Rect, payload: AnyHashable) {
@@ -121,6 +215,7 @@ public final class RenderContext {
         guard acceptsInput else { return }
         let scoped = focusScopeStack.last.map { XControl(id: control.id, label: control.label, scope: $0) } ?? control
         controls.append(ResolvedControl(control: scoped, rect: rect))
+        guard !suppressFocusRecording else { return }
         _EnvironmentObjectContext.currentOrEmpty
             .object(FocusStore.self)?
             .recordControl(scoped, rect: rect)
@@ -175,7 +270,11 @@ public struct RenderResult {
     public var controls: [ResolvedControl]
     public var tapGestures: [ResolvedTapGesture]
     public var dragGestures: [ResolvedDragGesture]
+    public var x3dPlanes: [ResolvedX3DPlane]
+    public var x3dDiagnostics: [X3DDiagnostic]
     public var anchors: AnchorMap
+    /// Epoch-relative seconds for plane orbit / `X3DPlaneHit` (usually `x3d.time`).
+    public var x3dTime: Float
 
     public init(
         regions: [ResolvedRegion],
@@ -183,20 +282,33 @@ public struct RenderResult {
         controls: [ResolvedControl] = [],
         tapGestures: [ResolvedTapGesture] = [],
         dragGestures: [ResolvedDragGesture] = [],
-        anchors: AnchorMap
+        x3dPlanes: [ResolvedX3DPlane] = [],
+        x3dDiagnostics: [X3DDiagnostic] = [],
+        anchors: AnchorMap,
+        x3dTime: Float = 0
     ) {
         self.regions = regions
         self.shaders = shaders
         self.controls = controls
         self.tapGestures = tapGestures
         self.dragGestures = dragGestures
+        self.x3dPlanes = x3dPlanes
+        self.x3dDiagnostics = x3dDiagnostics
         self.anchors = anchors
+        self.x3dTime = x3dTime
     }
 
     /// First region whose payload is of type `T`, hit-tested against `point`.
+    /// Flat 2D regions win; interactive X3D planes are tested afterward.
     public func hit<T>(_ point: Point, as type: T.Type = T.self) -> T? {
         for region in regions where region.rect.contains(point) {
             if let match = region.payload.base as? T { return match }
+        }
+        for plane in x3dPlanes.reversed() {
+            guard let local = plane.localPoint(for: point, time: x3dTime) else { continue }
+            for region in plane.regions where region.rect.contains(local) {
+                if let match = region.payload.base as? T { return match }
+            }
         }
         return nil
     }
@@ -205,10 +317,55 @@ public struct RenderResult {
     /// `point`. Returns whether a gesture handled the point.
     @discardableResult
     public func tap(_ point: Point) -> Bool {
-        for gesture in tapGestures where gesture.rect.contains(point) {
+        if let gesture = tapGesture(at: point) {
             gesture.perform()
             return true
         }
         return false
+    }
+
+    public func tapGesture(at point: Point) -> ResolvedTapGesture? {
+        if let gesture = tapGestures.first(where: { $0.rect.contains(point) }) {
+            return gesture
+        }
+        for plane in x3dPlanes.reversed() {
+            guard let local = plane.localPoint(for: point, time: x3dTime) else { continue }
+            if let gesture = plane.tapGestures.first(where: { $0.rect.contains(local) }) {
+                return gesture
+            }
+        }
+        return nil
+    }
+
+    public func dragGesture(at point: Point) -> ResolvedDragGesture? {
+        if let gesture = dragGestures.first(where: { $0.rect.contains(point) }) {
+            return gesture
+        }
+        for plane in x3dPlanes.reversed() {
+            guard let local = plane.localPoint(for: point, time: x3dTime) else { continue }
+            if let gesture = plane.dragGestures.first(where: { $0.rect.contains(local) }) {
+                return gesture
+            }
+        }
+        return nil
+    }
+}
+
+public extension ResolvedX3DPlane {
+    /// Screen point → plane-local layout point when the ray hits this panel.
+    func localPoint(for point: Point, time: Float = 0) -> Point? {
+        let screen = SIMD2(
+            Float(point.x - hostRect.x),
+            Float(point.y - hostRect.y)
+        )
+        guard let local = X3DPlaneHit.hit(
+            screen: screen,
+            viewSize: SIMD2(Float(hostRect.width), Float(hostRect.height)),
+            planeSize: SIMD2(Float(planeSize.width), Float(planeSize.height)),
+            camera: camera,
+            model: model,
+            time: time
+        ) else { return nil }
+        return Point(x: Double(local.x), y: Double(local.y))
     }
 }

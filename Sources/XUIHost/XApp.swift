@@ -57,8 +57,8 @@ public final class XAppSession<App: XApp> {
     }
 
     @discardableResult
-    public func render(time: Double? = nil) async -> XUIFrame {
-        let frame = await host.render(app.body, time: time)
+    public func render(time: Double? = nil, x3dTime: Float = 0) async -> XUIFrame {
+        let frame = await host.render(app.body, time: time, x3dTime: x3dTime)
         lastFrame = frame
         return frame
     }
@@ -86,7 +86,8 @@ public final class XAppDriver<App: XApp> {
         self.renderer = renderer
     }
 
-    private var epoch: Double?
+    /// Keeps FX/`fxTime` and GPU `x3d.time` on the same display-link timeline.
+    public private(set) var timeSync = X3DTimeSync()
 
     @discardableResult
     public func frame(
@@ -94,7 +95,10 @@ public final class XAppDriver<App: XApp> {
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) async -> CompiledFrame {
-        let xFrame = await session.render(time: time)
+        let probe = X3DCostProbe.shared
+        probe.beginFrame()
+        let gpuTime = timeSync.rendererTime(at: time)
+        let xFrame = await session.render(time: timeSync.fxTime(at: time), x3dTime: gpuTime)
         let logicalSize = session.host.size
         let framebufferSize = framebuffer ?? logicalSize
         let compiled = SceneCompiler.compile(
@@ -104,9 +108,8 @@ public final class XAppDriver<App: XApp> {
             fit: fit,
             fonts: session.host.fonts
         )
-        let start = epoch ?? time
-        epoch = start
-        renderer.render(compiled, time: Float(time - start))
+        renderer.render(compiled, time: gpuTime)
+        probe.endFrame()
         return compiled
     }
 }

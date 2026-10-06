@@ -46,7 +46,7 @@ public final class XUIHost: @unchecked Sendable {
     /// host instead of touching the scene directly.
     @discardableResult
     @XUIActor
-    public func render<V: XView>(_ view: V, time: Double? = nil) async -> XUIFrame {
+    public func render<V: XView>(_ view: V, time: Double? = nil, x3dTime: Float = 0) async -> XUIFrame {
         var frameEnvironment = environment
         if let time { frameEnvironment.fxTime = time }
         frameEnvironment.environmentObject(focusStore)
@@ -58,10 +58,11 @@ public final class XUIHost: @unchecked Sendable {
             images: images,
             imageResolver: imageResolver
         )
-        let layout = await LayoutHost(
+        var layout = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
             environment: frameEnvironment
         ).render(view, into: surface, store: store)
+        layout.x3dTime = x3dTime
 
         focusStore.selectedID = FocusNavigator.selectInitial(
             in: layout.controls,

@@ -6,27 +6,37 @@ public struct Buffer: X3DProgram, _PrimitiveX3D {
     let name: String
     let byteCount: Int
     let contents: [Float]?
+    /// Author-managed revision. When set, the renderer reuses the GPU buffer
+    /// as long as `byteCount` and `generation` match — no full-contents compare.
+    let generation: UInt64?
 
     public init(_ name: String, stride: Int, count: Int) {
         self.name = name
         self.byteCount = stride * count
         self.contents = nil
+        self.generation = nil
     }
 
-    public init(_ name: String, contents: [Float]) {
+    public init(_ name: String, contents: [Float], generation: UInt64? = nil) {
         self.name = name
         self.byteCount = contents.count * MemoryLayout<Float>.stride
         self.contents = contents
+        self.generation = generation
     }
 
     /// One column-major `mat4x4<f32>` per instance, for `instance_index` lookups.
-    public init(_ name: String, transforms: [X3DTransform]) {
-        self.init(name, contents: transforms.flatMap(\.matrix))
+    public init(_ name: String, transforms: [X3DTransform], generation: UInt64? = nil) {
+        self.init(name, contents: transforms.flatMap(\.matrix), generation: generation)
     }
 
     @XUIActor
     func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
-        walk.emit(.resource(.buffer(id: walk.resource(name), byteCount: byteCount, contents: contents)))
+        walk.emit(.resource(.buffer(
+            id: walk.resource(name),
+            byteCount: byteCount,
+            contents: contents,
+            generation: generation
+        )))
     }
 }
 
@@ -172,22 +182,28 @@ public struct Pass<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
 public struct Camera<Content: X3DProgram>: X3DProgram, _PrimitiveX3D {
     public typealias Body = Never
     let camera: X3DCamera
+    let acceptsInput: Bool
     let content: Content
 
     public init(position: SIMD3<Float>, target: SIMD3<Float> = .zero, fieldOfView: Float = .pi / 3,
                 near: Float = 0.05, far: Float = 100, orbit: Float = 0,
+                acceptsInput: Bool = false,
                 @XViewBuilder content: () -> Content) {
         self.camera = X3DCamera(position: position, target: target, fieldOfView: fieldOfView,
                                 near: near, far: far, orbit: orbit)
+        self.acceptsInput = acceptsInput
         self.content = content()
     }
 
     @XUIActor
     func _walk(id: StateIdentity, store: StateStore, into walk: inout X3DWalk) async {
-        let outer = walk.camera
+        let outerCamera = walk.camera
+        let outerInput = walk.acceptsPlaneInput
         walk.camera = camera
+        walk.acceptsPlaneInput = acceptsInput
         await walkX3D(content, id: id.child(type: Content.self), store: store, into: &walk)
-        walk.camera = outer
+        walk.camera = outerCamera
+        walk.acceptsPlaneInput = outerInput
     }
 }
 

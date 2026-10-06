@@ -31,3 +31,12 @@ extension SceneCanvas: XUI.X3DSink {
         builder.endX3D()
     }
 }
+
+extension SceneCanvas: XUI.X3DDiagnosticSource {
+    public var x3dGraphs: [X3DGraph] {
+        scene.commands.compactMap { command in
+            if case .x3d(let x3d) = command { return x3d.graph }
+            return nil
+        }
+    }
+}

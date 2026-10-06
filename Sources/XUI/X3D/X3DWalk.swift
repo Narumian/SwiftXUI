@@ -4,7 +4,7 @@ import XShader
 enum X3DStep {
     case op(X3DOp)
     case view(LayoutNode)
-    case plane(LayoutNode, camera: X3DCamera, model: X3DTransform)
+    case plane(LayoutNode, camera: X3DCamera, model: X3DTransform, acceptsInput: Bool)
 }
 
 /// The flattened form of a program tree. Draws, blits and views written
@@ -13,6 +13,8 @@ struct X3DWalk {
     private(set) var steps: [X3DStep] = []
     var scope: Int
     var camera: X3DCamera?
+    /// When true, views inside the active `Camera` register plane-local hit targets.
+    var acceptsPlaneInput = false
     var model: X3DTransform = .identity
     private var explicitPassDepth = 0
     private var implicitPassOpen = false
@@ -41,8 +43,10 @@ struct X3DWalk {
     mutating func view(_ node: LayoutNode) {
         openImplicitPassIfNeeded()
         if let camera {
-            node.blocksInput = true
-            steps.append(.plane(node, camera: camera, model: model))
+            // Plane content is laid out in local (0,0)-(w,h); interactive planes
+            // collect hits there and remap via `X3DPlaneHit` at pick time.
+            node.blocksInput = !acceptsPlaneInput
+            steps.append(.plane(node, camera: camera, model: model, acceptsInput: acceptsPlaneInput))
         } else {
             steps.append(.view(node))
         }

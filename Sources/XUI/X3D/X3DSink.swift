@@ -1,4 +1,5 @@
 import Foundation
+import XRender
 import XShader
 
 /// Optional canvas capability that receives an `X3DView`'s lowered program.
@@ -14,4 +15,10 @@ public protocol X3DSink: AnyObject {
     func beginX3DPlane(size: Size)
     func endX3DPlane(camera: X3DCamera, model: X3DTransform)
     func endX3D()
+}
+
+/// Canvases that retain assembled `X3DGraph`s so `LayoutHost` can attach
+/// authoring diagnostics to `RenderResult` without a DEBUG-only crash path.
+public protocol X3DDiagnosticSource: AnyObject {
+    var x3dGraphs: [X3DGraph] { get }
 }

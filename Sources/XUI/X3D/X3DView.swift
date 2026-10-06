@@ -1,4 +1,5 @@
 import Foundation
+import XRender
 import XShader
 
 /// Hosts an `X3DProgram` in a view's layout slot. It takes the size its
@@ -15,16 +16,19 @@ public struct X3DView<Content: X3DProgram>: XView, _PrimitiveXView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let scope = id.child(type: X3DView.self)
+        let probe = X3DCostProbe.shared
+        let walkStarted = probe.begin(.walk)
         var walk = X3DWalk(scope: scope.hashValue)
         await walkX3D(content, id: scope, store: store, into: &walk)
         walk.finish()
+        probe.end(.walk, started: walkStarted)
         let steps = walk.steps
         let embedded = steps.compactMap { step -> LayoutNode? in
             if case .view(let node) = step { return node }
             return nil
         }
         let planes = steps.compactMap { step -> LayoutNode? in
-            if case .plane(let node, _, _) = step { return node }
+            if case .plane(let node, _, _, _) = step { return node }
             return nil
         }
         let node = LayoutNode(layout: X3DViewLayout())
@@ -53,9 +57,21 @@ public struct X3DView<Content: X3DProgram>: XView, _PrimitiveXView {
                     sink.beginX3DView(in: child.frame)
                     LayoutEngine.render(child, into: context)
                     sink.endX3DView()
-                case .plane(let child, let camera, let model):
+                case .plane(let child, let camera, let model, let acceptsInput):
                     sink.beginX3DPlane(size: child.frame.size)
-                    LayoutEngine.render(child, into: context)
+                    if acceptsInput {
+                        let marker = context.beginPlaneInputCapture()
+                        LayoutEngine.render(child, into: context)
+                        context.endPlaneInputCapture(
+                            marker,
+                            hostRect: rect,
+                            planeSize: child.frame.size,
+                            camera: camera,
+                            model: model
+                        )
+                    } else {
+                        LayoutEngine.render(child, into: context)
+                    }
                     sink.endX3DPlane(camera: camera, model: model)
                 }
             }

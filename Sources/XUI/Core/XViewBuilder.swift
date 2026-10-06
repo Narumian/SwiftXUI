@@ -23,6 +23,11 @@ public enum XViewBuilder {
         return TupleView(children)
     }
 
+    /// Disfavored because every `XView` is also an `X3DProgram` — without this,
+    /// two-or-more view stacks are ambiguous between `TupleView` and `TupleX3D`
+    /// (Linux Swift 6 is strict about the tie). Pure GPU programs still resolve
+    /// here; view trees prefer the overload above.
+    @_disfavoredOverload
     public static func buildBlock<First: X3DProgram, Second: X3DProgram, each Rest: X3DProgram>(
         _ first: First, _ second: Second, _ rest: repeat each Rest
     ) -> TupleX3D {
