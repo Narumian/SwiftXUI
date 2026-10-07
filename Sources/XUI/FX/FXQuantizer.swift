@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol FXQuantizer {
+public protocol FXQuantizer: Sendable {
     var delay: Double { get }
 }
 
