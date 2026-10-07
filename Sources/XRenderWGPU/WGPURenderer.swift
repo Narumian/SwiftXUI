@@ -866,6 +866,9 @@ public final class WGPURenderer: XRenderer {
         case ShaderLibrary.hitFlashKey: return 3
         case ShaderLibrary.glassKey: return 4
         case ShaderLibrary.vhsKey: return 5
+        case ShaderLibrary.foilKey: return 6
+        case ShaderLibrary.lenticularKey: return 7
+        case ShaderLibrary.warpKey: return 8
         default: return 0
         }
     }

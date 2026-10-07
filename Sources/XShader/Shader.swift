@@ -90,9 +90,24 @@ public enum ShaderLibrary {
     public static let hitFlashKey: ShaderKey = "swiftx.hitFlash"
     public static let glassKey: ShaderKey = "swiftx.glass"
     public static let vhsKey: ShaderKey = "swiftx.vhs"
+    public static let foilKey: ShaderKey = "swiftx.foil"
+    public static let lenticularKey: ShaderKey = "swiftx.lenticular"
+    public static let warpKey: ShaderKey = "swiftx.warp"
 
     public static func vhs(intensity: Float = 1) -> VHSShader {
         VHSShader(intensity: intensity)
+    }
+
+    public static func foil(phase: Float = 0, density: Float = 2, saturation: Float = 0.8, strength: Float = 1) -> FoilShader {
+        FoilShader(phase: phase, density: density, saturation: saturation, strength: strength)
+    }
+
+    public static func lenticular(tilt: Float = 0, stripes: Float = 14, depth: Float = 1, strength: Float = 1) -> LenticularShader {
+        LenticularShader(tilt: tilt, stripes: stripes, depth: depth, strength: strength)
+    }
+
+    public static func warp(phase: Float = 0, frequency: Float = 9, strength: Float = 1) -> WarpShader {
+        WarpShader(phase: phase, frequency: frequency, strength: strength)
     }
 
     public static func cellGlow(color: SIMD3<Float>, intensity: Float = 1) -> CellGlowShader {
@@ -201,5 +216,66 @@ public struct VHSShader: Shader {
     public func encode(into uniforms: inout ShaderUniforms) {
         uniforms.write(SIMD3<Float>(0, 0, 0))
         uniforms.write(intensity)
+    }
+}
+
+public struct FoilShader: Shader {
+    public static let key = ShaderLibrary.foilKey
+    public static let scope: ShaderScope = .layer
+
+    public var phase: Float
+    public var density: Float
+    public var saturation: Float
+    public var strength: Float
+
+    public init(phase: Float = 0, density: Float = 2, saturation: Float = 0.8, strength: Float = 1) {
+        self.phase = phase
+        self.density = density
+        self.saturation = saturation
+        self.strength = strength
+    }
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD4<Float>(phase, density, saturation, strength))
+    }
+}
+
+public struct LenticularShader: Shader {
+    public static let key = ShaderLibrary.lenticularKey
+    public static let scope: ShaderScope = .layer
+
+    public var tilt: Float
+    public var stripes: Float
+    public var depth: Float
+    public var strength: Float
+
+    public init(tilt: Float = 0, stripes: Float = 14, depth: Float = 1, strength: Float = 1) {
+        self.tilt = tilt
+        self.stripes = stripes
+        self.depth = depth
+        self.strength = strength
+    }
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD4<Float>(tilt, stripes, depth, strength))
+    }
+}
+
+public struct WarpShader: Shader {
+    public static let key = ShaderLibrary.warpKey
+    public static let scope: ShaderScope = .layer
+
+    public var phase: Float
+    public var frequency: Float
+    public var strength: Float
+
+    public init(phase: Float = 0, frequency: Float = 9, strength: Float = 1) {
+        self.phase = phase
+        self.frequency = frequency
+        self.strength = strength
+    }
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD4<Float>(phase, frequency, 0, strength))
     }
 }

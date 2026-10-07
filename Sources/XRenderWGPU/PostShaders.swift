@@ -49,6 +49,7 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
     let edge = abs(uv.x - 0.5) * 2.0;
     let shift = edge * edge * 1.8 * u.intensity / u.resolution.x;
 
+    var alpha = select(1.0, source.a, u.composition == 1.0);
     var col: vec3<f32>;
     col.r = textureSample(sceneTexture, sceneSampler, uv + vec2<f32>(shift, 0.0)).r;
     col.g = textureSample(sceneTexture, sceneSampler, uv).g;
@@ -119,10 +120,49 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
             let lineScan = 1.0 - amount * 0.05 * step(2.0, (fragCoord.y - floor(fragCoord.y / 3.0) * 3.0));
             let lineNoise = fract(sin(dot(fragCoord.xy + vec2<f32>(u.time), vec2<f32>(12.9898, 78.233))) * 43758.5453);
             col = shifted * lineScan + vec3<f32>((lineNoise - 0.5) * (3.0 / 255.0) * amount);
+        } else if (effect.kind == 6.0) {
+            // Foil: holographic rainbow bands sliding diagonally across the subtree.
+            let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;
+            let band = (local.x * 0.8 + local.y * 0.6) * effect.params.y + effect.params.x;
+            let hue = vec3<f32>(
+                0.5 + 0.5 * sin(6.2832 * band),
+                0.5 + 0.5 * sin(6.2832 * (band + 0.3333)),
+                0.5 + 0.5 * sin(6.2832 * (band + 0.6667))
+            );
+            let foil = mix(vec3<f32>(1.0), hue, clamp(effect.params.z, 0.0, 1.0));
+            let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+            col = mix(col, col * (0.55 + 0.9 * foil), amount * 0.65) + foil * amount * 0.22 * (0.35 + luma);
+        } else if (effect.kind == 7.0) {
+            // Lenticular: vertical lenses, each showing the image shifted by the viewing tilt.
+            let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;
+            let stripes = max(effect.params.y, 1.0);
+            let lens = fract(local.x * stripes) - 0.5;
+            let shift = (effect.params.x * 0.5 + lens) * effect.params.z * 0.9 / stripes * (effect.rect.z / u.resolution.x);
+            let shifted = textureSample(sceneTexture, sceneSampler,
+                clamp(uv + vec2<f32>(shift, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+            let ridge = pow(1.0 - abs(lens * 2.0), 3.0);
+            let sheen = vec3<f32>(
+                0.5 + 0.5 * sin(6.2832 * (effect.params.x + local.y * 0.6)),
+                0.5 + 0.5 * sin(6.2832 * (effect.params.x + local.y * 0.6 + 0.3333)),
+                0.5 + 0.5 * sin(6.2832 * (effect.params.x + local.y * 0.6 + 0.6667))
+            );
+            col = mix(col, shifted, amount * 0.7) + sheen * ridge * amount * 0.2;
+        } else if (effect.kind == 8.0) {
+            // Warp: a travelling sine distortion of the subtree's own pixels.
+            let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;
+            let size = effect.rect.zw / u.resolution;
+            let phase = effect.params.x * 6.2832;
+            let offset = vec2<f32>(
+                sin(local.y * effect.params.y + phase),
+                cos(local.x * effect.params.y * 1.3 + phase)
+            ) * 0.06 * size * amount;
+            let warped = textureSample(sceneTexture, sceneSampler,
+                clamp(uv + offset, vec2<f32>(0.0), vec2<f32>(1.0)));
+            col = mix(col, warped.rgb, amount);
+            alpha = select(alpha, mix(alpha, warped.a, amount), u.composition == 1.0);
         }
     }
 
-    let alpha = select(1.0, source.a, u.composition == 1.0);
     return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
 }
 """

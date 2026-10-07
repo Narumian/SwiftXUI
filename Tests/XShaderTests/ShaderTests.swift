@@ -37,3 +37,18 @@ private struct TestShader: Shader {
     #expect(glass.key == "swiftx.glass")
     #expect(glass.uniforms.values == [0.7, 0.88, 1, 0.3])
 }
+
+@Test func surfaceShadersPackFourUniformsUnderStableKeys() {
+    let foil = ShaderLibrary.foil(phase: 0.25, density: 3, saturation: 0.5, strength: 0.8).erased()
+    #expect(foil.key == ShaderLibrary.foilKey)
+    #expect(foil.scope == .layer)
+    #expect(foil.uniforms.values == [0.25, 3, 0.5, 0.8])
+
+    let lenticular = ShaderLibrary.lenticular(tilt: -0.5, stripes: 10, depth: 2, strength: 1).erased()
+    #expect(lenticular.key == ShaderLibrary.lenticularKey)
+    #expect(lenticular.uniforms.values == [-0.5, 10, 2, 1])
+
+    let warp = ShaderLibrary.warp(phase: 0.5, frequency: 7, strength: 0.6).erased()
+    #expect(warp.key == ShaderLibrary.warpKey)
+    #expect(warp.uniforms.values == [0.5, 7, 0, 0.6])
+}
