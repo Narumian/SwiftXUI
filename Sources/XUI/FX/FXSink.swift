@@ -26,6 +26,7 @@ public struct _FXSinkModifier<Content: XView>: XView, _PrimitiveXView {
     let signal: Signal<any FX>
     let anchor: Alignment
     let offset: Point
+    let quantizer: (any FXQuantizer)?
 
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
@@ -73,9 +74,12 @@ public struct _FXSinkModifier<Content: XView>: XView, _PrimitiveXView {
                     emit(value, id: id.child(type: Self.self, index: 3), store: store, into: &leaves)
                 }
                 let now = context.environment.fxTime
+                let lead = quantizer?.delay ?? 0
                 for value in leaves {
-                    if let scheduled = value as? ScheduledFX, scheduled.delay > 0 {
-                        pending.value.append((now + scheduled.delay, scheduled.leaf, point))
+                    let scheduled = value as? ScheduledFX
+                    let delay = (scheduled?.delay ?? 0) + lead
+                    if delay > 0 {
+                        pending.value.append((now + delay, scheduled?.leaf ?? value, point))
                     } else {
                         dispatch(value, point, at: now, context)
                     }
@@ -105,6 +109,17 @@ public extension XView {
     /// at `anchor` (plus `offset`) within this node's own resolved rect. VFX
     /// leaves are driven and drawn here; other leaves use the optional app sink.
     func fx(_ signal: Signal<any FX>, anchor: Alignment = .center, offset: Point = .zero) -> _FXSinkModifier<Self> {
-        _FXSinkModifier(content: self, signal: signal, anchor: anchor, offset: offset)
+        _FXSinkModifier(content: self, signal: signal, anchor: anchor, offset: offset, quantizer: nil)
+    }
+
+    /// Like `fx(_:)`, but every received effect starts `quantizer.delay`
+    /// seconds later, so it lands on the quantizer's grid (a musical beat).
+    func beatsyncFX(
+        _ signal: Signal<any FX>,
+        quantizer: any FXQuantizer,
+        anchor: Alignment = .center,
+        offset: Point = .zero
+    ) -> _FXSinkModifier<Self> {
+        _FXSinkModifier(content: self, signal: signal, anchor: anchor, offset: offset, quantizer: quantizer)
     }
 }
