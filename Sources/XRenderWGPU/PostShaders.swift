@@ -155,7 +155,7 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
             let offset = vec2<f32>(
                 sin(local.y * effect.params.y + phase),
                 cos(local.x * effect.params.y * 1.3 + phase)
-            ) * 0.06 * size * amount;
+            ) * 0.06 * size * effect.params.z * amount;
             let warped = textureSample(sceneTexture, sceneSampler,
                 clamp(uv + offset, vec2<f32>(0.0), vec2<f32>(1.0)));
             col = mix(col, warped.rgb, amount);

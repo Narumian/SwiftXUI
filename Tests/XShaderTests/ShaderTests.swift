@@ -48,7 +48,7 @@ private struct TestShader: Shader {
     #expect(lenticular.key == ShaderLibrary.lenticularKey)
     #expect(lenticular.uniforms.values == [-0.5, 10, 2, 1])
 
-    let warp = ShaderLibrary.warp(phase: 0.5, frequency: 7, strength: 0.6).erased()
+    let warp = ShaderLibrary.warp(phase: 0.5, frequency: 7, strength: 0.6, amplitude: 0.25).erased()
     #expect(warp.key == ShaderLibrary.warpKey)
-    #expect(warp.uniforms.values == [0.5, 7, 0, 0.6])
+    #expect(warp.uniforms.values == [0.5, 7, 0.25, 0.6])
 }

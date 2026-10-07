@@ -106,8 +106,8 @@ public enum ShaderLibrary {
         LenticularShader(tilt: tilt, stripes: stripes, depth: depth, strength: strength)
     }
 
-    public static func warp(phase: Float = 0, frequency: Float = 9, strength: Float = 1) -> WarpShader {
-        WarpShader(phase: phase, frequency: frequency, strength: strength)
+    public static func warp(phase: Float = 0, frequency: Float = 9, strength: Float = 1, amplitude: Float = 1) -> WarpShader {
+        WarpShader(phase: phase, frequency: frequency, strength: strength, amplitude: amplitude)
     }
 
     public static func cellGlow(color: SIMD3<Float>, intensity: Float = 1) -> CellGlowShader {
@@ -268,14 +268,16 @@ public struct WarpShader: Shader {
     public var phase: Float
     public var frequency: Float
     public var strength: Float
+    public var amplitude: Float
 
-    public init(phase: Float = 0, frequency: Float = 9, strength: Float = 1) {
+    public init(phase: Float = 0, frequency: Float = 9, strength: Float = 1, amplitude: Float = 1) {
         self.phase = phase
         self.frequency = frequency
         self.strength = strength
+        self.amplitude = amplitude
     }
 
     public func encode(into uniforms: inout ShaderUniforms) {
-        uniforms.write(SIMD4<Float>(phase, frequency, 0, strength))
+        uniforms.write(SIMD4<Float>(phase, frequency, amplitude, strength))
     }
 }
