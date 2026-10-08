@@ -356,10 +356,11 @@ public enum SceneCompiler {
         // A native-size atlas is drawn 1:1 with glyph quads on whole
         // framebuffer pixels (no resampling, so stems keep the weight they were
         // baked with). That needs an unrotated, unscaled placement and an atlas
-        // close enough to the requested size; anything else scales as before.
+        // within a few percent of the requested size, because the 1:1 quads
+        // bypass `drawScale` and layout measured the string at the requested size.
         let capPixels = 7 * text.scale * box.scale
         let native = atlas.native && box.fit && text.transform == .identity
-            && abs(atlas.capHeight - capPixels) <= 0.35 * capPixels
+            && abs(atlas.capHeight - capPixels) <= 0.04 * capPixels
         let s = native ? 1 / box.scale : atlas.drawScale(text.scale)
         func snapX(_ x: Float) -> Float { native ? ((box.offsetX + x * box.scale).rounded() - box.offsetX) / box.scale : x }
         func snapY(_ y: Float) -> Float { native ? ((box.offsetY + y * box.scale).rounded() - box.offsetY) / box.scale : y }
