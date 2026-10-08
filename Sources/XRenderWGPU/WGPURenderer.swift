@@ -795,6 +795,7 @@ public final class WGPURenderer: XRenderer {
             guard let pass = wgpuCommandEncoderBeginRenderPass(encoder, &descriptor) else { return }
             wgpuRenderPassEncoderSetPipeline(pass, postPipeline)
             wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nil)
+            applyScissor(pass, layer.rect)
             wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)
             wgpuRenderPassEncoderEnd(pass)
             wgpuRenderPassEncoderRelease(pass)

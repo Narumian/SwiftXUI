@@ -100,17 +100,19 @@ public struct FontBook: Sendable, Equatable {
         return Self.closest(candidates, capPixels: capPixels)
     }
 
-    /// The candidate whose whole-pixel em size is nearest the size that would
-    /// put a cap-height glyph at `capPixels`. This is the same rule
-    /// `DynamicFontBook.prepare` uses to decide which size to bake, so drawing
-    /// and preparation always agree — choosing by raw cap height instead
-    /// disagrees near the midpoint between two sizes (e.g. 12px vs 16px) once
-    /// both exist.
+    /// The smallest candidate whose whole-pixel em is at least the size that
+    /// would put a cap-height glyph at `capPixels` (nearest-greater). Matches
+    /// `DynamicFontBook.prepare` so drawing never picks a smaller SDF page than
+    /// the one preparation baked for that request.
     private static func closest(_ candidates: [FontAtlas], capPixels: Float) -> FontAtlas? {
         guard let first = candidates.first else { return nil }
         let ratio = max(0.1, first.capHeight / max(first.pixelSize, 1))
         let desired = max(6, capPixels / ratio)
-        return candidates.min { abs($0.pixelSize - desired) < abs($1.pixelSize - desired) }
+        let largeEnough = candidates.filter { $0.pixelSize >= desired }
+        if let best = largeEnough.min(by: { $0.pixelSize < $1.pixelSize }) {
+            return best
+        }
+        return candidates.max(by: { $0.pixelSize < $1.pixelSize })
     }
 
     /// The closest-size page that contains `character`. Dynamic font books may

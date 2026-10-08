@@ -102,9 +102,13 @@ public final class DynamicFontBook: @unchecked Sendable {
     private func pixelSize(for font: TrueTypeFont, capPixels: Float) -> Int {
         let ratio = max(0.1, Float(font.capHeight) / Float(font.unitsPerEm))
         let desired = max(6, capPixels / ratio)
-        return pixelSizes.min {
-            abs(Float($0) - desired) < abs(Float($1) - desired)
-        } ?? 32
+        // Nearest-greater: prefer the next larger discrete size so drawing does
+        // not downscale a bigger SDF (that softens strokes). Fall back to the
+        // largest available rung when desired is above the ladder.
+        if let ceil = pixelSizes.first(where: { Float($0) >= desired }) {
+            return ceil
+        }
+        return pixelSizes.last ?? 32
     }
 
     private func makePage(for key: SizeKey, font: TrueTypeFont) -> DynamicFontAtlas {
@@ -161,7 +165,9 @@ public final class DynamicFontBook: @unchecked Sendable {
     private static func layout(pixelSize: Int) -> (spread: Int, dimension: Int, supersample: Int) {
         let spread = min(24, Int((Float(pixelSize) * 0.2).rounded(.up)) + 2)
         let dimension = pixelSize <= 40 ? 256 : (pixelSize <= 80 ? 512 : 1024)
-        let supersample = pixelSize <= 32 ? 4 : (pixelSize <= 64 ? 2 : 1)
+        // Keep supersample at 1 for interactive atlases: 2×/4× SDF dominates
+        // first-glyph frame time once Japanese chrome enters a new size page.
+        let supersample = 1
         return (spread, dimension, supersample)
     }
 }

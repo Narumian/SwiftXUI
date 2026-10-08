@@ -321,7 +321,10 @@ public final class DynamicFontAtlas {
         return (0..<count).map { index in
             let distance = sqrt(inside[index] ? toOutside[index] : toInside[index])
             let signed = inside[index] ? distance : -distance
-            let encoded = 128 + Int((signed / range * 127).rounded())
+            let scaled = (signed / max(range, 1) * 127).rounded()
+            // Empty / degenerate glyphs can yield ±inf or huge finite distances.
+            guard scaled.isFinite else { return inside[index] ? UInt8(255) : 0 }
+            let encoded = 128 + Int(min(127, max(-128, scaled)))
             return UInt8(min(255, max(0, encoded)))
         }
     }
@@ -355,7 +358,13 @@ public final class DynamicFontAtlas {
                         sum += inside[i] ? d : -d
                     }
                 }
-                let encoded = 128 + Int((sum * weight / range * 127).rounded())
+                let scaled = (sum * weight / max(range, 1) * 127).rounded()
+                let encoded: Int
+                if scaled.isFinite {
+                    encoded = 128 + Int(min(127, max(-128, scaled)))
+                } else {
+                    encoded = inside[y * k * fw + x * k] ? 255 : 0
+                }
                 out[y * width + x] = UInt8(min(255, max(0, encoded)))
             }
         }
