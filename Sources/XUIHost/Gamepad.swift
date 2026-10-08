@@ -141,10 +141,19 @@ struct FocusNavigator {
             }
         }
 
-        return candidates.min { lhs, rhs in
+        let aligned = candidates.filter { overlapsCrossAxis($0.rect, current.rect, direction: direction) }
+        let pool = aligned.isEmpty ? candidates : aligned
+        return pool.min { lhs, rhs in
             score(lhs.rect, from: origin, direction: direction)
                 < score(rhs.rect, from: origin, direction: direction)
         }?.control.id ?? current.control.id
+    }
+
+    private static func overlapsCrossAxis(_ lhs: Rect, _ rhs: Rect, direction: GamepadDirection) -> Bool {
+        switch direction {
+        case .up, .down: return lhs.minX < rhs.maxX && rhs.minX < lhs.maxX
+        case .left, .right: return lhs.minY < rhs.maxY && rhs.minY < lhs.maxY
+        }
     }
 
     private static func score(_ rect: Rect, from origin: Point, direction: GamepadDirection) -> Double {
@@ -159,6 +168,6 @@ struct FocusNavigator {
             primary = abs(center.x - origin.x)
             secondary = abs(center.y - origin.y)
         }
-        return primary * 1000 + secondary
+        return primary + secondary * 3
     }
 }
