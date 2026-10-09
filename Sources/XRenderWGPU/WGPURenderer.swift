@@ -870,6 +870,7 @@ public final class WGPURenderer: XRenderer {
         case ShaderLibrary.foilKey: return 6
         case ShaderLibrary.lenticularKey: return 7
         case ShaderLibrary.warpKey: return 8
+        case ShaderLibrary.circleClipKey: return 9
         default: return 0
         }
     }

@@ -147,6 +147,13 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
                 0.5 + 0.5 * sin(6.2832 * (effect.params.x + local.y * 0.6 + 0.6667))
             );
             col = mix(col, shifted, amount * 0.7) + sheen * ridge * amount * 0.2;
+        } else if (effect.kind == 9.0) {
+            // Circle clip: keep only the circle inscribed in the layer's frame.
+            let center = effect.rect.xy + effect.rect.zw * 0.5;
+            let radius = min(effect.rect.z, effect.rect.w) * 0.5;
+            let mask = 1.0 - smoothstep(-1.0, 1.0, length(fragCoord.xy - center) - radius);
+            col = col * mask;
+            alpha = alpha * mask;
         } else if (effect.kind == 8.0) {
             // Warp: a travelling sine distortion of the subtree's own pixels.
             let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;

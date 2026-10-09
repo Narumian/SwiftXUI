@@ -93,6 +93,7 @@ public enum ShaderLibrary {
     public static let foilKey: ShaderKey = "swiftx.foil"
     public static let lenticularKey: ShaderKey = "swiftx.lenticular"
     public static let warpKey: ShaderKey = "swiftx.warp"
+    public static let circleClipKey: ShaderKey = "swiftx.circleClip"
 
     public static func vhs(intensity: Float = 1) -> VHSShader {
         VHSShader(intensity: intensity)
@@ -120,6 +121,10 @@ public enum ShaderLibrary {
 
     public static func hitFlash(amount: Float = 1) -> HitFlashShader {
         HitFlashShader(amount: amount)
+    }
+
+    public static func circleClip() -> CircleClipShader {
+        CircleClipShader()
     }
 
     public static func glass(
@@ -258,6 +263,18 @@ public struct LenticularShader: Shader {
 
     public func encode(into uniforms: inout ShaderUniforms) {
         uniforms.write(SIMD4<Float>(tilt, stripes, depth, strength))
+    }
+}
+
+/// Clips the layer to the circle inscribed in its frame, with an anti-aliased edge.
+public struct CircleClipShader: Shader {
+    public static let key = ShaderLibrary.circleClipKey
+    public static let scope: ShaderScope = .layer
+
+    public init() {}
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD4<Float>(0, 0, 0, 1))
     }
 }
 
