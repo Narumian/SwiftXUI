@@ -189,9 +189,11 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
                 }
             }
             let tint = effect.params.rgb;
-            let rim = smoothstep(0.35, 0.95, length((uv - vec2<f32>(0.5)) * vec2<f32>(1.0, 1.1)) * 1.4);
+            let rim = smoothstep(0.45, 1.05, length((uv - vec2<f32>(0.5)) * vec2<f32>(1.0, 1.1)) * 1.4);
             shade = mix(shade, tint * (luma * 1.1 + 0.04), clamp(effect.params.w, 0.0, 1.0));
             shade = mix(shade, tint * (0.35 + luma), clamp(fog, 0.0, 0.92));
+            // Drained pictures also sink into darkness toward the edges, which reads even over a dark picture.
+            shade = shade * (1.0 - effect.params2.x * 0.6 * rim);
             shade = mix(shade, effect.params3.rgb, clamp(effect.params3.w * effect.params2.w * rim, 0.0, 1.0));
             col = shade * coverage;
             alpha = select(alpha, sampled.a, u.composition == 1.0);
