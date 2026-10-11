@@ -381,20 +381,25 @@ public enum SceneCompiler {
         // within a few percent of the requested size, because the 1:1 quads
         // bypass `drawScale` and layout measured the string at the requested size.
         let capPixels = 7 * text.scale * box.scale
-        let native = atlas.native && box.fit && text.transform == .identity
-            && abs(atlas.capHeight - capPixels) <= 0.04 * capPixels
-        let s = native ? 1 / box.scale : atlas.drawScale(text.scale)
-        func snapX(_ x: Float) -> Float { native ? ((box.offsetX + x * box.scale).rounded() - box.offsetX) / box.scale : x }
-        func snapY(_ y: Float) -> Float { native ? ((box.offsetY + y * box.scale).rounded() - box.offsetY) / box.scale : y }
         let chars = Array(text.string)
         let glyphAtlases = text.string.map { atlasFor($0) ?? atlas }
+        // Each glyph is scaled by the page it is taken from. A character that is only baked on
+        // another size's page still comes out at the requested size instead of that page's own.
+        func isNative(_ page: FontAtlas) -> Bool {
+            page.native && box.fit && text.transform == .identity
+                && abs(page.capHeight - capPixels) <= 0.04 * capPixels
+        }
+        let scales = glyphAtlases.map { page in isNative(page) ? 1 / box.scale : page.drawScale(text.scale) }
+        let natives = glyphAtlases.map(isNative)
+        func snapX(_ x: Float, _ native: Bool) -> Float { native ? ((box.offsetX + x * box.scale).rounded() - box.offsetX) / box.scale : x }
+        func snapY(_ y: Float, _ native: Bool) -> Float { native ? ((box.offsetY + y * box.scale).rounded() - box.offsetY) / box.scale : y }
         func glyph(_ index: Int) -> GlyphBox? {
             glyphAtlases[index].glyphs[chars[index]]
         }
         var lineWidth: Float = 0
         for i in chars.indices {
             let page = glyphAtlases[i]
-            lineWidth += (page.glyphs[chars[i]]?.advance ?? page.glyphs[" "]?.advance ?? page.pixelSize * 0.5) * s
+            lineWidth += (page.glyphs[chars[i]]?.advance ?? page.glyphs[" "]?.advance ?? page.pixelSize * 0.5) * scales[i]
         }
         var penX = text.centeredWidth.map { text.origin.x + ($0 - lineWidth) * 0.5 } ?? text.origin.x
         // Always ink-centred: the baseline comes from this string's measured
@@ -404,12 +409,14 @@ public enum SceneCompiler {
         var inkBottom: Float?
         for i in chars.indices {
             guard let g = glyph(i), g.w > 0, g.h > 0 else { continue }
-            let bottom = g.top - g.h
-            inkTop = max(inkTop ?? g.top, g.top)
+            let top = g.top * scales[i]
+            let bottom = (g.top - g.h) * scales[i]
+            inkTop = max(inkTop ?? top, top)
             inkBottom = min(inkBottom ?? bottom, bottom)
         }
-        let boxHeight = text.centeredHeight ?? atlas.lineHeight * s
-        let inkCenterAboveBaseline = ((inkTop ?? 0) + (inkBottom ?? 0)) * 0.5 * s
+        let lineScale = isNative(atlas) ? 1 / box.scale : atlas.drawScale(text.scale)
+        let boxHeight = text.centeredHeight ?? atlas.lineHeight * lineScale
+        let inkCenterAboveBaseline = ((inkTop ?? 0) + (inkBottom ?? 0)) * 0.5
         let baselineY = text.origin.y + boxHeight * 0.5 + inkCenterAboveBaseline
         let a = text.color.alpha
         let tint = (text.color.red * a, text.color.green * a, text.color.blue * a, a)
@@ -444,13 +451,14 @@ public enum SceneCompiler {
                 activeTexture = page.texture
                 activeStart = dst.count / 14
             }
+            let s = scales[i]
             guard let g = page.glyphs[ch] else {
                 penX += (page.glyphs[" "]?.advance ?? page.pixelSize * 0.5) * s
                 continue
             }
             if g.w > 0, g.h > 0 {
-                let x0 = snapX(penX + g.left * s)
-                let y0 = snapY(baselineY - g.top * s)
+                let x0 = snapX(penX + g.left * s, natives[i])
+                let y0 = snapY(baselineY - g.top * s, natives[i])
                 let x1 = x0 + g.w * s
                 let y1 = y0 + g.h * s
                 let corners = [RenderPoint(x: x0, y: y0), RenderPoint(x: x1, y: y0),

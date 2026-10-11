@@ -109,3 +109,33 @@ private final class SquareGlyphs: GlyphRasterizer {
     #expect(book.atlas(for: .numeric, capPixels: 10.08, character: "x")?.pixelSize == 16)
     #expect(book.atlas(for: .numeric, capPixels: 9.4, character: "x")?.pixelSize == 12)
 }
+
+/// A glyph present only on a smaller page must still be drawn at the requested size: the
+/// scale belongs to the page each glyph comes from, not to the page the string was matched to.
+@Test func aGlyphTakenFromASmallerPageIsScaledToTheRequestedSize() {
+    func page(_ id: UInt32, size: Float, glyphs: [Character: GlyphBox]) -> FontAtlas {
+        FontAtlas(texture: TextureID(id), atlasWidth: 256, atlasHeight: 256, pixelSize: size,
+                  ascent: size, descent: 0, lineHeight: size, glyphs: glyphs, capHeight: size * 0.7,
+                  sdfRange: 4, native: true)
+    }
+    // "A" exists on both pages, "B" only on the 20px page; both are as tall as their page's cap.
+    let big = page(2, size: 40, glyphs: ["A": GlyphBox(x: 0, y: 0, w: 28, h: 28, advance: 30, left: 0, top: 28)])
+    let small = page(1, size: 20, glyphs: [
+        "A": GlyphBox(x: 0, y: 0, w: 14, h: 14, advance: 15, left: 0, top: 14),
+        "B": GlyphBox(x: 20, y: 0, w: 14, h: 14, advance: 15, left: 0, top: 14),
+    ])
+    var scene = Scene()
+    // capPixels = 7 * 4 = 28 → the 40px page (cap 28) is the match.
+    scene.append(.text(TextCommand(string: "AB", origin: RenderPoint(x: 0, y: 0), scale: 4,
+                                   color: .white, font: .ui)))
+    let frame = SceneCompiler.compile(scene, canvas: RenderSize(width: 400, height: 200),
+                                      framebuffer: RenderSize(width: 400, height: 200),
+                                      fonts: FontBook(atlases: [.ui: big], sized: [.ui: [small, big]]))
+    // Two glyphs, six vertices each, 14 floats per vertex. Measure each quad's pixel height from NDC y.
+    func quadHeight(_ glyph: Int) -> Float {
+        let ys = (0..<6).map { frame.fontVertices[(glyph * 6 + $0) * 14 + 1] }
+        return (ys.max()! - ys.min()!) / 2 * 200
+    }
+    #expect(frame.fontVertices.count == 2 * 6 * 14)
+    #expect(abs(quadHeight(0) - quadHeight(1)) < 0.5, "A \(quadHeight(0)) vs B \(quadHeight(1))")
+}
