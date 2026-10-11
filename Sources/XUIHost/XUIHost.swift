@@ -16,7 +16,9 @@ public final class XUIHost: @unchecked Sendable {
     public let focusStore: FocusStore
 
     private let store = StateStore()
-    private var gestureRuntime = GestureRuntime()
+    /// Slop is in logical canvas units. A phone shows the canvas at about 0.36pt per unit, so the
+    /// 10-unit default is under 4pt of finger travel and a plain tap reads as a drag.
+    private var gestureRuntime = GestureRuntime(tapSlop: 24)
     private var lastFrame: XUIFrame?
     private var gamepadSource: GamepadInputSource?
 

@@ -77,7 +77,7 @@ private struct _ScrollViewPrimitive<Content: XView>: XView, _PrimitiveXView {
         )
         node.clipsToBounds = true
         node.scrollViewportID = self.id
-        node.dragGesture = DragGesture(minimumDistance: 8)
+        node.dragGesture = DragGesture(minimumDistance: 28)
             .onChanged { value in dragChanged(value.translation.y) }
             .onEnded { _ in dragEnded() }
         return [node]
