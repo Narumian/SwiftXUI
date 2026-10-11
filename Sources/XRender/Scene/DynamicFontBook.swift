@@ -24,7 +24,7 @@ public final class DynamicFontBook: @unchecked Sendable {
     private var registered: Set<TextureID> = []
     private var nextTexture: UInt32
 
-    public var maxPagesPerSize = 16
+    public var maxPagesPerSize = 48
 
     /// Discrete sizes prevent responsive layout from creating a new page for
     /// every intermediate scale.
