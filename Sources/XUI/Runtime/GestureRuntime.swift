@@ -71,6 +71,11 @@ public struct GestureRuntime: Sendable {
                 tapEligible: true,
                 dragStarted: drag?.minimumDistance == 0
             )
+            // A drag with no minimum distance begins at touch-down: tell it so right away, with no movement yet,
+            // so a press can be shown before the finger moves or lifts.
+            if let drag, drag.minimumDistance == 0 {
+                drag.performChanged(makeValue(input: input, startLocation: input.position))
+            }
             return true
 
         case .moved:

@@ -58,3 +58,19 @@ private func renderGestureView(_ view: some XView) async -> RenderResult {
     let endedAfterCancel = runtime.handle(PointerInput(id: 3, phase: .ended, position: Point(x: 20, y: 20)), in: render)
     #expect(!endedAfterCancel)
 }
+
+@Test @XUIActor func dragWithNoMinimumDistanceReportsTheTouchDownBeforeAnyMovement() async {
+    let recorder = SendableDragRecorder()
+    let view = Color.black
+        .frame(width: 100, height: 100, alignment: .topLeading)
+        .gesture(DragGesture(minimumDistance: 0).onChanged { recorder.changed.append($0) }.onEnded { recorder.ended.append($0) })
+    let render = await renderGestureView(view)
+    var runtime = GestureRuntime()
+
+    _ = runtime.handle(PointerInput(id: 1, phase: .began, position: Point(x: 10, y: 10), timestamp: 1), in: render)
+    #expect(recorder.changed.count == 1)
+    #expect(recorder.changed[0].translation == Point(x: 0, y: 0))
+    #expect(recorder.ended.isEmpty)
+    _ = runtime.handle(PointerInput(id: 1, phase: .ended, position: Point(x: 10, y: 10), timestamp: 2), in: render)
+    #expect(recorder.ended.count == 1)
+}
