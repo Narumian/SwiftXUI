@@ -111,13 +111,18 @@ public enum CompiledDraw: Sendable, Equatable {
 /// An `X3DCommand` mapped to framebuffer pixels. `views` holds each embedded
 /// view's frame in the order its `.view` items appear in the graph.
 public struct CompiledX3D: Sendable, Equatable {
+    /// The part of the command's rect that lies inside the framebuffer.
     public var rect: PixelRect
+    /// The rect as laid out (x, y, width, height in framebuffer pixels), which may reach past the framebuffer.
+    /// Shaders get this as their origin and resolution, so a drawing that overflows is cut off instead of squeezed to fit.
+    public var exactRect: SIMD4<Float>?
     public var graph: X3DGraph
     public var views: [CompiledFrame]
     public var planes: [CompiledX3DPlane]
 
-    public init(rect: PixelRect, graph: X3DGraph, views: [CompiledFrame], planes: [CompiledX3DPlane] = []) {
+    public init(rect: PixelRect, exactRect: SIMD4<Float>? = nil, graph: X3DGraph, views: [CompiledFrame], planes: [CompiledX3DPlane] = []) {
         self.rect = rect
+        self.exactRect = exactRect
         self.graph = graph
         self.views = views
         self.planes = planes
@@ -180,6 +185,23 @@ struct Letterbox {
         } else {
             return (x / canvas.width * 2 - 1, 1 - y / canvas.height * 2)
         }
+    }
+
+    /// The rect in framebuffer pixels exactly as laid out, so it may start before the framebuffer or end past it.
+    func exactPixels(_ rect: RenderRect) -> SIMD4<Float> {
+        let x = fit ? offsetX + rect.x * scale : rect.x / canvas.width * fb.width
+        let y = fit ? offsetY + rect.y * scale : rect.y / canvas.height * fb.height
+        let w = fit ? rect.width * scale : rect.width / canvas.width * fb.width
+        let h = fit ? rect.height * scale : rect.height / canvas.height * fb.height
+        return SIMD4(x, y, w, h)
+    }
+
+    /// The part of the rect that lies inside the framebuffer.
+    func visiblePixels(_ rect: RenderRect) -> PixelRect {
+        let exact = exactPixels(rect)
+        let x0 = min(max(exact.x, 0), fb.width), y0 = min(max(exact.y, 0), fb.height)
+        let x1 = min(max(exact.x + exact.z, 0), fb.width), y1 = min(max(exact.y + exact.w, 0), fb.height)
+        return PixelRect(x: UInt32(x0), y: UInt32(y0), width: UInt32(max(x1 - x0, 0)), height: UInt32(max(y1 - y0, 0)))
     }
 
     func pixels(_ rect: RenderRect) -> PixelRect {
@@ -326,7 +348,7 @@ public enum SceneCompiler {
                     }
                 }
                 let index = frame.x3d.count
-                frame.x3d.append(CompiledX3D(rect: box.pixels(x3d.rect), graph: x3d.graph, views: views, planes: planes))
+                frame.x3d.append(CompiledX3D(rect: box.visiblePixels(x3d.rect), exactRect: box.exactPixels(x3d.rect), graph: x3d.graph, views: views, planes: planes))
                 frame.draws.append(.x3d(index: index))
             }
         }

@@ -5,6 +5,8 @@ let postWGSL = """
 struct Effect {
     rect: vec4<f32>,
     params: vec4<f32>,
+    params2: vec4<f32>,
+    params3: vec4<f32>,
     kind: f32,
 };
 
@@ -15,12 +17,18 @@ struct Uniforms {
     effectCount: f32,
     // 0 = final opaque post pass; 1 = alpha-composite a transparent view layer.
     composition: f32,
+    // distance = depthA / (depthB - depth); depthFocus is the distance to the camera's target.
+    depthA: f32,
+    depthB: f32,
+    depthFocus: f32,
     effects: array<Effect, 16>,
 };
 
 @group(0) @binding(0) var sceneTexture: texture_2d<f32>;
 @group(0) @binding(1) var sceneSampler: sampler;
 @group(0) @binding(2) var<uniform> u: Uniforms;
+// The scene depth of the last X3D pass that drew with depth; a 1x1 stand-in when none did.
+@group(0) @binding(3) var depthTexture: texture_depth_2d;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
@@ -154,6 +162,39 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
             let mask = 1.0 - smoothstep(-1.0, 1.0, length(fragCoord.xy - center) - radius);
             col = col * mask;
             alpha = alpha * mask;
+        } else if (effect.kind == 10.0) {
+            // Condition: a ripple of the picture itself, a drained look, a colour wash, a depth fog and a rim.
+            // Everything is scaled by the layer's own alpha, so it never paints past what the subtree drew.
+            let ripple = effect.params2.y;
+            let wave = vec2<f32>(
+                sin(uv.y * 24.0 + u.time * 1.7) + 0.5 * sin(uv.y * 53.0 - u.time * 2.3),
+                cos(uv.x * 19.0 - u.time * 1.4) + 0.5 * cos(uv.x * 47.0 + u.time * 2.1)
+            ) * (0.0011 * ripple);
+            let sampled = textureSample(sceneTexture, sceneSampler, clamp(uv + wave, vec2<f32>(0.0), vec2<f32>(1.0)));
+            // The layer holds premultiplied colour: grade the straight colour, then premultiply again.
+            let coverage = select(1.0, sampled.a, u.composition == 1.0);
+            var shade = sampled.rgb / max(coverage, 0.001);
+            let luma = dot(shade, vec3<f32>(0.299, 0.587, 0.114));
+            shade = mix(shade, vec3<f32>(luma), effect.params2.x * 0.85) * (1.0 - 0.28 * effect.params2.x);
+
+            // Distance from the camera where X3D drew depth; flat UI (cleared depth) reads as infinitely far and takes no fog.
+            let depthSize = textureDimensions(depthTexture);
+            var fog = 0.0;
+            if (depthSize.x > 1u) {
+                let z = textureLoad(depthTexture, vec2<i32>(fragCoord.xy), 0);
+                if (z < 0.99999) {
+                    let distance = u.depthA / max(u.depthB - z, 1e-6);
+                    // Behind the camera's target the picture sinks into the mist; in front of it, it stays clear.
+                    fog = smoothstep(-0.2, 2.2, distance - u.depthFocus) * effect.params2.z;
+                }
+            }
+            let tint = effect.params.rgb;
+            let rim = smoothstep(0.35, 0.95, length((uv - vec2<f32>(0.5)) * vec2<f32>(1.0, 1.1)) * 1.4);
+            shade = mix(shade, tint * (luma * 1.1 + 0.04), clamp(effect.params.w, 0.0, 1.0));
+            shade = mix(shade, tint * (0.35 + luma), clamp(fog, 0.0, 0.92));
+            shade = mix(shade, effect.params3.rgb, clamp(effect.params3.w * effect.params2.w * rim, 0.0, 1.0));
+            col = shade * coverage;
+            alpha = select(alpha, sampled.a, u.composition == 1.0);
         } else if (effect.kind == 8.0) {
             // Warp: a travelling sine distortion of the subtree's own pixels.
             let amount = clamp(effect.params.w, 0.0, 1.0) * inside * layerMask;

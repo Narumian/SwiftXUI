@@ -94,6 +94,7 @@ public enum ShaderLibrary {
     public static let lenticularKey: ShaderKey = "swiftx.lenticular"
     public static let warpKey: ShaderKey = "swiftx.warp"
     public static let circleClipKey: ShaderKey = "swiftx.circleClip"
+    public static let conditionKey: ShaderKey = "swiftx.condition"
 
     public static func vhs(intensity: Float = 1) -> VHSShader {
         VHSShader(intensity: intensity)
@@ -121,6 +122,14 @@ public enum ShaderLibrary {
 
     public static func hitFlash(amount: Float = 1) -> HitFlashShader {
         HitFlashShader(amount: amount)
+    }
+
+    public static func condition(
+        tint: SIMD3<Float> = .zero, tintAmount: Float = 0, drain: Float = 0, ripple: Float = 0, fog: Float = 0, pulse: Float = 1,
+        edge: SIMD3<Float> = .zero, edgeAmount: Float = 0
+    ) -> ConditionShader {
+        ConditionShader(tint: tint, tintAmount: tintAmount, drain: drain, ripple: ripple, fog: fog, pulse: pulse,
+                        edge: edge, edgeAmount: edgeAmount)
     }
 
     public static func circleClip() -> CircleClipShader {
@@ -296,5 +305,35 @@ public struct WarpShader: Shader {
 
     public func encode(into uniforms: inout ShaderUniforms) {
         uniforms.write(SIMD4<Float>(phase, frequency, amplitude, strength))
+    }
+}
+
+/// A whole-screen state treatment for a subtree: a colour wash, a drained (greyed) look, a slow ripple of the picture itself,
+/// a depth fog that thickens with distance from the camera (only where X3D drew depth; flat UI is left clear), and a coloured
+/// rim. The renderer hands it the scene depth, so the fog follows the picture's 3D shape.
+public struct ConditionShader: Shader {
+    public static let key = ShaderLibrary.conditionKey
+    public static let scope: ShaderScope = .layer
+
+    public var tint: SIMD3<Float>
+    public var tintAmount: Float
+    public var drain: Float
+    public var ripple: Float
+    public var fog: Float
+    /// Multiplies the rim, so a caller can breathe it.
+    public var pulse: Float
+    public var edge: SIMD3<Float>
+    public var edgeAmount: Float
+
+    public init(tint: SIMD3<Float> = .zero, tintAmount: Float = 0, drain: Float = 0, ripple: Float = 0, fog: Float = 0,
+                pulse: Float = 1, edge: SIMD3<Float> = .zero, edgeAmount: Float = 0) {
+        self.tint = tint; self.tintAmount = tintAmount; self.drain = drain; self.ripple = ripple
+        self.fog = fog; self.pulse = pulse; self.edge = edge; self.edgeAmount = edgeAmount
+    }
+
+    public func encode(into uniforms: inout ShaderUniforms) {
+        uniforms.write(SIMD4<Float>(tint.x, tint.y, tint.z, tintAmount))
+        uniforms.write(SIMD4<Float>(drain, ripple, fog, pulse))
+        uniforms.write(SIMD4<Float>(edge.x, edge.y, edge.z, edgeAmount))
     }
 }

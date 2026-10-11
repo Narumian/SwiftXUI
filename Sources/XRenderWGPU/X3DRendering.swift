@@ -64,6 +64,14 @@ fn x3d_blit(in: X3DFullscreen) -> @location(0) vec4<f32> {
     return textureSample(x3dSource, x3dSampler, in.uv);
 }
 
+// A plane of XView content: texels that drew nothing are dropped, so only what is really there writes depth.
+@fragment
+fn x3d_plane_blit(in: X3DFullscreen) -> @location(0) vec4<f32> {
+    let colour = textureSample(x3dSource, x3dSampler, in.uv);
+    if (colour.a < 0.02) { discard; }
+    return colour;
+}
+
 @fragment
 fn x3d_fade(in: X3DFullscreen) -> @location(0) vec4<f32> {
     return vec4(0.0, 0.0, 0.0, clamp(x3dParams[0], 0.0, 1.0));
@@ -114,6 +122,10 @@ private struct X3DViewport {
     var x: UInt32, y: UInt32, width: UInt32, height: UInt32
     var attachmentWidth: UInt32, attachmentHeight: UInt32
     var depth: WGPUTextureView?
+    /// Where shaders think the drawing is (origin) and how big it is (resolution), when that differs from the viewport
+    /// because the drawing overflows the target.
+    var exactOrigin: SIMD2<Float>?
+    var exactSize: SIMD2<Float>?
 }
 
 extension WGPURenderer {
@@ -179,7 +191,9 @@ extension WGPURenderer {
         let output = X3DViewport(view: target.view, format: surfaceFormat, x: x, y: y,
                                  width: min(x3d.rect.width, configuredWidth - x),
                                  height: min(x3d.rect.height, configuredHeight - y),
-                                 attachmentWidth: configuredWidth, attachmentHeight: configuredHeight)
+                                 attachmentWidth: configuredWidth, attachmentHeight: configuredHeight,
+                                 exactOrigin: x3d.exactRect.map { SIMD2($0.x, $0.y) },
+                                 exactSize: x3d.exactRect.map { SIMD2($0.z, $0.w) })
         guard output.width > 0, output.height > 0 else { return }
         for resource in x3d.graph.resources {
             ensureX3DResource(resource, outputWidth: output.width, outputHeight: output.height)
@@ -200,6 +214,15 @@ extension WGPURenderer {
                 }
                 if render.depth, let attached = viewport {
                     viewport?.depth = x3dDepthView(width: attached.attachmentWidth, height: attached.attachmentHeight)
+                    if let depthView = viewport?.depth, case .output = render.target {
+                        x3dRecordDepth(depthView, camera: render.items.lazy.compactMap { item -> X3DCamera? in
+                            switch item {
+                            case .draw(let draw): return draw.camera
+                            case .plane(_, _, let camera, _): return camera
+                            default: return nil
+                            }
+                        }.first)
+                    }
                 }
                 guard let viewport else {
                     for item in render.items {
@@ -254,7 +277,7 @@ extension WGPURenderer {
                             lastFrame: x3dFrameIndex
                         )
                         let draw = X3DDraw(
-                            shader: x3dBuiltinKey, vertexEntry: "x3d_plane", fragmentEntry: "x3d_blit",
+                            shader: x3dBuiltinKey, vertexEntry: "x3d_plane", fragmentEntry: "x3d_plane_blit",
                             vertexCount: 6, bindings: [X3DBinding(resource: id, access: .read)],
                             uniforms: [size.width / 200, size.height / 200,
                                        plane.uv.x, plane.uv.y, plane.uv.z, plane.uv.w],
@@ -366,7 +389,7 @@ extension WGPURenderer {
         if let target = x3dDepthTargets[key] { return target.view }
         if x3dDepthTargets.count >= 4 { releaseX3DDepthTargets() }
         var descriptor = WGPUTextureDescriptor()
-        descriptor.usage = WGPUTextureUsage_RenderAttachment
+        descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
         descriptor.dimension = WGPUTextureDimension_2D
         descriptor.size = WGPUExtent3D(width: width, height: height, depthOrArrayLayers: 1)
         descriptor.format = WGPUTextureFormat_Depth32Float
@@ -408,6 +431,16 @@ extension WGPURenderer {
             x3dPlaneTargets.append(target)
         }
         return target
+    }
+
+    /// Remembers the depth a pass left (it is cleared by the next pass that draws with depth) and the camera it was drawn with.
+    func x3dRecordDepth(_ view: WGPUTextureView, camera: X3DCamera?) {
+        let near = camera?.near ?? 0.05, far = camera?.far ?? 100
+        let focus = camera.map { camera -> Float in
+            let offset = camera.position - camera.target
+            return (offset.x * offset.x + offset.y * offset.y + offset.z * offset.z).squareRoot()
+        } ?? 0
+        x3dDepthInfo = (view, near * far / (far - near), far / (far - near), focus)
     }
 
     func releaseX3DDepthTargets() {
@@ -460,7 +493,8 @@ extension WGPURenderer {
                                                depth: viewport.depth != nil,
                                                signature: layout.signature, layout: layout.pipeline),
               let frameGroup = x3dFrameGroup(width: viewport.width, height: viewport.height,
-                                             x: viewport.x, y: viewport.y, params: draw.uniforms,
+                                             x: viewport.x, y: viewport.y,
+                                             exactOrigin: viewport.exactOrigin, exactSize: viewport.exactSize, params: draw.uniforms,
                                              camera: draw.camera, model: draw.model) else { return }
         wgpuRenderPassEncoderSetPipeline(pass, pipeline)
         wgpuRenderPassEncoderSetBindGroup(pass, 0, frameGroup, 0, nil)
@@ -499,11 +533,13 @@ extension WGPURenderer {
     // MARK: bind groups
 
     private func x3dFrameGroup(width: UInt32, height: UInt32, x: UInt32, y: UInt32,
+                               exactOrigin: SIMD2<Float>? = nil, exactSize: SIMD2<Float>? = nil,
                                params: [Float], camera: X3DCamera?, model: X3DTransform) -> WGPUBindGroup? {
         guard let layout = x3dFrameLayout(), let sampler = ensureX3DSampler() else { return nil }
+        // `resolution` and `origin` describe the drawing as laid out; the camera's aspect follows the viewport actually drawn.
         var frame: [UInt32] = [
-            Float(width).bitPattern, Float(height).bitPattern,
-            Float(x).bitPattern, Float(y).bitPattern,
+            (exactSize?.x ?? Float(width)).bitPattern, (exactSize?.y ?? Float(height)).bitPattern,
+            (exactOrigin?.x ?? Float(x)).bitPattern, (exactOrigin?.y ?? Float(y)).bitPattern,
             x3dTime.bitPattern, x3dDeltaTime.bitPattern,
             x3dFrameIndex, 0,
         ]
@@ -760,7 +796,7 @@ extension WGPURenderer {
                             var depthState = WGPUDepthStencilState()
                             depthState.format = WGPUTextureFormat_Depth32Float
                             let overlay = draw.vertexEntry == "x3d_fullscreen"
-                            depthState.depthWriteEnabled = mode == .opaque && !overlay
+                            depthState.depthWriteEnabled = (mode == .opaque || draw.fragmentEntry == "x3d_plane_blit") && !overlay
                                 ? WGPUOptionalBool_True : WGPUOptionalBool_False
                             depthState.depthCompare = overlay ? WGPUCompareFunction_Always : WGPUCompareFunction_Less
                             for face in [\WGPUDepthStencilState.stencilFront, \WGPUDepthStencilState.stencilBack] {

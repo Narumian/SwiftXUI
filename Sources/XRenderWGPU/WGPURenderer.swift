@@ -6,10 +6,12 @@ import XShader
 /// Everything submitted here is backend-neutral geometry compiled from a `Scene`.
 public final class WGPURenderer: XRenderer {
     private static let maxShaderRegions = 16
-    // resolution/time/intensity/effectCount + implicit WGSL alignment gap +
-    // 16 Effect structs (rect, params, kind + trailing padding). The array's
-    // 16-byte alignment places it at float offset 8.
-    private static let postUniformFloatCount = 8 + maxShaderRegions * 12
+    // resolution/time/intensity/effectCount/composition, the three depth-linearising
+    // constants, and padding up to a 16-byte boundary (12 floats), then 16 Effect
+    // structs (rect, three param vec4s, kind + trailing padding: 20 floats each).
+    private static let postHeaderFloatCount = 12
+    private static let effectFloatCount = 20
+    private static let postUniformFloatCount = postHeaderFloatCount + maxShaderRegions * effectFloatCount
     let instance: WGPUInstance
     /// nil for a headless renderer (`init(headless:)`), which only draws to
     /// offscreen textures via `renderToImage`.
@@ -94,6 +96,12 @@ public final class WGPURenderer: XRenderer {
     var x3dFailures: Set<String> = []
     var x3dDepthTargets: [String: (texture: WGPUTexture, view: WGPUTextureView)] = [:]
     var x3dPlaneTargets: [(texture: WGPUTexture, view: WGPUTextureView, width: UInt32, height: UInt32)] = []
+    /// The depth of the X3D pass that last drew with depth in the scene being post-processed, with what is needed to turn it back
+    /// into a distance from its camera: `distance = a / (b - depth)`, and the distance to the camera's target.
+    var x3dDepthInfo: (view: WGPUTextureView, a: Float, b: Float, focus: Float)?
+    /// A 1×1 stand-in bound when no pass drew depth; the shader recognises it by its size.
+    var postDummyDepthTexture: WGPUTexture?
+    var postDummyDepthView: WGPUTextureView?
     var x3dFrameIndex: UInt32 = 0
     var x3dLastTime: Float?
     var x3dTime: Float = 0
@@ -179,6 +187,8 @@ public final class WGPURenderer: XRenderer {
         if let postBindGroupLayout { wgpuBindGroupLayoutRelease(postBindGroupLayout) }
         if let postSampler { wgpuSamplerRelease(postSampler) }
         if let postShader { wgpuShaderModuleRelease(postShader) }
+        if let postDummyDepthView { wgpuTextureViewRelease(postDummyDepthView) }
+        if let postDummyDepthTexture { wgpuTextureRelease(postDummyDepthTexture) }
         releaseShaderLayerTargets()
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
@@ -455,6 +465,7 @@ public final class WGPURenderer: XRenderer {
                              into surfaceView: WGPUTextureView, encoder: WGPUCommandEncoder) {
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
+        x3dDepthInfo = nil
         advanceX3DClock(time)
         _ = upload(frame.shapeVertices, into: &vertexBuffer, capacity: &vertexBufferCapacity)
         _ = upload(frame.spriteVertices, into: &spriteVertexBuffer, capacity: &spriteVertexBufferCapacity)
@@ -674,10 +685,13 @@ public final class WGPURenderer: XRenderer {
                 let layer = frame.shaderLayers[index]
                 guard let target = ensureShaderLayerTarget(at: depth) else { return }
                 let layerGeometry = makeTransientGeometryBuffers(for: layer.frame)
+                let outerDepth = x3dDepthInfo
+                x3dDepthInfo = nil
                 drawScene(layer.frame, geometry: layerGeometry, into: target.view, encoder: encoder,
                           clear: RenderColor(0, 0, 0, 0), time: time, depth: depth + 1)
                 runLayerPost(into: targetView, sourceView: target.view, time: time,
                              layer: layer, encoder: encoder)
+                x3dDepthInfo = x3dDepthInfo ?? outerDepth
                 pass = beginPass(load: true)
                 guard pass != nil else { return }
             }
@@ -696,26 +710,30 @@ public final class WGPURenderer: XRenderer {
         regions: [CompiledShaderRegion],
         encoder: WGPUCommandEncoder
     ) {
-        guard let postPipeline, let postBindGroup, let postUniformBuffer else { return }
+        guard let postPipeline, let postUniformBuffer, let postSampler, let postBindGroupLayout else { return }
         var uniforms = Array(repeating: Float(0), count: Self.postUniformFloatCount)
         uniforms[0] = Float(configuredWidth)
         uniforms[1] = Float(configuredHeight)
         uniforms[2] = time
         uniforms[3] = intensity
         uniforms[4] = Float(min(regions.count, Self.maxShaderRegions))
+        writeDepthConstants(into: &uniforms)
         for (index, region) in regions.prefix(Self.maxShaderRegions).enumerated() {
-            let base = 8 + index * 12
+            let base = Self.postHeaderFloatCount + index * Self.effectFloatCount
             uniforms[base] = Float(region.rect.x)
             uniforms[base + 1] = Float(region.rect.y)
             uniforms[base + 2] = Float(region.rect.width)
             uniforms[base + 3] = Float(region.rect.height)
-            for (offset, value) in region.shader.uniforms.values.prefix(4).enumerated() {
+            for (offset, value) in region.shader.uniforms.values.prefix(12).enumerated() {
                 uniforms[base + 4 + offset] = value
             }
-            uniforms[base + 8] = Self.shaderKind(for: region.shader.key)
+            uniforms[base + 16] = Self.shaderKind(for: region.shader.key)
         }
         uniforms[5] = 0
         uniforms.withUnsafeBytes { wgpuQueueWriteBuffer(queue, postUniformBuffer, 0, $0.baseAddress, $0.count) }
+        guard let postBindGroup = makePostBindGroup(layout: postBindGroupLayout, source: sceneView,
+                                                    sampler: postSampler, uniform: postUniformBuffer) else { return }
+        transientPostBindGroups.append(postBindGroup)
 
         var attachment = WGPURenderPassColorAttachment()
         attachment.view = surfaceView
@@ -736,6 +754,50 @@ public final class WGPURenderer: XRenderer {
         }
     }
 
+    /// Linearising constants for the scene depth, so a post shader can turn depth back into a distance from the camera.
+    private func writeDepthConstants(into uniforms: inout [Float]) {
+        if let info = x3dDepthInfo {
+            uniforms[6] = info.a
+            uniforms[7] = info.b
+            uniforms[8] = info.focus
+        }
+    }
+
+    /// The bind group every post draw uses: the picture, a sampler, the uniforms and the scene depth (a 1×1 stand-in without one).
+    private func makePostBindGroup(layout: WGPUBindGroupLayout, source: WGPUTextureView, sampler: WGPUSampler,
+                                   uniform: WGPUBuffer) -> WGPUBindGroup? {
+        guard let depthView = x3dDepthInfo?.view ?? ensureDummyDepth() else { return nil }
+        var entries = [WGPUBindGroupEntry(), WGPUBindGroupEntry(), WGPUBindGroupEntry(), WGPUBindGroupEntry()]
+        entries[0].binding = 0; entries[0].textureView = source
+        entries[1].binding = 1; entries[1].sampler = sampler
+        entries[2].binding = 2; entries[2].buffer = uniform
+        entries[2].size = UInt64(Self.postUniformFloatCount * MemoryLayout<Float>.stride)
+        entries[3].binding = 3; entries[3].textureView = depthView
+        return entries.withUnsafeBufferPointer { pointer -> WGPUBindGroup? in
+            var descriptor = WGPUBindGroupDescriptor()
+            descriptor.layout = layout
+            descriptor.entryCount = pointer.count
+            descriptor.entries = pointer.baseAddress
+            return wgpuDeviceCreateBindGroup(device, &descriptor)
+        }
+    }
+
+    private func ensureDummyDepth() -> WGPUTextureView? {
+        if let postDummyDepthView { return postDummyDepthView }
+        var descriptor = WGPUTextureDescriptor()
+        descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
+        descriptor.dimension = WGPUTextureDimension_2D
+        descriptor.size = WGPUExtent3D(width: 1, height: 1, depthOrArrayLayers: 1)
+        descriptor.format = WGPUTextureFormat_Depth32Float
+        descriptor.mipLevelCount = 1
+        descriptor.sampleCount = 1
+        guard let texture = wgpuDeviceCreateTexture(device, &descriptor),
+              let view = wgpuTextureCreateView(texture, nil) else { return nil }
+        postDummyDepthTexture = texture
+        postDummyDepthView = view
+        return view
+    }
+
     /// Apply one `.layer` shader to an isolated transparent texture and alpha
     /// composite it over the already-painted parent target.
     func runLayerPost(
@@ -752,14 +814,16 @@ public final class WGPURenderer: XRenderer {
         uniforms[2] = time
         uniforms[4] = 1
         uniforms[5] = 1
-        uniforms[8] = Float(layer.rect.x)
-        uniforms[9] = Float(layer.rect.y)
-        uniforms[10] = Float(layer.rect.width)
-        uniforms[11] = Float(layer.rect.height)
-        for (offset, value) in layer.shader.uniforms.values.prefix(4).enumerated() {
-            uniforms[12 + offset] = value
+        writeDepthConstants(into: &uniforms)
+        let first = Self.postHeaderFloatCount
+        uniforms[first] = Float(layer.rect.x)
+        uniforms[first + 1] = Float(layer.rect.y)
+        uniforms[first + 2] = Float(layer.rect.width)
+        uniforms[first + 3] = Float(layer.rect.height)
+        for (offset, value) in layer.shader.uniforms.values.prefix(12).enumerated() {
+            uniforms[first + 4 + offset] = value
         }
-        uniforms[16] = Self.shaderKind(for: layer.shader.key)
+        uniforms[first + 16] = Self.shaderKind(for: layer.shader.key)
 
         var bufferDescriptor = WGPUBufferDescriptor()
         bufferDescriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst
@@ -767,18 +831,7 @@ public final class WGPURenderer: XRenderer {
         guard let uniform = wgpuDeviceCreateBuffer(device, &bufferDescriptor) else { return }
         uniforms.withUnsafeBytes { wgpuQueueWriteBuffer(queue, uniform, 0, $0.baseAddress, $0.count) }
 
-        var entries = [WGPUBindGroupEntry(), WGPUBindGroupEntry(), WGPUBindGroupEntry()]
-        entries[0].binding = 0; entries[0].textureView = sourceView
-        entries[1].binding = 1; entries[1].sampler = postSampler
-        entries[2].binding = 2; entries[2].buffer = uniform
-        entries[2].size = UInt64(Self.postUniformFloatCount * MemoryLayout<Float>.stride)
-        let bindGroup = entries.withUnsafeBufferPointer { pointer -> WGPUBindGroup? in
-            var descriptor = WGPUBindGroupDescriptor()
-            descriptor.layout = postBindGroupLayout
-            descriptor.entryCount = pointer.count
-            descriptor.entries = pointer.baseAddress
-            return wgpuDeviceCreateBindGroup(device, &descriptor)
-        }
+        let bindGroup = makePostBindGroup(layout: postBindGroupLayout, source: sourceView, sampler: postSampler, uniform: uniform)
         guard let bindGroup else { wgpuBufferRelease(uniform); return }
         transientPostUniformBuffers.append(uniform)
         transientPostBindGroups.append(bindGroup)
@@ -871,6 +924,7 @@ public final class WGPURenderer: XRenderer {
         case ShaderLibrary.lenticularKey: return 7
         case ShaderLibrary.warpKey: return 8
         case ShaderLibrary.circleClipKey: return 9
+        case ShaderLibrary.conditionKey: return 10
         default: return 0
         }
     }
@@ -1011,7 +1065,7 @@ public final class WGPURenderer: XRenderer {
                 wgpuSamplerRelease(sampler); return false
             }
 
-            var layoutEntries = [WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry()]
+            var layoutEntries = [WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry()]
             layoutEntries[0].binding = 0
             layoutEntries[0].visibility = WGPUShaderStage_Fragment
             layoutEntries[0].texture.sampleType = WGPUTextureSampleType_Float
@@ -1022,6 +1076,10 @@ public final class WGPURenderer: XRenderer {
             layoutEntries[2].binding = 2
             layoutEntries[2].visibility = WGPUShaderStage_Fragment
             layoutEntries[2].buffer.type = WGPUBufferBindingType_Uniform
+            layoutEntries[3].binding = 3
+            layoutEntries[3].visibility = WGPUShaderStage_Fragment
+            layoutEntries[3].texture.sampleType = WGPUTextureSampleType_Depth
+            layoutEntries[3].texture.viewDimension = WGPUTextureViewDimension_2D
             let bindGroupLayout = layoutEntries.withUnsafeBufferPointer { pointer -> WGPUBindGroupLayout? in
                 var descriptor = WGPUBindGroupLayoutDescriptor()
                 descriptor.entryCount = pointer.count
@@ -1053,21 +1111,8 @@ public final class WGPURenderer: XRenderer {
         }
 
         if postBindGroup == nil, let sceneView, let postSampler, let postUniformBuffer, let postBindGroupLayout {
-            var entries = [WGPUBindGroupEntry(), WGPUBindGroupEntry(), WGPUBindGroupEntry()]
-            entries[0].binding = 0
-            entries[0].textureView = sceneView
-            entries[1].binding = 1
-            entries[1].sampler = postSampler
-            entries[2].binding = 2
-            entries[2].buffer = postUniformBuffer
-            entries[2].size = UInt64(Self.postUniformFloatCount * MemoryLayout<Float>.stride)
-            postBindGroup = entries.withUnsafeBufferPointer { pointer -> WGPUBindGroup? in
-                var descriptor = WGPUBindGroupDescriptor()
-                descriptor.layout = postBindGroupLayout
-                descriptor.entryCount = pointer.count
-                descriptor.entries = pointer.baseAddress
-                return wgpuDeviceCreateBindGroup(device, &descriptor)
-            }
+            postBindGroup = makePostBindGroup(layout: postBindGroupLayout, source: sceneView,
+                                              sampler: postSampler, uniform: postUniformBuffer)
         }
         return postPipeline != nil && postBindGroup != nil
     }
