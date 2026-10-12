@@ -272,3 +272,57 @@ private func square(_ layer: RenderLayer, color: RenderColor = .white) -> DrawCo
     guard case .sprite(let last, _, _) = frame.draws[2] else { Issue.record("last sprite"); return }
     #expect(last == TextureID(3))
 }
+
+// MARK: - Strokes lay down no overlap
+
+/// Summed area of the triangles in a mesh of `x, y, r, g, b, a` vertices.
+private func meshArea(_ mesh: [Float]) -> Float {
+    var total: Float = 0
+    var i = 0
+    while i + 17 < mesh.count {
+        let ax = mesh[i], ay = mesh[i + 1], bx = mesh[i + 6], by = mesh[i + 7], cx = mesh[i + 12], cy = mesh[i + 13]
+        total += abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
+        i += 18
+    }
+    return total
+}
+
+@Test func aClosedStrokeCoversItsRingOnce() {
+    // A translucent stroke is only even if no piece is drawn twice: the triangles add up to the ring and no more.
+    let radius: Float = 40, width: Float = 6, count = 64
+    let ring = (0..<count).map { i -> RenderPoint in
+        let a = Float(i) / Float(count) * 2 * .pi
+        return RenderPoint(x: 50 + cos(a) * radius, y: 50 + sin(a) * radius)
+    }
+    let mesh = ShapeMesher.mesh(ShapeCommand(geometry: .stroke(points: ring, width: width, closed: true), color: .white))
+    let expected = 2 * .pi * radius * width
+    #expect(abs(meshArea(mesh) - expected) / expected < 0.02, "area \(meshArea(mesh)) vs ring \(expected)")
+}
+
+@Test func aRoundedRectBorderCoversItsRingOnce() {
+    // The same, with the corner arcs a rounded rectangle's border is made of.
+    let r: Float = 12, w: Float = 100, h: Float = 60
+    var points: [RenderPoint] = []
+    for (center, start) in [(RenderPoint(x: r, y: r), Float.pi), (RenderPoint(x: w - r, y: r), -Float.pi / 2),
+                            (RenderPoint(x: w - r, y: h - r), 0), (RenderPoint(x: r, y: h - r), Float.pi / 2)] {
+        for i in 0...8 {
+            let a = start + Float(i) / 8 * (.pi / 2)
+            points.append(RenderPoint(x: center.x + cos(a) * r, y: center.y + sin(a) * r))
+        }
+    }
+    let width: Float = 4
+    let mesh = ShapeMesher.mesh(ShapeCommand(geometry: .stroke(points: points, width: width, closed: true), color: .white))
+    // Perimeter of the rounded rectangle times the width (the polygon is a little shorter than the true arc).
+    let perimeter = 2 * (w - 2 * r) + 2 * (h - 2 * r) + 2 * .pi * r
+    #expect(abs(meshArea(mesh) - perimeter * width) / (perimeter * width) < 0.03)
+}
+
+@Test func anOpenStrokeEndsInHalfDiscsAndNothingFolds() {
+    let line = [RenderPoint(x: 0, y: 0), RenderPoint(x: 100, y: 0)]
+    let mesh = ShapeMesher.mesh(ShapeCommand(geometry: .stroke(points: line, width: 10, closed: false), color: .white))
+    // A 100 x 10 bar plus a half disc of radius 5 at each end.
+    let expected: Float = 100 * 10 + .pi * 25
+    #expect(abs(meshArea(mesh) - expected) / expected < 0.03)
+    let xs = stride(from: 0, to: mesh.count, by: 6).map { mesh[$0] }
+    #expect(xs.min()! < -4.5 && xs.max()! > 104.5)
+}

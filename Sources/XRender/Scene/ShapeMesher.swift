@@ -117,30 +117,97 @@ enum ShapeMesher {
         }
     }
 
+    /// A stroke is laid down without overlap, so a translucent colour has the same strength everywhere along it: each segment's
+    /// quad shares its edge with the next one at a mitred join. Only a very sharp corner (past 120 degrees of turn) falls back to a
+    /// round join, and an open line ends in a half disc; those are the only places pieces meet more than edge to edge.
     private static func appendStroke(
         _ out: inout [Float], _ points: [RenderPoint], width: Float, closed: Bool,
         color: RenderColor, t: Transform2D
     ) {
-        guard points.count >= 2 else { return }
+        var pts: [RenderPoint] = []
+        for point in points {
+            if let last = pts.last, abs(point.x - last.x) + abs(point.y - last.y) < 0.0001 { continue }
+            pts.append(point)
+        }
+        if closed, pts.count > 1, let first = pts.first, let last = pts.last, abs(first.x - last.x) + abs(first.y - last.y) < 0.0001 {
+            pts.removeLast()
+        }
+        guard pts.count >= 2 else { return }
         let hw = max(width, 0.5) * 0.5
-        var pts = points
-        if closed, let first = points.first { pts.append(first) }
-        for i in pts.indices.dropFirst() {
-            let from = pts[i - 1], to = pts[i]
+        let count = pts.count
+        let segments = closed ? count : count - 1
+
+        // Unit direction of segment i, from pts[i] to pts[i + 1].
+        func direction(_ i: Int) -> (x: Float, y: Float) {
+            let from = pts[i], to = pts[(i + 1) % count]
             let dx = to.x - from.x, dy = to.y - from.y
             let len = max((dx * dx + dy * dy).squareRoot(), 0.0001)
-            let nx = -dy / len * hw, ny = dx / len * hw
-            let a = RenderPoint(x: from.x + nx, y: from.y + ny)
-            let b = RenderPoint(x: to.x + nx, y: to.y + ny)
-            let c = RenderPoint(x: to.x - nx, y: to.y - ny)
-            let d = RenderPoint(x: from.x - nx, y: from.y - ny)
+            return (dx / len, dy / len)
+        }
+
+        // The offset (towards the left of travel) at vertex v for the segment that starts (or ends) there. A shared miter when both
+        // neighbours exist and the turn is gentle; otherwise the segment's own normal, and the vertex needs a round join.
+        var roundJoins: [Int] = []
+        var shared = [(x: Float, y: Float)?](repeating: nil, count: count)
+        for v in 0..<count {
+            let before = closed ? (v - 1 + count) % count : (v > 0 ? v - 1 : nil)
+            let after = closed ? v : (v < count - 1 ? v : nil)
+            guard let before, let after else { continue }
+            let d1 = direction(before), d2 = direction(after)
+            let mx = -d1.y - d2.y, my = d1.x + d2.x
+            let len2 = mx * mx + my * my
+            // len2 = 4 cos^2(turn / 2); a miter longer than twice the half width is cut.
+            if len2 >= 1 {
+                let k = 2 * hw / len2
+                shared[v] = (mx * k, my * k)
+            } else {
+                roundJoins.append(v)
+            }
+        }
+
+        func offset(at v: Int, segment i: Int) -> (x: Float, y: Float) {
+            if let miter = shared[v] { return miter }
+            let d = direction(i)
+            return (-d.y * hw, d.x * hw)
+        }
+
+        for i in 0..<segments {
+            let v = i, w = (i + 1) % count
+            let from = pts[v], to = pts[w]
+            let start = offset(at: v, segment: i), end = offset(at: w, segment: i)
+            let a = RenderPoint(x: from.x + start.x, y: from.y + start.y)
+            let b = RenderPoint(x: to.x + end.x, y: to.y + end.y)
+            let c = RenderPoint(x: to.x - end.x, y: to.y - end.y)
+            let d = RenderPoint(x: from.x - start.x, y: from.y - start.y)
             appendTri(&out, a, b, c, color, color, color, t)
             appendTri(&out, a, c, d, color, color, color, t)
         }
-        // Round joins / caps so corners don't gap.
-        let joinRange = closed ? pts.dropLast().indices : pts.indices
-        for i in joinRange {
-            appendEllipse(&out, center: pts[i], rx: hw, ry: hw, color: color, t: t)
+
+        for v in roundJoins {
+            appendEllipse(&out, center: pts[v], rx: hw, ry: hw, color: color, t: t)
+        }
+
+        if !closed {
+            appendCap(&out, at: pts[0], direction: direction(0), halfWidth: hw, atStart: true, color: color, t: t)
+            appendCap(&out, at: pts[count - 1], direction: direction(count - 2), halfWidth: hw, atStart: false, color: color, t: t)
+        }
+    }
+
+    /// A half disc closing the end of an open stroke, on the outer side of its last quad only.
+    private static func appendCap(
+        _ out: inout [Float], at point: RenderPoint, direction d: (x: Float, y: Float), halfWidth hw: Float,
+        atStart: Bool, color: RenderColor, t: Transform2D
+    ) {
+        let steps = max(segmentCount(for: hw, t) / 2, 4)
+        let base = atan2(d.x, -d.y)
+        let sweep: Float = atStart ? .pi : -.pi
+        for i in 0..<steps {
+            let a = base + sweep * Float(i) / Float(steps)
+            let b = base + sweep * Float(i + 1) / Float(steps)
+            appendTri(&out, point,
+                      RenderPoint(x: point.x + cos(a) * hw, y: point.y + sin(a) * hw),
+                      RenderPoint(x: point.x + cos(b) * hw, y: point.y + sin(b) * hw),
+                      color, color, color, t)
         }
     }
 

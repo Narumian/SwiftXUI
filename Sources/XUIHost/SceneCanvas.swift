@@ -206,7 +206,8 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
             ]
         }
 
-        let segments = 5
+        // About one segment per six points of arc, so a big ring is round and a small corner stays cheap.
+        let segments = min(64, max(5, Int((radius * .pi / 2 / 6).rounded(.up))))
         let corners: [(center: XUI.Point, start: Double, end: Double)] = [
             (XUI.Point(x: rect.maxX - radius, y: rect.minY + radius), -.pi / 2, 0),
             (XUI.Point(x: rect.maxX - radius, y: rect.maxY - radius), 0, .pi / 2),
