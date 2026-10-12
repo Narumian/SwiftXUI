@@ -90,18 +90,21 @@ public final class GamepadInputSource: @unchecked Sendable {
         pad.leftThumbstick.valueChangedHandler = { _, x, y in directionChanged(x, y) }
     }
 
-    /// A single Joy-Con (or Siri Remote style pad) exposes only the micro profile: a d-pad plus A and X.
+    /// A single Joy-Con exposes only the micro profile: its stick arrives as the d-pad, and its four buttons as A, B, X and Y.
     private func configureMicro(_ controller: GCController) {
         guard let pad = controller.microGamepad else { return }
         pad.allowsRotation = true
         pad.reportsAbsoluteDpadValues = true
-        pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard pressed else { return }
-            self?.onInput?(.confirm)
+        let profile = controller.physicalInputProfile
+        for name in ["Button A", "Button B"] {
+            profile.buttons[name]?.pressedChangedHandler = { [weak self] _, _, pressed in
+                if pressed { self?.onInput?(.confirm) }
+            }
         }
-        pad.buttonX.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard pressed else { return }
-            self?.onInput?(.back)
+        for name in ["Button X", "Button Y"] {
+            profile.buttons[name]?.pressedChangedHandler = { [weak self] _, _, pressed in
+                if pressed { self?.onInput?(.back) }
+            }
         }
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in self?.emitDirection(x: x, y: y) }
     }
@@ -114,7 +117,7 @@ public final class GamepadInputSource: @unchecked Sendable {
 
         let direction: GamepadDirection
         if abs(y) >= abs(x) {
-            direction = y > 0 ? .down : .up
+            direction = y > 0 ? .up : .down
         } else {
             direction = x > 0 ? .right : .left
         }
