@@ -69,7 +69,10 @@ public final class GamepadInputSource: @unchecked Sendable {
     }
 
     private func configure(_ controller: GCController) {
-        guard let pad = controller.extendedGamepad else { return }
+        guard let pad = controller.extendedGamepad else {
+            configureMicro(controller)
+            return
+        }
 
         pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
             guard pressed else { return }
@@ -85,6 +88,22 @@ public final class GamepadInputSource: @unchecked Sendable {
         }
         pad.dpad.valueChangedHandler = { _, x, y in directionChanged(x, y) }
         pad.leftThumbstick.valueChangedHandler = { _, x, y in directionChanged(x, y) }
+    }
+
+    /// A single Joy-Con (or Siri Remote style pad) exposes only the micro profile: a d-pad plus A and X.
+    private func configureMicro(_ controller: GCController) {
+        guard let pad = controller.microGamepad else { return }
+        pad.allowsRotation = true
+        pad.reportsAbsoluteDpadValues = true
+        pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard pressed else { return }
+            self?.onInput?(.confirm)
+        }
+        pad.buttonX.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard pressed else { return }
+            self?.onInput?(.back)
+        }
+        pad.dpad.valueChangedHandler = { [weak self] _, x, y in self?.emitDirection(x: x, y: y) }
     }
 
     private func emitDirection(x: Float, y: Float) {
