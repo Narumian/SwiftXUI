@@ -95,6 +95,8 @@ public final class WGPURenderer: XRenderer {
     var x3dSampler: WGPUSampler?
     var x3dFailures: Set<String> = []
     var x3dDepthTargets: [String: (texture: WGPUTexture, view: WGPUTextureView)] = [:]
+    /// What each plane target was last drawn with, so a plane whose frame has not changed is not drawn again.
+    var x3dPlaneContents: [CompiledFrame?] = []
     var x3dPlaneTargets: [(texture: WGPUTexture, view: WGPUTextureView, width: UInt32, height: UInt32)] = []
     /// The depth of the X3D pass that last drew with depth in the scene being post-processed, with what is needed to turn it back
     /// into a distance from its camera: `distance = a / (b - depth)`, and the distance to the camera's target.

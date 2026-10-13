@@ -174,6 +174,7 @@ extension WGPURenderer {
             wgpuTextureRelease(target.texture)
         }
         x3dPlaneTargets.removeAll()
+        x3dPlaneContents.removeAll()
         x3dPipelines.removeAll()
         x3dComputePipelines.removeAll()
         x3dModules.removeAll()
@@ -262,14 +263,19 @@ extension WGPURenderer {
                         defer { planeIndex += 1 }
                         guard x3d.planes.indices.contains(planeIndex),
                               let planeTarget = x3dPlaneTarget(planeIndex) else { continue }
-                        active.map(endX3DPass)
-                        active = nil
                         let plane = x3d.planes[planeIndex]
-                        drawScene(plane.frame, geometry: makeTransientGeometryBuffers(for: plane.frame),
-                                  into: planeTarget.view, encoder: encoder, clear: RenderColor(0, 0, 0, 0),
-                                  time: x3dTime, depth: depth + 1)
-                        active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
-                                              clearDepth: false, encoder: encoder)
+                        let unchanged = x3dPlaneContents.indices.contains(planeIndex) && x3dPlaneContents[planeIndex] == plane.frame
+                        if !unchanged {
+                            active.map(endX3DPass)
+                            active = nil
+                            drawScene(plane.frame, geometry: makeTransientGeometryBuffers(for: plane.frame),
+                                      into: planeTarget.view, encoder: encoder, clear: RenderColor(0, 0, 0, 0),
+                                      time: x3dTime, depth: depth + 1)
+                            active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
+                                                  clearDepth: false, encoder: encoder)
+                            while x3dPlaneContents.count <= planeIndex { x3dPlaneContents.append(nil) }
+                            x3dPlaneContents[planeIndex] = plane.frame
+                        }
                         let id = X3DResourceID(scope: .min, name: "plane\(planeIndex)")
                         x3dResources[id] = X3DResourceRecord(
                             kind: .texture(planeTarget.texture, planeTarget.view, format: .rgba8Unorm,
@@ -411,6 +417,7 @@ extension WGPURenderer {
             if existing.width == configuredWidth && existing.height == configuredHeight { return existing }
             wgpuTextureViewRelease(existing.view)
             wgpuTextureRelease(existing.texture)
+            if x3dPlaneContents.indices.contains(index) { x3dPlaneContents[index] = nil }
         }
         var descriptor = WGPUTextureDescriptor()
         descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
