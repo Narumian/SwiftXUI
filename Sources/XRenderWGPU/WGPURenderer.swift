@@ -672,7 +672,7 @@ public final class WGPURenderer: XRenderer {
                 // belongs to the forthcoming XUI-native material renderer.
                 continue
             case .x3d(let index):
-                guard frame.x3d.indices.contains(index), let activePass = pass else { continue }
+                guard frame.x3d.indices.contains(index), frame.x3d[index].drawsAnything, let activePass = pass else { continue }
                 wgpuRenderPassEncoderEnd(activePass)
                 pass = nil
                 encodeX3D(frame.x3d[index], parent: targetView, encoder: encoder, depth: depth)

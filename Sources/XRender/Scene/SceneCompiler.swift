@@ -131,6 +131,18 @@ public struct CompiledX3D: Sendable, Equatable {
 
 /// A plane's view compiled aspect-fit into the full framebuffer; `uv` is the
 /// `(minU, minV, maxU, maxV)` of the region it occupies there.
+extension CompiledX3D {
+    /// False when no pass would run or draw anything, so the renderer can skip the whole view without breaking the frame's pass.
+    public var drawsAnything: Bool {
+        graph.passes.contains { pass in
+            switch pass {
+            case .compute: return true
+            case .render(let render): return !render.items.isEmpty
+            }
+        }
+    }
+}
+
 public struct CompiledX3DPlane: Sendable, Equatable {
     public var frame: CompiledFrame
     public var uv: SIMD4<Float>
