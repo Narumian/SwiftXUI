@@ -94,7 +94,9 @@ public final class XAppDriver<App: XApp> {
         framebuffer: RenderSize? = nil,
         fit: Bool = true
     ) async -> CompiledFrame {
+        let t0 = FrameProbe.now
         let xFrame = await session.render(time: time)
+        let t1 = FrameProbe.now
         let logicalSize = session.host.size
         let framebufferSize = framebuffer ?? logicalSize
         let compiled = SceneCompiler.compile(
@@ -104,9 +106,11 @@ public final class XAppDriver<App: XApp> {
             fit: fit,
             fonts: session.host.fonts
         )
+        let t2 = FrameProbe.now
         let start = epoch ?? time
         epoch = start
         renderer.render(compiled, time: Float(time - start))
+        FrameProbe.record(build: t1 - t0, compile: t2 - t1, submit: FrameProbe.now - t2)
         return compiled
     }
 }
