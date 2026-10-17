@@ -4,15 +4,15 @@ import Foundation
 /// synchronously, on the calling thread, before returning — no queueing, no
 /// deferral to the next `lower`/`render` pass. This is the default case for
 /// an event that already originates on the thread that owns the view tree
-/// (a `BattleAction` dispatch, a `Choreo` beat): most of RIGGED's own events
-/// qualify, and get genuine push with none of `BufferedSignal`'s locking.
+/// (e.g. a UI action fired from the same run loop turn). Those events get
+/// genuine push with none of `BufferedSignal`'s locking.
 ///
 /// Not internally synchronized — same contract as `StateStore`: touched only
 /// from the single thread that owns it. A producer that can't guarantee that
 /// thread must go through `BufferedSignal` instead of calling `send` here
 /// directly. `@unchecked Sendable` asserts that contract (same as
 /// `StateStore`) rather than enforcing it — needed so a value type can hold
-/// one as a stored property (e.g. `RIGGED`'s `Combatant: Sendable`) without
+/// one as a stored property (e.g. a `Sendable` model type) without
 /// losing its own `Sendable` conformance.
 public final class Signal<Value>: @unchecked Sendable {
     private struct Entry {

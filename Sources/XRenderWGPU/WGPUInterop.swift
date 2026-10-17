@@ -13,7 +13,7 @@ import os
 @inline(__always)
 func rendererLog(_ message: String) {
     #if canImport(os)
-    os_log("%{public}s", log: OSLog(subsystem: "RIGGED.GameRender", category: "wgpu"), type: .default, message)
+    os_log("%{public}s", log: OSLog(subsystem: "XRender.WGPU", category: "wgpu"), type: .default, message)
     #elseif canImport(Darwin)
     fputs("\(message)\n", stderr)
     #else
