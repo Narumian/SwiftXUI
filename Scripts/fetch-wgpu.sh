@@ -7,6 +7,9 @@
 #
 #   bash Scripts/fetch-wgpu.sh
 #
+# Linux hosts use the companion script instead:
+#   bash Scripts/fetch-wgpu-linux.sh
+#
 # 生成物: Vendor/CWGPU.xcframework  (git 管理外)
 # スライス: ios-arm64 / ios-arm64-simulator / macos-arm64
 #
