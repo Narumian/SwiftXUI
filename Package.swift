@@ -11,6 +11,7 @@ let package = Package(
         .macOS(.v13),
     ],
     products: [
+        .library(name: "CWGPU", targets: ["CWGPU"]),
         .library(name: "X", targets: ["X"]),
         .library(name: "XShader", targets: ["XShader"]),
         .library(name: "XRender", targets: ["XRender"]),

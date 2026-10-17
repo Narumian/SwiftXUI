@@ -330,7 +330,7 @@ extension WGPURenderer {
             let (width, height) = x3dTextureSize(size, outputWidth, outputHeight)
             var descriptor = WGPUTextureDescriptor()
             descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
-                | WGPUTextureUsage_StorageBinding
+                | WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopySrc
             descriptor.dimension = WGPUTextureDimension_2D
             descriptor.size = WGPUExtent3D(width: width, height: height, depthOrArrayLayers: 1)
             descriptor.format = Self.textureFormat(format)
@@ -865,6 +865,17 @@ extension WGPURenderer {
         case .pointList: return WGPUPrimitiveTopology_PointList
         }
     }
+
+    /// Color attachment for a declared X3D texture resource after the most recent `render`.
+    public func x3dColorTexture(id: X3DResourceID) -> (texture: WGPUTexture, width: UInt32, height: UInt32)? {
+        guard let record = x3dResources[id],
+              case .texture(let texture, _, _, let width, let height) = record.kind
+        else { return nil }
+        return (texture, width, height)
+    }
+
+    public var webGPUDevice: WGPUDevice { device }
+    public var webGPUQueue: WGPUQueue { queue }
 }
 
 private final class X3DScopeBox {
