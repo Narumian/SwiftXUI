@@ -25,6 +25,11 @@ public final class WGPURenderer: XRenderer {
     let surfaceFormat = WGPUTextureFormat_BGRA8Unorm
     var configuredWidth: UInt32 = 0
     var configuredHeight: UInt32 = 0
+    /// Size of the color attachment currently being encoded. During a resize the
+    /// swapchain drawable can be smaller than `configuredWidth` for a frame; scissors
+    /// must be clamped to this, not to the configured surface size alone.
+    var renderPassWidth: UInt32 = 0
+    var renderPassHeight: UInt32 = 0
     private var vertexBuffer: WGPUBuffer?
     private var vertexBufferCapacity = 0
 
@@ -264,7 +269,15 @@ public final class WGPURenderer: XRenderer {
             _ = wgpuSurfacePresent(surface)
             _ = wgpuDevicePoll(device, 0, nil)
         }
-        defer { present(); wgpuTextureRelease(texture) }
+        defer {
+            renderPassWidth = 0
+            renderPassHeight = 0
+            present()
+            wgpuTextureRelease(texture)
+        }
+
+        renderPassWidth = max(1, wgpuTextureGetWidth(texture))
+        renderPassHeight = max(1, wgpuTextureGetHeight(texture))
 
         guard let view = wgpuTextureCreateView(texture, nil) else { return }
         defer { wgpuTextureViewRelease(view) }
@@ -465,6 +478,10 @@ public final class WGPURenderer: XRenderer {
 
     private func encodeFrame(_ frame: CompiledFrame, time: Float,
                              into surfaceView: WGPUTextureView, encoder: WGPUCommandEncoder) {
+        if renderPassWidth == 0 || renderPassHeight == 0 {
+            renderPassWidth = max(1, configuredWidth)
+            renderPassHeight = max(1, configuredHeight)
+        }
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
         x3dDepthInfo = nil
@@ -932,14 +949,29 @@ public final class WGPURenderer: XRenderer {
     }
 
     func applyScissor(_ pass: WGPURenderPassEncoder, _ rect: PixelRect?) {
+        let limitW = max(1, renderPassWidth > 0 ? renderPassWidth : configuredWidth)
+        let limitH = max(1, renderPassHeight > 0 ? renderPassHeight : configuredHeight)
         guard let rect else {
-            wgpuRenderPassEncoderSetScissorRect(pass, 0, 0, configuredWidth, configuredHeight)
+            wgpuRenderPassEncoderSetScissorRect(pass, 0, 0, limitW, limitH)
             return
         }
-        let x = min(rect.x, configuredWidth)
-        let y = min(rect.y, configuredHeight)
+        let x = min(rect.x, limitW)
+        let y = min(rect.y, limitH)
         wgpuRenderPassEncoderSetScissorRect(
-            pass, x, y, min(rect.width, configuredWidth - x), min(rect.height, configuredHeight - y)
+            pass, x, y, min(rect.width, limitW - x), min(rect.height, limitH - y)
+        )
+    }
+
+    func clampToRenderPass(x: UInt32, y: UInt32, width: UInt32, height: UInt32) -> (UInt32, UInt32, UInt32, UInt32) {
+        let limitW = max(1, renderPassWidth > 0 ? renderPassWidth : configuredWidth)
+        let limitH = max(1, renderPassHeight > 0 ? renderPassHeight : configuredHeight)
+        let clampedX = min(x, limitW)
+        let clampedY = min(y, limitH)
+        return (
+            clampedX,
+            clampedY,
+            min(width, limitW - clampedX),
+            min(height, limitH - clampedY)
         )
     }
 
