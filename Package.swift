@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "XUI", targets: ["XUI"]),
         .library(name: "XUIHost", targets: ["XUIHost"]),
         .library(name: "XDocument", targets: ["XDocument"]),
+        .library(name: "XDocumentApple", targets: ["XDocumentApple"]),
         .executable(name: "xview-bench", targets: ["xview-bench"]),
     ],
     dependencies: [
@@ -100,6 +101,7 @@ let package = Package(
             ]
         ),
         .target(name: "XDocument"),
+        .target(name: "XDocumentApple", dependencies: ["XDocument"]),
         .testTarget(name: "XDocumentTests", dependencies: ["XDocument"]),
         .executableTarget(name: "xview-bench", dependencies: ["XUI"]),
         .testTarget(name: "XShaderTests", dependencies: ["XShader"]),
