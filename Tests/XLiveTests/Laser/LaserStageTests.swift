@@ -70,10 +70,18 @@ final class LaserSamplerTests: XCTestCase {
         XCTAssertEqual(out.count, 3)
     }
 
-    func testAJumpFromADrawnSampleToABlankOneIsStillFilledLikeLegacy() {
+    func testAMoveToABlankSampleIsFilledInDarkInsteadOfFadingOut() {
         var sampler = LaserSampler(maximumStep: 0.5)
         let out = sampler.process(LaserChunk(elements: [point(-0.5), point(0.5, .blank)], shape: 1))
         XCTAssertEqual(out.count, 1 + 2 + 1)          // 2 inserted, then the blank end
+        XCTAssertTrue(out.elements.dropFirst().allSatisfy { $0.rgb == .zero && $0.mode == .blank })
+    }
+
+    func testAMoveFromABlankSampleIsDrawnInTheArrivingColourInsteadOfFadingIn() {
+        var sampler = LaserSampler(maximumStep: 0.5)
+        let out = sampler.process(LaserChunk(elements: [point(-0.5, .blank), point(0.5, lit: 0.8)], shape: 1))
+        XCTAssertEqual(out.count, 1 + 2 + 1)
+        XCTAssertTrue(out.elements.dropFirst().allSatisfy { $0.rgb.x == 0.8 && $0.mode == .normal })
     }
 
     func testTheMaximumInsertedCapsTheFill() {
