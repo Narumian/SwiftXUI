@@ -15,6 +15,9 @@ public final class XUIMCPServer: @unchecked Sendable {
     public typealias Tap = @XUIActor @Sendable (String) async throws -> Bool
     public typealias Pointer = @XUIActor @Sendable (String, Double, Double) async throws -> Bool
     public typealias Capture = @Sendable () async throws -> XUIMCPImage
+    /// Host-supplied text report about app internals that are not visible on screen.
+    public typealias Diagnostics = @Sendable () async -> String
+    private let diagnostics: Diagnostics?
     private let state: State
     private let tap: Tap
     private let pointer: Pointer
@@ -24,8 +27,9 @@ public final class XUIMCPServer: @unchecked Sendable {
     public let port: UInt16
 
     public init(port: UInt16 = 47321, state: @escaping State, tap: @escaping Tap,
-                pointer: @escaping Pointer, capture: @escaping Capture) {
+                pointer: @escaping Pointer, capture: @escaping Capture, diagnostics: Diagnostics? = nil) {
         self.port = port; self.state = state; self.tap = tap; self.pointer = pointer; self.capture = capture
+        self.diagnostics = diagnostics
     }
 
     public func start() throws {
@@ -144,7 +148,7 @@ public final class XUIMCPServer: @unchecked Sendable {
             case "initialize":
                 result = ["protocolVersion": "2025-11-25", "capabilities": ["tools": [:]], "serverInfo": ["name": "XUIHost", "version": "1.0"]]
             case "tools/list":
-                result = ["tools": Self.tools]
+                result = ["tools": tools]
             case "tools/call":
                 guard let params = request["params"] as? [String: Any], let name = params["name"] as? String else {
                     throw XUIMCPError.invalidRequest("Missing tool name")
@@ -165,6 +169,9 @@ public final class XUIMCPServer: @unchecked Sendable {
                 case "screen_capture":
                     let png = try await capture().png()
                     result = ["content": [["type": "image", "mimeType": "image/png", "data": png.base64EncodedString()]]]
+                case "app_diagnostics":
+                    guard let diagnostics else { throw XUIMCPError.invalidRequest("Unknown tool") }
+                    result = ["content": [["type": "text", "text": await diagnostics()]]]
                 default: throw XUIMCPError.invalidRequest("Unknown tool")
                 }
             case "ping": result = [:]
@@ -175,11 +182,17 @@ public final class XUIMCPServer: @unchecked Sendable {
             return try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "result": ["isError": true, "content": [["type": "text", "text": error.localizedDescription]]]])
         }
     }
-    private static var tools: [[String: Any]] { [
+    private var tools: [[String: Any]] {
+        var tools: [[String: Any]] = [
         ["name": "screen_state", "description": "Read the current XUI controls and logical coordinates", "inputSchema": ["type": "object", "properties": [:]]],
         ["name": "screen_tap", "description": "Tap a semantic control by id", "inputSchema": ["type": "object", "properties": ["id": ["type": "string"]], "required": ["id"]]],
         ["name": "screen_pointer", "description": "Send a pointer phase in logical coordinates", "inputSchema": ["type": "object", "properties": ["phase": ["type": "string", "enum": ["began", "moved", "ended", "cancelled"]], "x": ["type": "number"], "y": ["type": "number"]], "required": ["phase", "x", "y"]]],
         ["name": "screen_capture", "description": "Capture the rendered XUI surface as PNG", "inputSchema": ["type": "object", "properties": [:]]]
-    ] }
+        ]
+        if diagnostics != nil {
+            tools.append(["name": "app_diagnostics", "description": "Read the host application's diagnostic report (internal state not shown on screen)", "inputSchema": ["type": "object", "properties": [:]]])
+        }
+        return tools
+    }
 }
 private final class ResponseBox: @unchecked Sendable { var value: Data? }

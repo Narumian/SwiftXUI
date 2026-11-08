@@ -112,6 +112,7 @@ public final class XAppSession<App: XApp> {
     /// The host supplies a capture of the presented surface and redraw callback.
     public func mcpServer(port: UInt16 = 47321,
                           capture: @escaping XUIMCPServer.Capture,
+                          diagnostics: XUIMCPServer.Diagnostics? = nil,
                           invalidate: @escaping @Sendable () -> Void) -> XUIMCPServer? {
         guard app.configuration.mcpEnabled else { return nil }
         return XUIMCPServer(port: port,
@@ -136,7 +137,7 @@ public final class XAppSession<App: XApp> {
                 let handled = self.pointer(PointerEvent(phase: converted, position: RenderPoint(x: Float(x), y: Float(y))))
                 if handled { invalidate() }
                 return handled
-            }, capture: capture)
+            }, capture: capture, diagnostics: diagnostics)
     }
 }
 
