@@ -34,6 +34,20 @@ public struct AppleWorkspaceAccessProvider: WorkspaceAccessProvider {
     }
 }
 
+extension AppleWorkspaceAccessProvider {
+    public func beginAccess(token: Data) throws -> WorkspaceLease {
+        var stale = false
+        #if os(macOS)
+        let url = try URL(resolvingBookmarkData: token, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale)
+        #else
+        let url = try URL(resolvingBookmarkData: token, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+        #endif
+        guard !stale else { throw AppleWorkspaceAccessError.staleBookmark }
+        let started = url.startAccessingSecurityScopedResource()
+        return WorkspaceLease(root: url) { if started { url.stopAccessingSecurityScopedResource() } }
+    }
+}
+
 /// Coordinates each operation with Apple document and file providers.
 public struct AppleWorkspaceFileCoordinator: WorkspaceFileCoordinator {
     public init() {}

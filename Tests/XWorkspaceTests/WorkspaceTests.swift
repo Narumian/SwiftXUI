@@ -42,4 +42,58 @@ final class WorkspaceTests: XCTestCase {
         let entries = try await workspace.list(folderID: folder.id)
         XCTAssertTrue(entries.isEmpty)
     }
+
+    func testListingCarriesSizeExtensionAndDirectoryStamp() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: base.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        let workspace = try Workspace(access: LocalWorkspaceAccessProvider())
+        let folder = try await workspace.register(directory: base)
+        try await workspace.write(folderID: folder.id, path: "Cue.Final.ILD", data: Data(repeating: 1, count: 12))
+        let before = try await workspace.directoryStamp(folderID: folder.id)
+        let listing = try await workspace.list(folderID: folder.id)
+        let file = try XCTUnwrap(listing.first { $0.kind == .file })
+        XCTAssertEqual(file.size, 12)
+        XCTAssertEqual(file.fileExtension, "ild")
+        XCTAssertNotNil(file.modified)
+        XCTAssertEqual(listing.first { $0.kind == .directory }?.fileExtension, "")
+        XCTAssertNil(listing.first { $0.kind == .directory }?.size)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try await workspace.write(folderID: folder.id, path: "another.txt", data: Data())
+        let after = try await workspace.directoryStamp(folderID: folder.id)
+        XCTAssertNotEqual(before, after)
+    }
+
+    func testListingSkipsSymlinksAndKeepsHiddenFilesAndNestedPaths() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("root")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("deep/er"), withIntermediateDirectories: true)
+        try Data([1, 2]).write(to: root.appendingPathComponent("deep/er/.hidden"))
+        try Data([1]).write(to: root.appendingPathComponent("plain.txt"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: base)
+        let workspace = try Workspace(access: LocalWorkspaceAccessProvider())
+        let folder = try await workspace.register(directory: root)
+        let top = try await workspace.list(folderID: folder.id).map(\.name)
+        XCTAssertEqual(top, ["deep", "plain.txt"])
+        let nested = try await workspace.list(folderID: folder.id, path: "deep/er")
+        XCTAssertEqual(nested.map(\.path), ["deep/er/.hidden"])
+        XCTAssertEqual(nested.first?.size, 2)
+        let unsorted = try await workspace.list(folderID: folder.id, sorted: false)
+        XCTAssertEqual(Set(unsorted.map(\.name)), ["deep", "plain.txt"])
+        do { _ = try await workspace.list(folderID: folder.id, path: "plain.txt"); XCTFail("a file is not a directory") } catch {}
+    }
+
+    func testLeaseKeepsARootUsableUntilReleased() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: base.appendingPathComponent("project"), withIntermediateDirectories: true)
+        let workspace = try Workspace(access: LocalWorkspaceAccessProvider())
+        let folder = try await workspace.register(directory: base)
+        let lease = try await workspace.lease(folderID: folder.id)
+        XCTAssertEqual(lease.url(for: "project").lastPathComponent, "project")
+        XCTAssertEqual(lease.url(for: "").path, lease.root.path)
+        lease.release()
+        lease.release()
+    }
 }
