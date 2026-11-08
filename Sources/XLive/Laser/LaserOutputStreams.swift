@@ -61,12 +61,34 @@ extension LaserPoint {
 /// application's concern.
 public actor LaserOutputStreams {
     public typealias Opener = @Sendable () async throws -> any LaserOutputSession
+
+    /// A live source attached to one output: a producer task fills a bounded ring
+    /// at the source's own pace, and the pump pulls from it on the device clock
+    /// through a rate converter. Only the pump touches the converter.
+    private final class Feed: @unchecked Sendable {
+        let ring: LaserSampleRing
+        let sourceRate: UInt32
+        var converter: LaserRateConverter
+        var producer: Task<Void, Never>?
+        var sourceFailure: String?
+        init(ring: LaserSampleRing, sourceRate: UInt32, outputRate: UInt32) {
+            self.ring = ring; self.sourceRate = sourceRate
+            converter = LaserRateConverter(sourceRate: sourceRate, outputRate: outputRate)
+        }
+        func pull(_ count: Int) -> [LaserPoint] {
+            let ring = ring
+            return converter.convert(count: count) { ring.pull($0) }
+        }
+        func cancel() { producer?.cancel(); producer = nil; ring.clear() }
+    }
+
     private struct Stream {
         let session: any LaserOutputSession
         let rate: UInt32
         var task: Task<Void, Never>?
         var generation: UUID
         var looping = false
+        var feed: Feed?
         var pattern: [LaserPoint] = []
         var offset = 0
         var failure: String?
@@ -77,8 +99,12 @@ public actor LaserOutputStreams {
     private var connecting: Set<UUID> = []
     private let blockSize: Int
     private let pauseNanoseconds: UInt64
-    public init(blockSize: Int = 1400, pauseMilliseconds: Int = 20) {
+    private let sourceBufferSamples: Int
+    /// `sourceBufferSamples` bounds the ring between a source and its pump; the
+    /// default of two blocks keeps edits within roughly a block of the output.
+    public init(blockSize: Int = 1400, pauseMilliseconds: Int = 20, sourceBufferSamples: Int? = nil) {
         self.blockSize = blockSize
+        self.sourceBufferSamples = max(1, sourceBufferSamples ?? 2 * blockSize)
         self.pauseNanoseconds = UInt64(max(0, pauseMilliseconds)) * 1_000_000
     }
 
@@ -87,14 +113,20 @@ public actor LaserOutputStreams {
     public func diagnosticsReport() -> String {
         guard !streams.isEmpty else { return "no connected output" }
         return streams.map { id, stream in
-            "output=\(id) block=\(blockSize) pause=\(pauseNanoseconds / 1_000_000)ms rate=\(stream.rate) looping=\(stream.looping) changing=\(stream.changing) pattern=\(stream.pattern.count) failure=\(stream.failure ?? "none")\n  \(stream.stats)"
+            "output=\(id) block=\(blockSize) pause=\(pauseNanoseconds / 1_000_000)ms rate=\(stream.rate) looping=\(stream.looping) changing=\(stream.changing) pattern=\(stream.pattern.count) \(Self.feedReport(stream.feed)) failure=\(stream.failure ?? "none")\n  \(stream.stats)"
         }.sorted().joined(separator: "\n")
+    }
+    private static func feedReport(_ feed: Feed?) -> String {
+        guard let feed else { return "source=none" }
+        return "source=\(feed.sourceRate)Hz ring=\(feed.ring.fill)/\(feed.ring.capacity) starved=\(feed.ring.starvedSamples)/\(feed.ring.starvedPullCount)pulls sourceFailure=\(feed.sourceFailure ?? "none")"
     }
     public func diagnostics(_ id: UUID) -> String? { streams[id].map { $0.stats.description } }
 
     public func hasSession(_ id: UUID) -> Bool { streams[id] != nil }
     /// True while a pattern is looping and the stream has not failed.
     public func patternActive(_ id: UUID) -> Bool { streams[id]?.looping == true && streams[id]?.failure == nil }
+    /// True while a live source is attached and the stream has not failed.
+    public func sourceActive(_ id: UUID) -> Bool { streams[id]?.feed != nil && streams[id]?.failure == nil }
     public func streamFailure(_ id: UUID) -> String? { streams[id]?.failure }
 
     /// Opens a session through `open` and starts streaming black on it.
@@ -120,10 +152,44 @@ public actor LaserOutputStreams {
         guard var stream = streams[id] else { throw LaserStreamError.notConnected }
         guard !stream.changing else { throw LaserStreamError.busy }
         if let failure = stream.failure { throw LaserStreamError.failed(failure) }
+        stream.feed?.cancel(); stream.feed = nil
         stream.pattern = pattern
         stream.offset = 0
         stream.looping = true
         streams[id] = stream
+    }
+
+    /// Streams a live source of sample chunks recorded at `sampleRate`, replacing
+    /// any pattern or earlier source. The source is pulled at its own pace and
+    /// suspends when the ring is full, so a slow output cannot hold up a fast one
+    /// and a slow source cannot stall the pump: the output goes dark meanwhile.
+    /// Chunks need no particular size; every packet-sized run should still end on
+    /// a blanked sample so a stall never leaves the beam lit.
+    public func play<Source: AsyncSequence & Sendable>(source: Source, sampleRate: UInt32, for id: UUID) throws
+    where Source.Element == [LaserPoint] {
+        guard var stream = streams[id] else { throw LaserStreamError.notConnected }
+        guard !stream.changing else { throw LaserStreamError.busy }
+        if let failure = stream.failure { throw LaserStreamError.failed(failure) }
+        guard sampleRate > 0 else { throw LaserOutputError.unsupportedPointRate }
+        stream.feed?.cancel()
+        let feed = Feed(ring: LaserSampleRing(capacity: sourceBufferSamples), sourceRate: sampleRate, outputRate: stream.rate)
+        let ring = feed.ring
+        feed.producer = Task { [weak self] in
+            do {
+                for try await chunk in source { try await ring.push(chunk) }
+            } catch is CancellationError {
+            } catch {
+                await self?.recordSourceFailure(error.localizedDescription, feed: feed)
+            }
+        }
+        stream.looping = false
+        stream.pattern = []
+        stream.feed = feed
+        streams[id] = stream
+    }
+
+    private func recordSourceFailure(_ message: String, feed: Feed) {
+        feed.sourceFailure = message
     }
 
     /// Swaps the looping pattern without interrupting what is already queued.
@@ -141,7 +207,8 @@ public actor LaserOutputStreams {
         guard var stream = streams[id] else { throw LaserStreamError.notConnected }
         guard !stream.changing else { throw LaserStreamError.busy }
         if let failure = stream.failure { throw LaserStreamError.failed(failure) }
-        guard stream.looping else { return }
+        guard stream.looping || stream.feed != nil else { return }
+        stream.feed?.cancel(); stream.feed = nil
         stream.changing = true
         stream.looping = false
         stream.generation = UUID()
@@ -173,13 +240,14 @@ public actor LaserOutputStreams {
     }
 
     public func stopAllPatterns() async {
-        for id in Array(streams.keys) where streams[id]?.looping == true {
+        for id in Array(streams.keys) where streams[id]?.looping == true || streams[id]?.feed != nil {
             try? await stopPattern(for: id)
         }
     }
 
     public func disconnect(_ id: UUID) async throws {
         guard let stream = streams.removeValue(forKey: id) else { return }
+        stream.feed?.cancel()
         stream.task?.cancel()
         // Disconnect interrupts an in-flight write and disables output.
         try await stream.session.disconnect()
@@ -200,7 +268,9 @@ public actor LaserOutputStreams {
         while !Task.isCancelled {
             guard var stream = streams[id], stream.generation == generation else { return }
             let samples: [LaserPoint]
-            if stream.looping && !stream.pattern.isEmpty {
+            if let feed = stream.feed {
+                samples = feed.pull(blockSize)
+            } else if stream.looping && !stream.pattern.isEmpty {
                 var block: [LaserPoint] = []
                 block.reserveCapacity(blockSize)
                 for _ in 0..<blockSize {
@@ -224,6 +294,7 @@ public actor LaserOutputStreams {
                 guard var current = streams[id], current.generation == generation else { return }
                 current.failure = error.localizedDescription
                 current.looping = false
+                current.feed?.cancel(); current.feed = nil
                 current.task = nil
                 streams[id] = current
                 #if DEBUG
