@@ -8,48 +8,57 @@ private func dark(_ x: Float) -> LaserPoint { try! LaserPoint(xy: SIMD2<Float>(x
 final class LaserSampleRingTests: XCTestCase {
     func testPullReturnsPushedSamplesInOrderAcrossWraparound() {
         let ring = LaserSampleRing(capacity: 4)
+        let reader = ring.makeReader()
         XCTAssertEqual(ring.tryPush([lit(0.1), lit(0.2), lit(0.3)][...]), 3)
-        XCTAssertEqual(ring.pull(2).map(\.xy.x), [0.1, 0.2])
+        XCTAssertEqual(reader.pull(2).map(\.xy.x), [0.1, 0.2])
         XCTAssertEqual(ring.tryPush([lit(0.4), lit(0.5), lit(0.6)][...]), 3) // wraps
-        XCTAssertEqual(ring.pull(4).map(\.xy.x), [0.3, 0.4, 0.5, 0.6])
-        XCTAssertEqual(ring.starvedSamples, 0)
+        XCTAssertEqual(reader.pull(4).map(\.xy.x), [0.3, 0.4, 0.5, 0.6])
+        XCTAssertEqual(reader.starvedSamples, 0)
     }
 
     func testTryPushTakesOnlyWhatFits() {
         let ring = LaserSampleRing(capacity: 3)
+        let reader = ring.makeReader()
         XCTAssertEqual(ring.tryPush([lit(0), lit(0), lit(0), lit(0), lit(0)][...]), 3)
-        XCTAssertEqual(ring.fill, 3)
+        XCTAssertEqual(reader.fill, 3)
+        XCTAssertEqual(ring.tryPush([lit(0)][...]), 0)
+    }
+
+    func testNothingIsTakenWithoutAReader() {
+        let ring = LaserSampleRing(capacity: 3)
         XCTAssertEqual(ring.tryPush([lit(0)][...]), 0)
     }
 
     func testStarvedPullIsToppedUpWithBlankSamplesAtTheLastPosition() {
         let ring = LaserSampleRing(capacity: 8)
+        let reader = ring.makeReader()
         _ = ring.tryPush([lit(0.25), lit(0.75)][...])
-        let out = ring.pull(5)
+        let out = reader.pull(5)
         XCTAssertEqual(out.count, 5)
         XCTAssertEqual(out[0].xy.x, 0.25)
         XCTAssertEqual(out[1].xy.x, 0.75)
         XCTAssertFalse(out[1].isBlanked)
         for point in out.dropFirst(2) { XCTAssertTrue(point.isBlanked && point.rgb == .zero && point.xy.x == 0.75) }
-        XCTAssertEqual(ring.starvedSamples, 3)
-        XCTAssertEqual(ring.starvedPullCount, 1)
+        XCTAssertEqual(reader.starvedSamples, 3)
+        XCTAssertEqual(reader.starvedPullCount, 1)
         // Later pulls stay dark at the same place until the producer catches up.
-        XCTAssertTrue(ring.pull(2).allSatisfy { $0.isBlanked && $0.xy.x == 0.75 })
+        XCTAssertTrue(reader.pull(2).allSatisfy { $0.isBlanked && $0.xy.x == 0.75 })
     }
 
     func testEmptyRingNeverEmitsLightAndStartsAtCentre() {
-        let out = LaserSampleRing(capacity: 4).pull(6)
+        let out = LaserSampleRing(capacity: 4).makeReader().pull(6)
         XCTAssertTrue(out.allSatisfy { $0.isBlanked && $0.xy == .zero && $0.rgb == .zero })
     }
 
     func testAsyncPushWaitsForSpaceAndCancellationEndsIt() async throws {
         let ring = LaserSampleRing(capacity: 2)
+        let reader = ring.makeReader()
         let producer = Task { try await ring.push([lit(0.1), lit(0.2), lit(0.3), lit(0.4)]) }
         try await Task.sleep(nanoseconds: 30_000_000)
-        XCTAssertEqual(ring.fill, 2) // blocked on the full ring
-        XCTAssertEqual(ring.pull(2).map(\.xy.x), [0.1, 0.2])
+        XCTAssertEqual(reader.fill, 2) // blocked on the full ring
+        XCTAssertEqual(reader.pull(2).map(\.xy.x), [0.1, 0.2])
         _ = try await producer.value
-        XCTAssertEqual(ring.pull(2).map(\.xy.x), [0.3, 0.4])
+        XCTAssertEqual(reader.pull(2).map(\.xy.x), [0.3, 0.4])
         let blocked = Task { try await ring.push(Array(repeating: lit(0.5), count: 10)) }
         try await Task.sleep(nanoseconds: 20_000_000)
         blocked.cancel()
@@ -58,9 +67,54 @@ final class LaserSampleRingTests: XCTestCase {
 
     func testClearDropsBufferedSamples() {
         let ring = LaserSampleRing(capacity: 4)
+        let reader = ring.makeReader()
         _ = ring.tryPush([lit(0.1), lit(0.2)][...])
         ring.clear()
-        XCTAssertEqual(ring.fill, 0)
+        XCTAssertEqual(reader.fill, 0)
+    }
+
+    func testEveryReaderSeesEverySampleOnItsOwnClock() {
+        let ring = LaserSampleRing(capacity: 8)
+        let a = ring.makeReader(), b = ring.makeReader()
+        _ = ring.tryPush([lit(0.1), lit(0.2), lit(0.3), lit(0.4)][...])
+        XCTAssertEqual(a.pull(4).map(\.xy.x), [0.1, 0.2, 0.3, 0.4])
+        XCTAssertEqual(b.pull(2).map(\.xy.x), [0.1, 0.2])
+        XCTAssertEqual(b.pull(2).map(\.xy.x), [0.3, 0.4])
+        XCTAssertEqual(a.starvedSamples + b.starvedSamples, 0)
+    }
+
+    func testAReaderStartsAtTheLiveEnd() {
+        let ring = LaserSampleRing(capacity: 8)
+        let first = ring.makeReader()
+        _ = ring.tryPush([lit(0.1), lit(0.2)][...])
+        let late = ring.makeReader()
+        _ = ring.tryPush([lit(0.3)][...])
+        XCTAssertEqual(late.pull(1).map(\.xy.x), [0.3])
+        XCTAssertEqual(first.pull(3).map(\.xy.x), [0.1, 0.2, 0.3])
+    }
+
+    func testTheProducerIsPacedByTheReaderThatIsAheadAndALaggardSkipsForward() {
+        let ring = LaserSampleRing(capacity: 4)
+        let fast = ring.makeReader(), slow = ring.makeReader()
+        XCTAssertEqual(ring.tryPush([lit(0.1), lit(0.2), lit(0.3), lit(0.4)][...]), 4)
+        XCTAssertEqual(ring.tryPush([lit(0.5)][...]), 0) // full for both
+        XCTAssertEqual(fast.pull(4).map(\.xy.x), [0.1, 0.2, 0.3, 0.4])
+        // The slow reader still holds the buffer's oldest samples, yet the producer goes on.
+        XCTAssertEqual(ring.tryPush([lit(0.5), lit(0.6), lit(0.7), lit(0.8)][...]), 4)
+        XCTAssertEqual(fast.pull(4).map(\.xy.x), [0.5, 0.6, 0.7, 0.8])
+        // The slow reader lost the first four and finds the last four.
+        XCTAssertEqual(slow.pull(4).map(\.xy.x), [0.5, 0.6, 0.7, 0.8])
+        XCTAssertEqual(slow.skippedSamples, 4)
+        XCTAssertEqual(slow.starvedSamples, 0)
+    }
+
+    func testARemovedReaderNoLongerHoldsTheProducerUp() {
+        let ring = LaserSampleRing(capacity: 2)
+        let reader = ring.makeReader()
+        XCTAssertEqual(ring.tryPush([lit(0), lit(0)][...]), 2)
+        ring.remove(reader)
+        XCTAssertEqual(ring.readerCount, 0)
+        XCTAssertEqual(ring.tryPush([lit(0)][...]), 0) // nobody is listening
     }
 }
 

@@ -23,7 +23,7 @@ public actor LaserOutputConnections {
 
     public func connect(_ output: LaserOutput) async throws {
         let connector = connector
-        try await streams.connect(output.id) { try await connector(output) }
+        try await streams.connect(output.id, masks: output.masks) { try await connector(output) }
     }
 
     /// Preview is explicitly enabled by the editor. All grid samples are
@@ -43,6 +43,7 @@ public actor LaserOutputConnections {
     /// this actor: the sample pump must never wait behind geometry work, or the
     /// device buffer runs dry.
     public func updatePreviewMasks(_ masks: LaserMaskSettings, for id: UUID) async {
+        await streams.setMasks(masks, for: id)
         guard await streams.patternActive(id) else { return }
         pendingMasks[id] = masks
         guard rebuilding.insert(id).inserted else { return }
@@ -58,13 +59,20 @@ public actor LaserOutputConnections {
         rebuilding.remove(id)
     }
 
-    /// Plays a scanner stream (a chain of stages ending in masking, say) on one
-    /// output at the rate it declares, replacing the preview or an earlier stream.
-    public func play<Stream: LaserOutputStream>(_ stream: Stream, for id: UUID) async throws {
-        pendingMasks[id] = nil
-        try await streams.play(stream: stream, for: id)
+    /// Sets the safety masks of an output. They are applied to what the output
+    /// plays, after the shared buffer, so they follow the edits while it plays.
+    public func setMasks(_ masks: LaserMaskSettings, for id: UUID) async { await streams.setMasks(masks, for: id) }
+
+    /// Plays one scanner stream on every connected output at the rate it declares,
+    /// replacing previews or an earlier stream. The stream holds everything that is
+    /// common to the outputs; each output adds only its rate conversion and masks.
+    public func play<Stream: LaserOutputStream>(_ stream: Stream) async throws {
+        pendingMasks.removeAll()
+        try await streams.play(stream: stream)
     }
-    /// Stops whatever is playing on the output; it returns to black at (0, 0).
+    /// Stops the stream; every output returns to black at (0, 0).
+    public func stopPlaying() async { await streams.stopSource() }
+    /// Stops whatever is playing on one output; it returns to black at (0, 0).
     public func stopPlaying(for id: UUID) async throws { try await streams.stopPattern(for: id) }
     public func isPlayingStream(_ id: UUID) async -> Bool { await streams.sourceActive(id) }
 

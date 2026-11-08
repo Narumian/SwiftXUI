@@ -1,10 +1,11 @@
 import Foundation
 
-/// How one output's scanner wants its drawing prepared. These are the settings of
-/// the output chain that belong to the scanner and its taste, not to a shape: the
-/// holds that let the galvanometers settle, how corners and screen edges are
-/// treated, and how finely moves are spaced. They are saved with the output.
-public struct LaserScannerProfile: Codable, Equatable, Sendable {
+/// How drawing is prepared for the scanners, in one set for the whole output
+/// chain: the holds that let the galvanometers settle, how corners and screen
+/// edges are treated, and how finely moves are spaced. They are not a shape's
+/// business and not one output's: the chain sits before the shared buffer, so every
+/// output plays what it makes.
+public struct LaserScannerSettings: Codable, Equatable, Sendable {
     /// Samples held at each end of a shape, and where a path is cut (view or screen).
     public var paddingDwell: Int
     /// Dark samples before a shape and where a path returns from a cut.
@@ -30,10 +31,10 @@ public struct LaserScannerProfile: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case paddingDwell, paddingBlank, screen, cornerDwell, cornerThresholdDegrees, maximumStep, minimumStep
     }
-    /// Missing keys keep their defaults, so a profile saved by an older build still loads.
+    /// Missing keys keep their defaults, so settings saved by an older build still load.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let d = LaserScannerProfile()
+        let d = LaserScannerSettings()
         paddingDwell = try c.decodeIfPresent(Int.self, forKey: .paddingDwell) ?? d.paddingDwell
         paddingBlank = try c.decodeIfPresent(Int.self, forKey: .paddingBlank) ?? d.paddingBlank
         screen = try c.decodeIfPresent(LaserScreenMode.self, forKey: .screen) ?? d.screen
@@ -43,24 +44,68 @@ public struct LaserScannerProfile: Codable, Equatable, Sendable {
         minimumStep = try c.decodeIfPresent(Double.self, forKey: .minimumStep) ?? d.minimumStep
     }
 
-    /// The whole output chain for one output: shapes in, scanner samples out.
-    /// Padding, projection (with this profile's cut and screen handling), corner
-    /// dwell, sampling and the output's safety masks, in that order.
-    public func output<Shapes: LaserStream>(from shapes: Shapes, projection template: LaserProjection,
-                                            masks: LaserMaskSettings, rate: UInt32 = 30000) -> some LaserOutputStream
+    /// The whole chain before the shared buffer: shapes in, scanner samples out.
+    /// Padding, projection (with the cut and screen handling of the settings), corner
+    /// dwell and sampling, in that order. The settings are read again for every
+    /// chunk, so changing `live` changes what is made from the next chunk on, while
+    /// the chain plays. The output's own safety masks are not here: they apply
+    /// after the buffer, per output.
+    public static func stream<Shapes: LaserStream>(from shapes: Shapes, projection template: LaserProjection,
+                                                   live: LaserLive<LaserScannerSettings>, rate: UInt32 = 30000) -> some LaserOutputStream
     where Shapes.Element == LaserVertex {
-        var projection = template
-        projection.dwell = max(0, paddingDwell); projection.blank = max(0, paddingBlank); projection.screen = screen
         let shapeFormat = LaserStreamFormat(domain: .shapes), scanner = LaserStreamFormat(domain: .scanner, rate: rate)
-        let padded = LaserStagedStream(shapes, stage: LaserDwellBlank(dwell: paddingDwell, blank: paddingBlank), format: shapeFormat)
-        let projected = LaserStagedStream(padded, stage: LaserProjector(projection), format: scanner)
-        let cornered = LaserStagedStream(projected, stage: LaserCornerDwell(maximum: cornerDwell, thresholdDegrees: cornerThresholdDegrees), format: scanner)
-        let sampled = LaserStagedStream(cornered, stage: LaserSampler(minimumStep: minimumStep, maximumStep: maximumStep), format: scanner)
-        return LaserStagedStream(sampled, stage: LaserMasking(masks), format: scanner)
+        let initial = live.value
+        let padding = LaserTuned(LaserDwellBlank(dwell: initial.paddingDwell, blank: initial.paddingBlank), live: live) { stage, s in
+            stage.dwell = max(0, s.paddingDwell); stage.blank = max(0, s.paddingBlank)
+        }
+        let projecting = LaserTuned(LaserProjector(template), live: live) { stage, s in
+            var projection = template
+            projection.dwell = max(0, s.paddingDwell); projection.blank = max(0, s.paddingBlank); projection.screen = s.screen
+            if stage.settings != projection { stage.settings = projection }
+        }
+        let cornering = LaserTuned(LaserCornerDwell(maximum: initial.cornerDwell), live: live) { stage, s in
+            stage.maximum = max(0, s.cornerDwell); stage.thresholdDegrees = min(180, max(0, s.cornerThresholdDegrees))
+        }
+        let sampling = LaserTuned(LaserSampler(maximumStep: initial.maximumStep), live: live) { stage, s in
+            stage.maximumStep = max(1e-9, s.maximumStep); stage.minimumStep = max(0, s.minimumStep)
+        }
+        let padded = LaserStagedStream(shapes, stage: padding, format: shapeFormat)
+        let projected = LaserStagedStream(padded, stage: projecting, format: scanner)
+        let cornered = LaserStagedStream(projected, stage: cornering, format: scanner)
+        return LaserStagedStream(cornered, stage: sampling, format: scanner)
     }
 }
 
-/// One adjustable number of a `LaserScannerProfile`, with what a control needs to
+/// A value that can be changed from anywhere while a stream reads it.
+public final class LaserLive<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    public init(_ value: Value) { stored = value }
+    public var value: Value {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
+/// A stage whose settings are brought up to date from `live` before every chunk.
+public struct LaserTuned<Stage: LaserStage>: LaserStage {
+    public typealias Input = Stage.Input
+    public typealias Output = Stage.Output
+    public var stage: Stage
+    private let live: LaserLive<LaserScannerSettings>
+    private let tune: @Sendable (inout Stage, LaserScannerSettings) -> Void
+
+    public init(_ stage: Stage, live: LaserLive<LaserScannerSettings>, tune: @escaping @Sendable (inout Stage, LaserScannerSettings) -> Void) {
+        self.stage = stage; self.live = live; self.tune = tune
+    }
+
+    public mutating func process(_ chunk: LaserChunk<Stage.Input>) -> LaserChunk<Stage.Output> {
+        tune(&stage, live.value)
+        return stage.process(chunk)
+    }
+}
+
+/// One adjustable number of a `LaserScannerSettings`, with what a control needs to
 /// show it: a label, a range, whether it is whole, and how to read and write it.
 public enum LaserScannerParameter: String, CaseIterable, Codable, Sendable, Identifiable {
     case paddingDwell, paddingBlank, cornerDwell, cornerThreshold, maximumStep, minimumStep
@@ -89,9 +134,9 @@ public enum LaserScannerParameter: String, CaseIterable, Codable, Sendable, Iden
     public var isWhole: Bool {
         switch self { case .paddingDwell, .paddingBlank, .cornerDwell: true; default: false }
     }
-    public var defaultValue: Double { value(in: LaserScannerProfile()) }
+    public var defaultValue: Double { value(in: LaserScannerSettings()) }
 
-    public func value(in profile: LaserScannerProfile) -> Double {
+    public func value(in profile: LaserScannerSettings) -> Double {
         switch self {
         case .paddingDwell: Double(profile.paddingDwell)
         case .paddingBlank: Double(profile.paddingBlank)
@@ -102,7 +147,7 @@ public enum LaserScannerParameter: String, CaseIterable, Codable, Sendable, Iden
         }
     }
     /// Writes `value`, limited to the range and rounded if the parameter is whole.
-    public func set(_ value: Double, in profile: inout LaserScannerProfile) {
+    public func set(_ value: Double, in profile: inout LaserScannerSettings) {
         guard value.isFinite else { return }
         let limited = min(range.upperBound, max(range.lowerBound, value))
         switch self {
@@ -115,14 +160,14 @@ public enum LaserScannerParameter: String, CaseIterable, Codable, Sendable, Iden
         }
     }
     /// 0...1 across the range.
-    public func normalized(in profile: LaserScannerProfile) -> Double {
+    public func normalized(in profile: LaserScannerSettings) -> Double {
         (value(in: profile) - range.lowerBound) / (range.upperBound - range.lowerBound)
     }
-    public func setNormalized(_ n: Double, in profile: inout LaserScannerProfile) {
+    public func setNormalized(_ n: Double, in profile: inout LaserScannerSettings) {
         guard n.isFinite else { return }
         set(range.lowerBound + min(1, max(0, n)) * (range.upperBound - range.lowerBound), in: &profile)
     }
-    public func display(_ profile: LaserScannerProfile) -> String {
+    public func display(_ profile: LaserScannerSettings) -> String {
         let v = value(in: profile)
         switch self {
         case .cornerThreshold: return "\(Int(v.rounded()))°"

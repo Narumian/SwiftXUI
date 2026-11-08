@@ -39,10 +39,10 @@ public struct LaserStreamChunks<Stream: LaserOutputStream>: AsyncSequence, Senda
 }
 
 extension LaserOutputStreams {
-    /// Plays a scanner stream on one output at the rate the stream declares,
-    /// replacing any pattern or earlier source.
-    public func play<Stream: LaserOutputStream>(stream: Stream, chunkSize: Int = 512, for id: UUID) throws {
+    /// Plays a scanner stream on every connected output at the rate the stream
+    /// declares, replacing any pattern or earlier source.
+    public func play<Stream: LaserOutputStream>(stream: Stream, chunkSize: Int = 512) throws {
         guard let rate = stream.format.rate, rate > 0 else { throw LaserOutputError.unsupportedPointRate }
-        try play(source: LaserStreamChunks(stream, chunkSize: chunkSize), sampleRate: rate, for: id)
+        try play(source: LaserStreamChunks(stream, chunkSize: chunkSize), sampleRate: rate)
     }
 }

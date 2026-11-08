@@ -4,12 +4,13 @@ import XCTest
 @testable import XLive
 
 private actor Recorder {
-    var starts = 0, stops = 0, interrupts = 0, litWrites = 0, blackWrites = 0
+    var starts = 0, stops = 0, interrupts = 0, litWrites = 0, blackWrites = 0, glowWrites = 0
     func start() { starts += 1 }
     func disconnect() { stops += 1 }
     func interrupt() { interrupts += 1 }
     func write(_ points: [LaserPoint]) {
         if points.contains(where: { !$0.isBlanked }) { litWrites += 1 } else { blackWrites += 1 }
+        if points.contains(where: { $0.rgb != .zero }) { glowWrites += 1 }
     }
 }
 
@@ -107,7 +108,7 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         let chunks = AsyncStream<[LaserPoint]> { continuation in
             Task { while !Task.isCancelled { continuation.yield(Array(repeating: lit, count: 139) + [dark]); try? await Task.sleep(nanoseconds: 2_000_000) } ; continuation.finish() }
         }
-        try await streams.play(source: chunks, sampleRate: 30000, for: id)
+        try await streams.play(source: chunks, sampleRate: 30000)
         let active = await streams.sourceActive(id)
         XCTAssertTrue(active)
         for _ in 0..<200 {
@@ -130,7 +131,7 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         let id = UUID()
         try await streams.connect(id) { StubSession(recorder) }
         let silent = AsyncStream<[LaserPoint]> { _ in }   // never yields
-        try await streams.play(source: silent, sampleRate: 30000, for: id)
+        try await streams.play(source: silent, sampleRate: 30000)
         try await Task.sleep(nanoseconds: 80_000_000)
         let lit = await recorder.litWrites, black = await recorder.blackWrites, failure = await streams.streamFailure(id)
         XCTAssertEqual(lit, 0)
@@ -141,20 +142,110 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         try await streams.disconnect(id)
     }
 
-    func testASourceOnOneOutputDoesNotHoldUpAnother() async throws {
-        let slowRecorder = Recorder(), fastRecorder = Recorder()
+    private func litChunks() -> AsyncStream<[LaserPoint]> {
+        let lit = try! LaserPoint(xy: .zero, rgb: SIMD3<Float>(repeating: 0.1))
+        let dark = try! LaserPoint(xy: .zero, rgb: .zero, isBlanked: true)
+        return AsyncStream<[LaserPoint]> { continuation in
+            Task { while !Task.isCancelled { continuation.yield(Array(repeating: lit, count: 139) + [dark]); try? await Task.sleep(nanoseconds: 2_000_000) }; continuation.finish() }
+        }
+    }
+    private func waitForLight(_ recorder: Recorder) async throws {
+        for _ in 0..<300 {
+            if await recorder.glowWrites > 0 { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    func testOneSourceIsPlayedOnEveryConnectedOutput() async throws {
+        let first = Recorder(), second = Recorder()
         let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
-        let slow = UUID(), fast = UUID()
-        try await streams.connect(slow) { StubSession(slowRecorder) }
-        try await streams.connect(fast) { StubSession(fastRecorder) }
-        let silent = AsyncStream<[LaserPoint]> { _ in }
-        try await streams.play(source: silent, sampleRate: 30000, for: slow)
+        let a = UUID(), b = UUID()
+        try await streams.connect(a) { StubSession(first) }
+        try await streams.connect(b) { StubSession(second) }
+        try await streams.play(source: litChunks(), sampleRate: 30000)
+        try await waitForLight(first); try await waitForLight(second)
+        let lightA = await first.glowWrites, lightB = await second.glowWrites
+        let activeA = await streams.sourceActive(a), activeB = await streams.sourceActive(b)
+        XCTAssertGreaterThan(lightA, 0)
+        XCTAssertGreaterThan(lightB, 0)
+        XCTAssertTrue(activeA && activeB)
+        await streams.stopSource()
+        let stillA = await streams.sourceActive(a), stillB = await streams.sourceActive(b)
+        XCTAssertFalse(stillA || stillB)
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testAnOutputThatConnectsWhileTheSourcePlaysJoinsIt() async throws {
+        let first = Recorder(), late = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let a = UUID(), b = UUID()
+        try await streams.connect(a) { StubSession(first) }
+        try await streams.play(source: litChunks(), sampleRate: 30000)
+        try await waitForLight(first)
+        try await streams.connect(b) { StubSession(late) }
+        try await waitForLight(late)
+        let light = await late.glowWrites
+        XCTAssertGreaterThan(light, 0)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testEachOutputAppliesItsOwnMasksAfterTheBuffer() async throws {
+        let masked = Recorder(), open = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let a = UUID(), b = UUID()
+        var mask = LaserMask(shape: .polygon, points: [.init(0.4, 0.4), .init(0.6, 0.4), .init(0.6, 0.6), .init(0.4, 0.6)])
+        mask.dimmer = 0
+        try await streams.connect(a, masks: LaserMaskSettings(masks: [mask])) { StubSession(masked) }
+        try await streams.connect(b) { StubSession(open) }
+        try await streams.play(source: litChunks(), sampleRate: 30000)
+        try await waitForLight(open)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let maskedLight = await masked.glowWrites, openLight = await open.glowWrites
+        XCTAssertEqual(maskedLight, 0)
+        XCTAssertGreaterThan(openLight, 0)
+        // Edited while playing: clearing the masks lets the light through.
+        await streams.setMasks(LaserMaskSettings(), for: a)
+        try await waitForLight(masked)
+        let after = await masked.glowWrites
+        XCTAssertGreaterThan(after, 0)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testStoppingOneOutputLeavesTheOthersPlaying() async throws {
+        let first = Recorder(), second = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let a = UUID(), b = UUID()
+        try await streams.connect(a) { StubSession(first) }
+        try await streams.connect(b) { StubSession(second) }
+        try await streams.play(source: litChunks(), sampleRate: 30000)
+        try await waitForLight(first); try await waitForLight(second)
+        try await streams.stopPattern(for: a)
+        let stoppedA = await streams.sourceActive(a), stillB = await streams.sourceActive(b)
+        XCTAssertFalse(stoppedA)
+        XCTAssertTrue(stillB)
+        let before = await second.glowWrites
         try await Task.sleep(nanoseconds: 100_000_000)
-        let slowWrites = await slowRecorder.blackWrites, fastWrites = await fastRecorder.blackWrites
-        XCTAssertGreaterThan(slowWrites, 3)   // the starved output keeps being fed (dark)
-        XCTAssertGreaterThan(fastWrites, 3)   // and so does the idle one
-        try await streams.disconnect(slow)
-        try await streams.disconnect(fast)
+        let afterB = await second.glowWrites
+        XCTAssertGreaterThan(afterB, before)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testASilentSourceKeepsEveryOutputFedDark() async throws {
+        let first = Recorder(), second = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let a = UUID(), b = UUID()
+        try await streams.connect(a) { StubSession(first) }
+        try await streams.connect(b) { StubSession(second) }
+        try await streams.play(source: AsyncStream<[LaserPoint]> { _ in }, sampleRate: 30000)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let writesA = await first.blackWrites, writesB = await second.blackWrites
+        XCTAssertGreaterThan(writesA, 3)
+        XCTAssertGreaterThan(writesB, 3)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
     }
 }
 
@@ -177,7 +268,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
         let padded = LaserStagedStream(looper, stage: LaserDwellBlank(dwell: 2, blank: 2), format: LaserStreamFormat(domain: .shapes))
         let projected = LaserStagedStream(padded, stage: LaserProjector(projection()), format: LaserStreamFormat(domain: .scanner, rate: 30000))
         let sampled = LaserStagedStream(projected, stage: LaserSampler(maximumStep: 0.05), format: projected.format)
-        try await streams.play(stream: sampled, for: id)
+        try await streams.play(stream: sampled)
         for _ in 0..<200 {
             if await recorder.litWrites > 0 { break }
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -202,7 +293,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
             var format: LaserStreamFormat { looper.format }
             mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
         }
-        do { try await streams.play(stream: Output(looper: looper), for: id); XCTFail("expected unsupportedPointRate") } catch {
+        do { try await streams.play(stream: Output(looper: looper)); XCTFail("expected unsupportedPointRate") } catch {
             XCTAssertEqual(error as? LaserOutputError, .unsupportedPointRate)
         }
         try await streams.disconnect(id)
@@ -219,7 +310,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
             var format: LaserStreamFormat { looper.format }
             mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
         }
-        try await streams.play(stream: Output(looper: looper), for: id)
+        try await streams.play(stream: Output(looper: looper))
         try await Task.sleep(nanoseconds: 80_000_000)
         let lit = await recorder.litWrites, black = await recorder.blackWrites, failure = await streams.streamFailure(id)
         XCTAssertEqual(lit, 0)

@@ -7,24 +7,23 @@ private let foreground = XColorValue(hex: 0xe8eeeb)
 private let secondary = XColorValue(hex: 0xa9b5b0)
 private let accent = XColorValue(hex: 0x80c9b2)
 
-/// The scanner settings of one output: every `LaserScannerParameter` as a slider,
+/// The scanner settings, shared by every output: every `LaserScannerParameter` as a slider,
 /// and the screen-edge mode. Changes are saved as they are made.
 public struct LaserScannerSettingsView: XView, Sendable {
-    private var _profile: StateStore.Box<LaserScannerProfile>?
-    private var profile: LaserScannerProfile { _profile?.value ?? initialProfile }
+    private var _profile: StateStore.Box<LaserScannerSettings>?
+    private var profile: LaserScannerSettings { _profile?.value ?? initialProfile }
     public mutating func _installState(id: StateIdentity, store: StateStore) {
         _profile = store._xstateBox(id: id, name: "profile", default: { initialProfile })
     }
 
-    let initialProfile: LaserScannerProfile
-    let outputName: String
-    let onChange: @Sendable (LaserScannerProfile) -> Void
+    let initialProfile: LaserScannerSettings
+    let onChange: @Sendable (LaserScannerSettings) -> Void
     let onBack: @Sendable () -> Void
 
-    public init(initial: LaserScannerProfile = .init(), outputName: String = "LASER 01",
-                onChange: @escaping @Sendable (LaserScannerProfile) -> Void = { _ in },
+    public init(initial: LaserScannerSettings = .init(),
+                onChange: @escaping @Sendable (LaserScannerSettings) -> Void = { _ in },
                 onBack: @escaping @Sendable () -> Void = {}) {
-        self.initialProfile = initial; self.outputName = outputName; self.onChange = onChange; self.onBack = onBack
+        self.initialProfile = initial; self.onChange = onChange; self.onBack = onBack
     }
 
     public var body: some XView {
@@ -32,14 +31,14 @@ public struct LaserScannerSettingsView: XView, Sendable {
         let current = profile
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Text("‹ OUTPUT", size: 14, color: accent).padding(6).onTapGesture(id: "scanner.back", label: "OUTPUT", onBack)
+                Text("‹ OUTPUTS", size: 14, color: accent).padding(6).onTapGesture(id: "scanner.back", label: "OUTPUTS", onBack)
                 Text("SCANNER SETTINGS", size: 18, color: foreground)
                 Spacer()
                 Text("AUTO SAVE", size: 12, color: secondary)
             }.padding(12).background { Rectangle(fill: panel) }
             ScrollView(id: "laser.scanner.settings") {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("\(outputName.uppercased())  /  SCANNER", size: 12, color: secondary)
+                    Text("ALL OUTPUTS", size: 12, color: secondary)
                     Text("OFF-SCREEN", size: 12, color: secondary)
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(LaserScannerSettingsView.screenModes) { mode in
@@ -54,13 +53,13 @@ public struct LaserScannerSettingsView: XView, Sendable {
                     }
                     Text("RESET ALL", size: 12, color: foreground).padding(9)
                         .background { RoundedRectangle(cornerRadius: 4, fill: XColorValue(hex: 0x3a4240)) }
-                        .onTapGesture(id: "scanner.reset.all", label: "RESET ALL") { edit(box) { $0 = LaserScannerProfile() } }
+                        .onTapGesture(id: "scanner.reset.all", label: "RESET ALL") { edit(box) { $0 = LaserScannerSettings() } }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background { Rectangle(fill: pageBackground) }
     }
 
-    private func row(_ parameter: LaserScannerParameter, profile: LaserScannerProfile, box: StateStore.Box<LaserScannerProfile>?) -> some XView {
+    private func row(_ parameter: LaserScannerParameter, profile: LaserScannerSettings, box: StateStore.Box<LaserScannerSettings>?) -> some XView {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(parameter.label, size: 12, color: foreground)
@@ -84,7 +83,7 @@ public struct LaserScannerSettingsView: XView, Sendable {
         }
     }
 
-    private func edit(_ box: StateStore.Box<LaserScannerProfile>?, _ change: (inout LaserScannerProfile) -> Void) {
+    private func edit(_ box: StateStore.Box<LaserScannerSettings>?, _ change: (inout LaserScannerSettings) -> Void) {
         guard let box else { return }
         var next = box.value
         change(&next)
