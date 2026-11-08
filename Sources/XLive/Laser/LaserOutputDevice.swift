@@ -96,10 +96,17 @@ public protocol LaserOutputSession: AnyObject, Sendable {
     ///
     /// Completion means the backend accepted the block, not that it was projected.
     /// Backends must bound their pending buffers and suspend the producer when full;
-    /// never silently drop, reorder, or repeat samples. Block boundaries have no
-    /// drawing or packet meaning. On a detected underrun, stop supplying lit
-    /// samples, attempt to disable playback, and report a terminal failure. A
-    /// backend must not recover by repeating old content or holding a lit point.
+    /// never silently drop or reorder samples. Block boundaries have no drawing or
+    /// packet meaning.
+    ///
+    /// An underrun, where the device runs out of samples, is not a failure. Links
+    /// such as Wi-Fi stall briefly and routinely, and the device resumes as soon as
+    /// samples arrive again, so the session keeps running and the gap is only a
+    /// momentary lapse in the output. Backends count underruns and expose them for
+    /// diagnostics instead of ending the timeline. A backend must not fill a gap
+    /// itself by repeating old content or holding a lit point. The producer is
+    /// responsible for safety across gaps: it ends every packet-sized run on a
+    /// blanked sample, so a stalled device never rests on a lit point.
     ///
     /// Cancellation or transport failure may occur after partial acceptance, so
     /// callers must not automatically retry a failed block. Such a failure ends
