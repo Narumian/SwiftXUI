@@ -58,6 +58,16 @@ public actor LaserOutputConnections {
         rebuilding.remove(id)
     }
 
+    /// Plays a scanner stream (a chain of stages ending in masking, say) on one
+    /// output at the rate it declares, replacing the preview or an earlier stream.
+    public func play<Stream: LaserOutputStream>(_ stream: Stream, for id: UUID) async throws {
+        pendingMasks[id] = nil
+        try await streams.play(stream: stream, for: id)
+    }
+    /// Stops whatever is playing on the output; it returns to black at (0, 0).
+    public func stopPlaying(for id: UUID) async throws { try await streams.stopPattern(for: id) }
+    public func isPlayingStream(_ id: UUID) async -> Bool { await streams.sourceActive(id) }
+
     public func disablePreviews() async { await streams.stopAllPatterns() }
     public func disconnect(_ id: UUID) async throws { try await streams.disconnect(id) }
     public func disconnectAll() async { await streams.disconnectAll() }
