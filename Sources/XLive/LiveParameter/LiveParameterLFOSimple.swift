@@ -1,28 +1,11 @@
 import Foundation
 
-public enum LiveParameterError: Error, Equatable, Sendable {
-    case invalidRange, invalidValue, invalidPeriod, invalidReturnDuration
-}
-
-public struct LiveLFO: Equatable, Sendable {
-    public enum Period: Equatable, Sendable {
-        case seconds(Double)
-        case beats(Double)
-    }
-    public let period: Period
-    /// Phase in cycles. Zero begins at the midpoint, rising.
-    public let phase: Double
-    public init(period: Period, phase: Double = 0) throws {
-        let length: Double
-        switch period { case .seconds(let value), .beats(let value): length = value }
-        guard length.isFinite && length > 0, phase.isFinite else { throw LiveParameterError.invalidPeriod }
-        self.period = period; self.phase = phase
-    }
-}
-
-/// A bounded parameter with optional sine LFO and latched manual override.
-public struct LiveParameter: Sendable {
-    public enum Mode: Equatable, Sendable { case automatic, manual, returning }
+/// The simple LFO parameter: a bounded value with an optional sine LFO and a latched manual
+/// override. It is driven by `update(context:)` once per host frame.
+///
+/// Its sibling `LiveParameterMIDISimple` takes its value from MIDI instead.
+public struct LiveParameterLFOSimple: Sendable, Codable {
+    public enum Mode: String, Equatable, Sendable, Codable { case automatic, manual, returning }
     public let range: ClosedRange<Double>
     public let returnDuration: Double
     public private(set) var value: Double
@@ -32,6 +15,34 @@ public struct LiveParameter: Sendable {
     private var secondsPhase = 0.0
     private var returnStart = 0.0
     private var returnElapsed = 0.0
+
+    private enum CodingKeys: String, CodingKey {
+        case range, returnDuration, value, manualValue, mode, lfo, secondsPhase, returnStart, returnElapsed
+    }
+
+    /// Restores a saved parameter through the validating initializer, so a file cannot bring
+    /// back a range, value or duration that `init` would refuse. The values that follow are
+    /// limited to what they could have been: a value stays in the range, and a phase or a
+    /// return stays inside its cycle or duration. Without an LFO the mode is always manual.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let lfo = try container.decodeIfPresent(LiveLFO.self, forKey: .lfo)
+        try self.init(value: container.decode(Double.self, forKey: .value),
+                      range: container.decode(ClosedRange<Double>.self, forKey: .range),
+                      lfo: lfo,
+                      returnDuration: container.decode(Double.self, forKey: .returnDuration))
+
+        func finite(_ key: CodingKeys) throws -> Double {
+            let number = try container.decodeIfPresent(Double.self, forKey: key) ?? 0
+            guard number.isFinite else { throw LiveParameterError.invalidValue }
+            return number
+        }
+        manualValue = min(range.upperBound, max(range.lowerBound, try finite(.manualValue)))
+        if lfo != nil { mode = try container.decode(Mode.self, forKey: .mode) }
+        secondsPhase = min(1, max(0, try finite(.secondsPhase)))
+        returnStart = min(range.upperBound, max(range.lowerBound, try finite(.returnStart)))
+        returnElapsed = min(returnDuration, max(0, try finite(.returnElapsed)))
+    }
 
     public init(value: Double, range: ClosedRange<Double> = 0...1, lfo: LiveLFO? = nil, returnDuration: Double = 0.3) throws {
         guard range.lowerBound.isFinite, range.upperBound.isFinite, range.lowerBound < range.upperBound,

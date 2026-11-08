@@ -20,6 +20,9 @@ public struct LiveTempo: Sendable {
 
 /// A live performance component with an XUI representation and time-driven state.
 /// The host serially updates and retains the mutated value; this is not an audio callback.
-public protocol XLive: XView, Sendable {
+///
+/// A component is `Codable`: what it encodes is the state a saved session needs to bring it
+/// back (its parameters and where they are), not caches or handles it can rebuild.
+public protocol XLive: XView, Codable, Sendable {
     mutating func update(context: LiveUpdateContext) async
 }

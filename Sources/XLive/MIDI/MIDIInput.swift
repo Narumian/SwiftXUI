@@ -1,4 +1,5 @@
 import Foundation
+import XCombine
 
 public struct MIDIInputSource: Identifiable, Hashable, Sendable {
     /// Stable identifier supplied by the backend, when the platform provides one.
@@ -24,9 +25,12 @@ public struct MIDIInputEvent: Equatable, Sendable {
     }
 }
 
-/// A connection has one consumer; disconnect ends its event stream.
+/// A connected source. Events arrive on the backend's own thread and are queued in `events`;
+/// the owner of the graph calls `events.drain()` (once per frame, or when `events.onWake`
+/// fires) and they are delivered on that thread to any number of subscribers. After
+/// `disconnect()` no further events are queued.
 public protocol MIDIInputConnection: AnyObject, Sendable {
-    var events: AsyncStream<MIDIInputEvent> { get }
+    var events: XInbox<MIDIInputEvent> { get }
     func disconnect()
 }
 

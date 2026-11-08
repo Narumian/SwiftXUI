@@ -1,6 +1,7 @@
 import CoreMIDI
 import Foundation
-import XMIDI
+import XCombine
+import XLive
 
 public struct AppleMIDIError: Error, Sendable {
     public let status: OSStatus
@@ -37,8 +38,7 @@ public struct AppleMIDIInputBackend: MIDIInputBackend {
 }
 
 private final class AppleMIDIConnection: MIDIInputConnection, @unchecked Sendable {
-    let events: AsyncStream<MIDIInputEvent>
-    private let continuation: AsyncStream<MIDIInputEvent>.Continuation
+    let events = XInbox<MIDIInputEvent>(overflow: .dropOldest(capacity: 4096))
     private let lock = NSLock()
     private var parser = MIDI1InputParser()
     private var client: MIDIClientRef = 0
@@ -49,7 +49,6 @@ private final class AppleMIDIConnection: MIDIInputConnection, @unchecked Sendabl
 
     init(endpoint: MIDIEndpointRef, sourceID: String) throws {
         self.sourceID = sourceID
-        (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(4096))
         var newClient: MIDIClientRef = 0
         var status = MIDIClientCreateWithBlock("XMIDI" as CFString, &newClient, nil)
         guard status == noErr else { throw AppleMIDIError(status: status) }
@@ -76,7 +75,7 @@ private final class AppleMIDIConnection: MIDIInputConnection, @unchecked Sendabl
                     parser.receive(UnsafeRawBufferPointer(start: data, count: Int(packet.pointee.length)))
                 }
                 for message in messages {
-                    continuation.yield(MIDIInputEvent(sourceID: sourceID, message: message, timestamp: packet.pointee.timeStamp))
+                    events.send(MIDIInputEvent(sourceID: sourceID, message: message, timestamp: packet.pointee.timeStamp))
                 }
                 packet = UnsafePointer(MIDIPacketNext(packet))
             }
@@ -92,7 +91,7 @@ private final class AppleMIDIConnection: MIDIInputConnection, @unchecked Sendabl
         lock.unlock()
         if oldPort != 0 { MIDIPortDisconnectSource(oldPort, oldEndpoint); MIDIPortDispose(oldPort) }
         if oldClient != 0 { MIDIClientDispose(oldClient) }
-        continuation.finish()
+        events.onWake(nil)
     }
     deinit { disconnect() }
 }

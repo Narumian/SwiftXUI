@@ -1,12 +1,12 @@
 import XUI
 
-/// Horizontal control for a host-owned LiveParameter. The host updates the same
+/// Horizontal control for a host-owned LiveParameterLFOSimple. The host updates the same
 /// binding each frame and provides a binding safe for gesture callbacks.
-public struct LiveSlider: XView, Sendable {
-    private let parameter: Binding<LiveParameter>
+public struct LiveSliderLFOSimple: XView, Sendable {
+    private let parameter: Binding<LiveParameterLFOSimple>
     private let knobSize: Double
 
-    public init(parameter: Binding<LiveParameter>, knobSize: Double = 24) {
+    public init(parameter: Binding<LiveParameterLFOSimple>, knobSize: Double = 24) {
         self.parameter = parameter
         self.knobSize = knobSize.isFinite ? max(1, knobSize) : 24
     }
