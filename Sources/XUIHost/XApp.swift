@@ -1,3 +1,4 @@
+import Foundation
 import XRender
 import XUI
 
@@ -7,17 +8,25 @@ public struct XAppConfiguration {
     public var background: RenderColor
     public var environment: EnvironmentValues
     public var mcpEnabled: Bool
+    /// TrueType data by semantic role. Empty keeps the built-in vector fallback.
+    public var fonts: [FontRole: Data]
+    /// Ordered fallback faces used when the primary face lacks a character.
+    public var fallbackFonts: [FontRole: [Data]]
 
     public init(
         size: RenderSize = RenderSize(width: 1920, height: 1080),
         background: RenderColor = RenderColor(0, 0, 0, 0),
         environment: EnvironmentValues = EnvironmentValues(),
-        mcpEnabled: Bool = false
+        mcpEnabled: Bool = false,
+        fonts: [FontRole: Data] = [:],
+        fallbackFonts: [FontRole: [Data]] = [:]
     ) {
         self.size = size
         self.background = background
         self.environment = environment
         self.mcpEnabled = mcpEnabled
+        self.fonts = fonts
+        self.fallbackFonts = fallbackFonts
     }
 }
 
@@ -48,6 +57,8 @@ public final class XAppSession<App: XApp> {
     public let app: App
     public let host: XUIHost
     public private(set) var lastFrame: XUIFrame?
+    private let dynamicFonts: DynamicFontBook?
+    private var fontUploads: [XUIFontTextureUpdate] = []
 
     public init(_ app: App) {
         self.app = app
@@ -57,13 +68,38 @@ public final class XAppSession<App: XApp> {
             background: configuration.background,
             environment: configuration.environment
         )
+        let faces = configuration.fonts.compactMapValues { TrueTypeFont(data: $0) }
+        let fallbacks = configuration.fallbackFonts.mapValues { $0.compactMap { TrueTypeFont(data: $0) } }
+        self.dynamicFonts = faces.isEmpty ? nil : DynamicFontBook(fonts: faces, fallbackFonts: fallbacks)
     }
 
     @discardableResult
-    public func render(time: Double? = nil) async -> XUIFrame {
-        let frame = await host.render(app.body, time: time)
+    public func render(time: Double? = nil, pixelScale: Float = 1, useFonts: Bool = true) async -> XUIFrame {
+        if !useFonts { host.fonts = nil }
+        var frame = await host.render(app.body, time: time)
+        if let dynamicFonts, useFonts {
+            // Resolve glyph metrics before the final layout, so hit targets and
+            // line wrapping are measured with the same faces used to draw.
+            dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
+            host.fonts = dynamicFonts.snapshot()
+            frame = await host.render(app.body, time: time)
+            dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
+            host.fonts = dynamicFonts.snapshot()
+            dynamicFonts.sync(register: { id, bytes, width, height in
+                fontUploads.append(.create(id: id, rgba: bytes, width: width, height: height))
+            }, update: { id, bytes, y, width, height in
+                fontUploads.append(.update(id: id, rgba: bytes, y: y, width: width, height: height))
+            })
+        }
         lastFrame = frame
         return frame
+    }
+
+    /// Drain before submitting the corresponding compiled frame to the renderer.
+    public func takeFontTextureUpdates() -> [XUIFontTextureUpdate] {
+        let updates = fontUploads
+        fontUploads.removeAll(keepingCapacity: true)
+        return updates
     }
 
     @discardableResult
@@ -129,10 +165,12 @@ public final class XAppDriver<App: XApp> {
         fit: Bool = true
     ) async -> CompiledFrame {
         let t0 = FrameProbe.now
-        let xFrame = await session.render(time: time)
-        let t1 = FrameProbe.now
         let logicalSize = session.host.size
         let framebufferSize = framebuffer ?? logicalSize
+        let textureRenderer = renderer as? any XTextureRenderer
+        let scale = logicalSize.width > 0 ? framebufferSize.width / logicalSize.width : 1
+        let xFrame = await session.render(time: time, pixelScale: scale, useFonts: textureRenderer != nil)
+        let t1 = FrameProbe.now
         let compiled = SceneCompiler.compile(
             xFrame.scene,
             canvas: logicalSize,
@@ -141,6 +179,9 @@ public final class XAppDriver<App: XApp> {
             fonts: session.host.fonts
         )
         let t2 = FrameProbe.now
+        if let textureRenderer {
+            for update in session.takeFontTextureUpdates() { update.apply(to: textureRenderer) }
+        }
         let start = epoch ?? time
         epoch = start
         renderer.render(compiled, time: Float(time - start))
