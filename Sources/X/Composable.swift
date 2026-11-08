@@ -99,6 +99,7 @@ public enum EitherPart<
     }
 }
 
+@available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)
 public struct Group<Domain>: Composable {
     public typealias Body = Empty<Domain>
 
@@ -171,6 +172,7 @@ public enum ComposableBuilder<Domain> {
         .second(part)
     }
 
+    @available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)
     public static func buildArray<P: Composable<Domain>>(
         _ parts: [P]
     ) -> Group<Domain> {

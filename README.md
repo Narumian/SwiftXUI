@@ -1,11 +1,16 @@
 # SwiftXUI
 
-Renderer-neutral shaders, scene compilation, and an `XView` UI layer (SwiftUI-shaped API) for iOS and macOS.
+Renderer-neutral shaders, scene compilation, and an `XView` UI layer (SwiftUI-shaped API).
 
 ## Requirements
 
 - Swift 6.0+
-- Xcode with Command Line Tools (for `xcodebuild` and Apple platform SDKs)
+- Apple builds require Xcode and the corresponding SDK. `X.Group`, the
+  composable builder's array support, and the LaserCube driver require
+  macOS 13, iOS 16, tvOS 16, or watchOS 9 for their Swift runtime APIs.
+- `XRenderApple` and the bundled `CWGPU.xcframework` are Apple-specific.
+  Other platforms need a compatible rendering backend; not all products have
+  been verified on every platform.
 
 ## Setup
 
