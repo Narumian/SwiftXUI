@@ -48,7 +48,7 @@ public struct LaserProjection: Equatable, Sendable {
 ///
 /// Projected coordinates beyond the scanner's -1...1 are clamped per component, as
 /// Legacy's wire encoding did; the colour is `rgb * alpha` limited to 0...1.
-public struct LaserProjector: Sendable {
+public struct LaserProjector: LaserStage {
     public var settings: LaserProjection
     private var previous: SIMD4<Double>?
     private var previousRun: LaserShapeID?
@@ -82,17 +82,10 @@ public struct LaserProjector: Sendable {
         }
         starts[count] = points.count
 
-        var out = LaserChunk<LaserPoint>(elements: points)
-        for run in chunk.runs {
-            let range = starts[run.range.lowerBound]..<starts[run.range.upperBound]
-            if !range.isEmpty { out.runs.append(LaserRun(id: run.id, range: range)) }
-        }
-        for end in chunk.frameEnds where end >= 1 && end <= count {
-            let mapped = starts[end]
-            if mapped > 0, mapped > (out.frameEnds.last ?? 0) { out.frameEnds.append(mapped) }
-        }
-        return out
+        return LaserChunk(elements: points, carrying: chunk, starts: starts)
     }
+
+    public mutating func process(_ chunk: LaserChunk<LaserVertex>) -> LaserChunk<LaserPoint> { project(chunk) }
 
     private func isInside(_ camera: SIMD4<Double>) -> Bool { camera.z > settings.near && camera.z < settings.far }
 
