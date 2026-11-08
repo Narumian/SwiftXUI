@@ -11,6 +11,7 @@ public struct LaserOutputConfigView: XView, Sendable {
     private var _collection: StateStore.Box<LaserOutputCollection>?
     private var _selectedID: StateStore.Box<UUID?>?
     private var _editingMasks: StateStore.Box<Bool>?
+    private var _editingScanner: StateStore.Box<Bool>?
     private var _detailVisible: StateStore.Box<Bool>?
     private var _editingAddress: StateStore.Box<Bool>?
     private var _addressDraft: StateStore.Box<String>?
@@ -19,6 +20,7 @@ public struct LaserOutputConfigView: XView, Sendable {
     private var collection: LaserOutputCollection { _collection?.value ?? initialOutputs }
     private var selectedID: UUID? { _selectedID?.value ?? nil }
     private var editingMasks: Bool { _editingMasks?.value ?? false }
+    private var editingScanner: Bool { _editingScanner?.value ?? false }
     private var detailVisible: Bool { _detailVisible?.value ?? false }
     private var editingAddress: Bool { _editingAddress?.value ?? false }
     private var addressDraft: String { _addressDraft?.value ?? "" }
@@ -28,6 +30,7 @@ public struct LaserOutputConfigView: XView, Sendable {
         _collection = store._xstateBox(id: id, name: "collection", default: { initialOutputs })
         _selectedID = store._xstateBox(id: id, name: "selectedID", default: { nil })
         _editingMasks = store._xstateBox(id: id, name: "editingMasks", default: { false })
+        _editingScanner = store._xstateBox(id: id, name: "editingScanner", default: { false })
         _detailVisible = store._xstateBox(id: id, name: "detailVisible", default: { false })
         _editingAddress = store._xstateBox(id: id, name: "editingAddress", default: { false })
         _addressDraft = store._xstateBox(id: id, name: "addressDraft", default: { "" })
@@ -46,7 +49,7 @@ public struct LaserOutputConfigView: XView, Sendable {
     public var body: some XView {
         let items = collection.outputs
         let selected = items.first { $0.id == selectedID }
-        let state = _collection, selection = _selectedID, masksPage = _editingMasks
+        let state = _collection, selection = _selectedID, masksPage = _editingMasks, scannerPage = _editingScanner
         let statuses = _connectionStates
         let detail = _detailVisible, addressPage = _editingAddress, draft = _addressDraft, error = _addressError
         if editingMasks, let selected {
@@ -62,6 +65,10 @@ public struct LaserOutputConfigView: XView, Sendable {
                     Task { await connections.updatePreviewMasks(masks, for: selected.id) }
                 }
             }, onBack: { masksPage?.value = false })
+        } else if editingScanner, let selected {
+            LaserScannerSettingsView(initial: selected.scanner, outputName: selected.name, onChange: { profile in
+                updateOutput(state, selected.id, onChange: onChange) { $0.scanner = profile }
+            }, onBack: { scannerPage?.value = false })
         } else {
             GeometryReader { geometry in
                 let wide = geometry.width >= 650 && geometry.width > geometry.height
@@ -80,13 +87,13 @@ public struct LaserOutputConfigView: XView, Sendable {
                                 outputList(items, selectedID: selectedID, states: connectionStates, state: state, selection: selection, detail: detail, addressPage: addressPage)
                             }.frame(width: .pt(230))
                             ScrollView(id: "laser.outputs.detail") {
-                                outputDetail(selected, state: state, masksPage: masksPage, addressPage: addressPage, draft: draft, error: error,
+                                outputDetail(selected, state: state, masksPage: masksPage, scannerPage: scannerPage, addressPage: addressPage, draft: draft, error: error,
                                              isEditingAddress: editingAddress, addressText: addressDraft, addressInvalid: addressError, status: selected.flatMap { connectionStates[$0.id] } ?? "NOT CONNECTED", statuses: statuses)
                             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if detailVisible, let selected {
                         ScrollView(id: "laser.outputs.detail.narrow") {
-                            outputDetail(selected, state: state, masksPage: masksPage, addressPage: addressPage, draft: draft, error: error,
+                            outputDetail(selected, state: state, masksPage: masksPage, scannerPage: scannerPage, addressPage: addressPage, draft: draft, error: error,
                                          isEditingAddress: editingAddress, addressText: addressDraft, addressInvalid: addressError, status: connectionStates[selected.id] ?? "NOT CONNECTED", statuses: statuses)
                         }
                     } else {
@@ -124,7 +131,7 @@ public struct LaserOutputConfigView: XView, Sendable {
         }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading).background { Rectangle(fill: outputPanel) }
     }
 
-    private func outputDetail(_ output: LaserOutput?, state: StateStore.Box<LaserOutputCollection>?, masksPage: StateStore.Box<Bool>?,
+    private func outputDetail(_ output: LaserOutput?, state: StateStore.Box<LaserOutputCollection>?, masksPage: StateStore.Box<Bool>?, scannerPage: StateStore.Box<Bool>?,
                               addressPage: StateStore.Box<Bool>?, draft: StateStore.Box<String>?, error: StateStore.Box<Bool>?,
                               isEditingAddress: Bool, addressText: String, addressInvalid: Bool, status: String, statuses: StateStore.Box<[UUID: String]>?) -> some XView {
         VStack(alignment: .leading, spacing: 12) {
@@ -189,6 +196,7 @@ public struct LaserOutputConfigView: XView, Sendable {
                     }
                 }
                 Text("OUTPUT SETTINGS", size: 12, color: outputMuted)
+                button("SCANNER SETTINGS   ›") { scannerPage?.value = true }
                 button("SAFETY MASKS   \(output.masks.masks.count)   ›") {
                     guard let connections else { masksPage?.value = true; return }
                     Task { @XUIActor in
