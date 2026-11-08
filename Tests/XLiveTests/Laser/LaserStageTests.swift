@@ -120,3 +120,39 @@ final class LaserSamplerTests: XCTestCase {
         for (a, b) in zip(drawn, drawn.dropFirst()) { XCTAssertLessThanOrEqual(abs(b.xy.x - a.xy.x), 0.05 + 1e-5) }
     }
 }
+
+final class LaserMaskingTests: XCTestCase {
+    private func square(dimmer: Double) -> LaserMaskSettings {
+        // The centre of the output area, 0.4...0.6 each way.
+        var mask = LaserMask(shape: .polygon, points: [.init(0.4, 0.4), .init(0.6, 0.4), .init(0.6, 0.6), .init(0.4, 0.6)])
+        mask.dimmer = dimmer
+        return LaserMaskSettings(masks: [mask])
+    }
+
+    func testLightIsCutInsideAMaskAndUntouchedOutsideKeepingEverythingElse() {
+        var stage = LaserMasking(square(dimmer: 0))
+        let chunk = LaserChunk(elements: [point(0), point(0.9), point(0, .dwell)], runs: [LaserRun(id: 3, range: 0..<3)], frameEnds: [3])
+        let out = stage.process(chunk)
+        XCTAssertEqual(out.elements[0].rgb, .zero)                 // the centre is masked
+        XCTAssertEqual(out.elements[0].xy, chunk.elements[0].xy)
+        XCTAssertEqual(out.elements[1], chunk.elements[1])         // outside is the same sample
+        XCTAssertEqual(out.elements[2].rgb, .zero)
+        XCTAssertEqual(out.elements[2].mode, .dwell)
+        XCTAssertEqual(out.runs, chunk.runs)
+        XCTAssertEqual(out.frameEnds, chunk.frameEnds)
+    }
+
+    func testADimmerLeavesThatFractionOfTheLight() {
+        var stage = LaserMasking(square(dimmer: 0.25))
+        XCTAssertEqual(stage.process(LaserChunk(elements: [point(0)], shape: 1)).elements[0].rgb.x, 0.25, accuracy: 1e-6)
+    }
+
+    func testMasksThatAreOffOrAbsentPassTheChunkThrough() {
+        var disabled = square(dimmer: 0)
+        disabled.masks[0].enabled = false
+        let chunk = LaserChunk(elements: [point(0)], shape: 1)
+        var off = LaserMasking(disabled), none = LaserMasking(LaserMaskSettings())
+        XCTAssertEqual(off.process(chunk).elements, chunk.elements)
+        XCTAssertEqual(none.process(chunk).elements, chunk.elements)
+    }
+}
