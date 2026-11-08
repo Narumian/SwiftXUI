@@ -13,7 +13,7 @@ private func resolve(_ view: some XView, store: StateStore) async {
 
 @Test @XUIActor func onChangeFiresOnTheFirstDeclarationWithNilOld() async {
     let store = StateStore()
-    var seen: [(Int?, Int)] = []
+    let seen = LogBox<(Int?, Int)>()
     await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
 
     #expect(seen.count == 1)
@@ -23,7 +23,7 @@ private func resolve(_ view: some XView, store: StateStore) async {
 
 @Test @XUIActor func onChangeDoesNotFireWhileRedeclaringTheSameValue() async {
     let store = StateStore()
-    var seen: [(Int?, Int)] = []
+    let seen = LogBox<(Int?, Int)>()
     for _ in 0..<3 {
         await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
     }
@@ -32,7 +32,7 @@ private func resolve(_ view: some XView, store: StateStore) async {
 
 @Test @XUIActor func onChangeFiresWithOldAndNewWhenTheValueDiffers() async {
     let store = StateStore()
-    var seen: [(Int?, Int)] = []
+    let seen = LogBox<(Int?, Int)>()
     await resolve(Color(.black).onChange(of: 1) { old, new in seen.append((old, new)) }, store: store)
     await resolve(Color(.black).onChange(of: 2) { old, new in seen.append((old, new)) }, store: store)
 

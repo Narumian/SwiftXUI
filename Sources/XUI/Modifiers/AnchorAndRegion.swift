@@ -69,6 +69,19 @@ public struct _DragGestureModifier<Content: XView>: XView, _PrimitiveXView {
     }
 }
 
+public struct _LongPressGestureModifier<Content: XView>: XView, _PrimitiveXView {
+    public typealias Body = Never
+    let content: Content
+    let gesture: LongPressGesture
+
+    @XUIActor
+    func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: stateID, store: store))
+        wrapper.longPressGesture = gesture
+        return [wrapper]
+    }
+}
+
 public extension XView {
     /// Attach a value-style gesture to this view.
     ///
@@ -86,6 +99,17 @@ public extension XView {
     /// Attach a value-style drag gesture to this view.
     func gesture(_ gesture: DragGesture) -> _DragGestureModifier<Self> {
         _DragGestureModifier(content: self, gesture: gesture)
+    }
+
+    /// Attach a long-press gesture to this view. See `LongPressGesture` for how it is recognized.
+    func gesture(_ gesture: LongPressGesture) -> _LongPressGestureModifier<Self> {
+        _LongPressGestureModifier(content: self, gesture: gesture)
+    }
+
+    /// Perform `action` when this view is pressed and held for `minimumDuration` seconds.
+    func onLongPressGesture(minimumDuration: Double = 0.5,
+                            perform action: @escaping @Sendable () -> Void) -> _LongPressGestureModifier<Self> {
+        gesture(LongPressGesture(minimumDuration: minimumDuration).onEnded(action))
     }
 
     /// Export this view's resolved frame as `result.anchors[id]` — the

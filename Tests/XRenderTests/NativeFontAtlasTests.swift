@@ -56,9 +56,9 @@ private final class SquareGlyphs: GlyphRasterizer {
     let glyph = GlyphBox(x: 0, y: 0, w: 8, h: 8, advance: 7.3, left: 0.4, top: 8)
     let atlas = FontAtlas(texture: TextureID(5), atlasWidth: 64, atlasHeight: 64, pixelSize: 12,
                           ascent: 10, descent: 2, lineHeight: 12, glyphs: ["A": glyph, "B": glyph],
-                          capHeight: 8, sdfRange: 4, native: true)
+                          capHeight: 8.2, sdfRange: 4, native: true)
     var scene = Scene()
-    // capPixels = 7 * 1.2 * 1 = 8.4 → within 35% of the atlas's 8px cap → native placement
+    // capPixels = 7 * 1.2 * 1 = 8.4 → within 4% of the atlas's 8.2px cap → native placement
     scene.append(.text(TextCommand(string: "AB", origin: RenderPoint(x: 10.37, y: 20.61), scale: 1.2,
                                    color: .white, font: .ui)))
     let frame = SceneCompiler.compile(scene, canvas: RenderSize(width: 200, height: 100),
@@ -105,9 +105,12 @@ private final class SquareGlyphs: GlyphRasterizer {
                   capHeight: cap)
     }
     let book = FontBook(sized: [.numeric: [atlas(12, cap: 8.4), atlas(16, cap: 11.2)]])
-    // desired em = 9.8 / 0.7 = 14 → 16 is nearer only when ties break upward; use 14.4 (cap 10.08).
+    // The page is the smallest whose em is at least the desired em (cap / 0.7), never a
+    // smaller one than preparation baked: 10.08 → em 14.4 → 16; 9.4 → em 13.4 → 16, although 12
+    // is nearer; 8.4 → em 12 → 12 exactly.
     #expect(book.atlas(for: .numeric, capPixels: 10.08, character: "x")?.pixelSize == 16)
-    #expect(book.atlas(for: .numeric, capPixels: 9.4, character: "x")?.pixelSize == 12)
+    #expect(book.atlas(for: .numeric, capPixels: 9.4, character: "x")?.pixelSize == 16)
+    #expect(book.atlas(for: .numeric, capPixels: 8.4, character: "x")?.pixelSize == 12)
 }
 
 /// A glyph present only on a smaller page must still be drawn at the requested size: the

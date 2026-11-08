@@ -23,10 +23,13 @@ final class NullCanvas: XCanvas {
 }
 
 func report(_ label: String, iterations: Int, _ body: () -> Void) {
-    let clock = ContinuousClock()
-    let elapsed = clock.measure { for _ in 0..<iterations { body() } }
-    let perCall = elapsed / iterations
-    print("\(label): \(iterations) iters in \(elapsed) → \(perCall)/call")
+    // `DispatchTime` is available on every platform the package builds for, without a
+    // minimum OS version, unlike `ContinuousClock`.
+    let start = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<iterations { body() }
+    let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    let perCall = elapsed / Double(iterations) * 1e6
+    print("\(label): \(iterations) iters in \(elapsed) s → \(perCall) µs/call")
 }
 
 // MARK: - trees

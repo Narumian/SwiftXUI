@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import XShader
 @testable import XRender

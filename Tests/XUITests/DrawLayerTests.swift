@@ -26,20 +26,20 @@ extension EnvironmentValues {
 }
 
 @Test @XUIActor func drawLayerFillsAndReceivesResolvedRect() async {
-    var painted = Rect.zero
-    let view = DrawLayer { rect, _ in painted = rect }
+    let painted = LogBox<Rect>()
+    let view = DrawLayer { rect, _ in painted.append(rect) }
         .frame(width: 120, height: 80, alignment: .topLeading)
     _ = await LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
-    #expect(painted.isApproximately(Rect(x: 0, y: 0, width: 120, height: 80)))
+    #expect(painted.values.last?.isApproximately(Rect(x: 0, y: 0, width: 120, height: 80)) == true)
 }
 
 @Test @XUIActor func drawLayerReadsInjectedEnvironment() async {
-    var seenClock = -1.0
+    let seenClock = LogBox<Double>()
     var env = EnvironmentValues()
     env.clock = 42
-    let view = DrawLayer { _, context in seenClock = context.environment.clock }
+    let view = DrawLayer { _, context in seenClock.append(context.environment.clock) }
     _ = await LayoutHost(canvas: canvas, environment: env).render(view, into: RecordingCanvas())
-    #expect(seenClock == 42)
+    #expect(seenClock.values.last == 42)
 }
 
 @Test @XUIActor func drawLayerCanPaintThroughTheThinCanvas() async {

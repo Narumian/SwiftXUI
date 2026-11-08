@@ -53,6 +53,8 @@ final class LayoutNode {
     var tapGestureLabel: String?
     /// Drag gesture registered by `.gesture(DragGesture(...))`.
     var dragGesture: DragGesture?
+    /// Long-press gesture registered by `.gesture(LongPressGesture(...))`.
+    var longPressGesture: LongPressGesture?
     /// Register `tapGesture` after the children so anything inside wins the
     /// first-match hit test (a scrim behind a sheet's content).
     var tapGestureAfterChildren = false

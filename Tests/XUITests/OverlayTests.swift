@@ -57,7 +57,7 @@ private func render(_ view: some XView, canvas: Size = Size(width: 300, height: 
     await LayoutHost(canvas: canvas).render(view, into: RecordingCanvas())
 }
 
-private func sheetScreen(presented: Bool, dismissed: @escaping () -> Void = {}) -> some XView {
+private func sheetScreen(presented: Bool, dismissed: @escaping @Sendable () -> Void = {}) -> some XView {
     Color.white
         .frame(width: 300, height: 200)
         .onTapGesture(id: "base", label: "base") {}
@@ -87,13 +87,13 @@ private func sheetScreen(presented: Bool, dismissed: @escaping () -> Void = {}) 
 }
 
 @Test @XUIActor func sheetContentTapBeatsScrimAndScrimDismisses() async {
-    var dismissed = 0
-    let r = await render(sheetScreen(presented: true) { dismissed += 1 })
+    let dismissed = LogBox<Void>()
+    let r = await render(sheetScreen(presented: true) { dismissed.append(()) })
     var hit = ""
     if let g = r.tapGestures.first(where: { $0.rect.contains(Point(x: 150, y: 100)) }) { hit = g.id ?? "" }
     #expect(hit == "inner")
     #expect(r.tap(Point(x: 5, y: 5)))
-    #expect(dismissed == 1)
+    #expect(dismissed.count == 1)
 }
 
 @Test @XUIActor func sheetClosedLeavesBaseInteractive() async {

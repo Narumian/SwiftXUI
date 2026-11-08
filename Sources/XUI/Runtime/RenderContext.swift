@@ -86,6 +86,21 @@ public struct ResolvedTapGesture {
     }
 }
 
+/// A resolved long-press target after layout.
+public struct ResolvedLongPressGesture: @unchecked Sendable {
+    public let rect: Rect
+    public let minimumDuration: Double
+    private let action: (@Sendable () -> Void)?
+
+    init(rect: Rect, gesture: LongPressGesture) {
+        self.rect = rect
+        self.minimumDuration = gesture.minimumDuration
+        self.action = gesture._endedAction
+    }
+
+    public func perform() { action?() }
+}
+
 /// Everything a leaf needs while painting: the canvas, the environment, and the
 /// sinks for regions and anchors. Reference type — one instance per render.
 public final class RenderContext {
@@ -96,6 +111,7 @@ public final class RenderContext {
     public private(set) var controls: [ResolvedControl] = []
     public private(set) var tapGestures: [ResolvedTapGesture] = []
     public private(set) var dragGestures: [ResolvedDragGesture] = []
+    public private(set) var longPressGestures: [ResolvedLongPressGesture] = []
     public private(set) var anchors = AnchorMap()
     var inputSuspendedDepth = 0
     var focusScopeStack: [FocusScopeID] = []
@@ -142,6 +158,11 @@ public final class RenderContext {
         dragGestures.append(ResolvedDragGesture(rect: rect, gesture: gesture))
     }
 
+    func addLongPressGesture(_ rect: Rect, gesture: LongPressGesture) {
+        guard acceptsInput else { return }
+        longPressGestures.append(ResolvedLongPressGesture(rect: rect, gesture: gesture))
+    }
+
     func setAnchor(_ id: AnchorID, _ rect: Rect) {
         anchors[id] = rect
     }
@@ -175,6 +196,7 @@ public struct RenderResult {
     public var controls: [ResolvedControl]
     public var tapGestures: [ResolvedTapGesture]
     public var dragGestures: [ResolvedDragGesture]
+    public var longPressGestures: [ResolvedLongPressGesture]
     public var anchors: AnchorMap
 
     public init(
@@ -183,6 +205,7 @@ public struct RenderResult {
         controls: [ResolvedControl] = [],
         tapGestures: [ResolvedTapGesture] = [],
         dragGestures: [ResolvedDragGesture] = [],
+        longPressGestures: [ResolvedLongPressGesture] = [],
         anchors: AnchorMap
     ) {
         self.regions = regions
@@ -190,6 +213,7 @@ public struct RenderResult {
         self.controls = controls
         self.tapGestures = tapGestures
         self.dragGestures = dragGestures
+        self.longPressGestures = longPressGestures
         self.anchors = anchors
     }
 

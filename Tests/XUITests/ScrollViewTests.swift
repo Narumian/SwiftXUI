@@ -35,18 +35,21 @@ func scrollViewMovesContentWhenDraggedUp() async {
     let (_, initial) = await renderScrollView(store: store)
     var runtime = GestureRuntime()
 
-    #expect(runtime.handle(
+    let handledBegan = runtime.handle(
         PointerInput(id: 1, phase: .began, position: Point(x: 50, y: 100)),
         in: initial
-    ))
-    #expect(runtime.handle(
+    )
+    #expect(handledBegan)
+    let handledMoved = runtime.handle(
         PointerInput(id: 1, phase: .moved, position: Point(x: 50, y: 40)),
         in: initial
-    ))
-    #expect(runtime.handle(
+    )
+    #expect(handledMoved)
+    let handledEnded = runtime.handle(
         PointerInput(id: 1, phase: .ended, position: Point(x: 50, y: 40)),
         in: initial
-    ))
+    )
+    #expect(handledEnded)
 
     let (surface, _) = await renderScrollView(store: store)
     #expect(surface.fills.map(\.rect) == [

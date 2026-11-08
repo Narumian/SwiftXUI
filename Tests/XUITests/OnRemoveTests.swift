@@ -14,7 +14,7 @@ private func resolve(_ view: some XView, store: StateStore) async {
 
 @Test @XUIActor func onRemoveFiresWithTheLastDeclaredValueOnceTheNodeStopsBeingDeclared() async {
     let store = StateStore()
-    var removed: [Int] = []
+    let removed = LogBox<Int>()
 
     await resolve(Color(.black).onRemove(1, perform: { removed.append($0) }), store: store)
     await resolve(Color(.black).onRemove(2, perform: { removed.append($0) }), store: store)
@@ -24,12 +24,12 @@ private func resolve(_ view: some XView, store: StateStore) async {
     store.beginPass()
     store.endPass()
 
-    #expect(removed == [2], "fires once with the LAST declared value, not the first")
+    #expect(removed.values == [2], "fires once with the LAST declared value, not the first")
 }
 
 @Test @XUIActor func onRemoveDoesNotFireWhileRedeclaredEveryWalk() async {
     let store = StateStore()
-    var removed: [Int] = []
+    let removed = LogBox<Int>()
     for _ in 0..<3 {
         await resolve(Color(.black).onRemove(9, perform: { removed.append($0) }), store: store)
     }
@@ -38,23 +38,23 @@ private func resolve(_ view: some XView, store: StateStore) async {
 
 @Test @XUIActor func onRemoveWithNoValueFiresOnceOnDisappearance() async {
     let store = StateStore()
-    var count = 0
-    await resolve(Color(.black).onRemove(perform: { count += 1 }), store: store)
+    let fired = LogBox<Void>()
+    await resolve(Color(.black).onRemove(perform: { fired.append(()) }), store: store)
 
     store.beginPass()
     store.endPass()
 
-    #expect(count == 1)
+    #expect(fired.count == 1)
 
     store.beginPass()
     store.endPass()
 
-    #expect(count == 1, "must not fire again on a later pass")
+    #expect(fired.count == 1, "must not fire again on a later pass")
 }
 
 @Test @XUIActor func fxOnRemoveFiresWithTheLastDeclaredValueOnceNoLongerEmitted() async {
     let store = StateStore()
-    var removed: [Int] = []
+    let removed = LogBox<Int>()
 
     func resolveOnce(_ fx: some FX) {
         store.beginPass()
@@ -70,5 +70,5 @@ private func resolve(_ view: some XView, store: StateStore) async {
     store.beginPass()
     store.endPass()
 
-    #expect(removed == [2])
+    #expect(removed.values == [2])
 }

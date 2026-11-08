@@ -8,14 +8,14 @@ import Testing
 /// `StatefulXViewTests`'s coverage of `@XState` itself.
 
 @XUIActor
-private func resolve(_ signal: Signal<Int>, log: @escaping (Int) -> Void, store: StateStore) async {
+private func resolve(_ signal: Signal<Int>, log: @escaping @Sendable (Int) -> Void, store: StateStore) async {
     let view = Color(.black).onReceive(signal, perform: log)
     _ = await LayoutHost(canvas: Size(width: 10, height: 10)).resolveAnchors(view, store: store)
 }
 
 @Test @XUIActor func onReceiveSubscribesOnceAcrossRepeatedWalks() async {
     let signal = Signal<Int>()
-    var received: [Int] = []
+    let received = LogBox<Int>()
     let store = StateStore()
 
     await resolve(signal, log: { received.append($0) }, store: store)
@@ -23,12 +23,12 @@ private func resolve(_ signal: Signal<Int>, log: @escaping (Int) -> Void, store:
 
     signal.send(1)
 
-    #expect(received == [1], "a second walk should reuse the existing subscription, not add a second one")
+    #expect(received.values == [1], "a second walk should reuse the existing subscription, not add a second one")
 }
 
 @Test @XUIActor func onReceiveUnsubscribesOnceTheNodeStopsBeingDeclared() async {
     let signal = Signal<Int>()
-    var received: [Int] = []
+    let received = LogBox<Int>()
     let store = StateStore()
 
     await resolve(signal, log: { received.append($0) }, store: store)

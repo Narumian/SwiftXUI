@@ -57,9 +57,9 @@ private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
 }
 
 @Test @XUIActor func geometryReaderExposesItsResolvedFrame() async {
-    var seen = Rect.zero
-    func capture(_ frame: Rect) -> Color {
-        seen = frame
+    let seen = LogBox<Rect>()
+    let capture: @Sendable (Rect) -> Color = { frame in
+        seen.append(frame)
         return .clear
     }
     let view = VStack(spacing: 0) {
@@ -73,7 +73,7 @@ private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
         .frame(height: 60)
     }
     _ = await run(view)
-    #expect(seen.isApproximately(Rect(x: 0, y: 20, width: 300, height: 60)))
+    #expect(seen.values.last?.isApproximately(Rect(x: 0, y: 20, width: 300, height: 60)) == true)
 }
 
 @Test @XUIActor func geometryReaderFillsOfferedSpace() async {
@@ -146,19 +146,19 @@ private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
 }
 
 @Test @XUIActor func onTapGesturePerformsClosureWhenHit() async {
-    var taps = 0
+    let taps = LogBox<Void>()
     let view = ZStack {
         Color.white
         Color.black
             .frame(width: 80, height: 50, alignment: .center)
-            .onTapGesture { taps += 1 }
+            .onTapGesture { taps.append(()) }
     }
 
     let (_, result) = await run(view)
     #expect(result.tap(Point(x: 10, y: 10)) == false)
-    #expect(taps == 0)
+    #expect(taps.count == 0)
     #expect(result.tap(Point(x: 150, y: 100)) == true)
-    #expect(taps == 1)
+    #expect(taps.count == 1)
 }
 
 @Test @XUIActor func tapGestureValueStylePerformsClosureWhenHit() async {
@@ -185,7 +185,8 @@ private func run(_ view: some XView) async -> (RecordingCanvas, RenderResult) {
         .gesture(TapGesture())
 
     let (_, result) = await run(view)
-    #expect(result.tap(Point(x: 150, y: 100)))
+    // A root view sits at the origin, so the 80x50 frame covers (0, 0)...(80, 50).
+    #expect(result.tap(Point(x: 40, y: 25)))
 }
 
 @Test @XUIActor func controlExportsSemanticMetadataWithResolvedFrame() async {

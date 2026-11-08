@@ -64,6 +64,9 @@ enum LayoutEngine {
         if let gesture = node.dragGesture {
             context.addDragGesture(node.frame, gesture: gesture)
         }
+        if let gesture = node.longPressGesture {
+            context.addLongPressGesture(node.frame, gesture: gesture)
+        }
         if let action = node.tapGesture, node.tapGestureAfterChildren {
             context.addTapGesture(node.frame, id: node.tapGestureID, label: node.tapGestureLabel, action: action)
         }

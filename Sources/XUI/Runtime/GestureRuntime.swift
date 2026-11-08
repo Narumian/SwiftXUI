@@ -24,7 +24,7 @@ public struct ResolvedDragGesture: @unchecked Sendable {
     }
 }
 
-/// The minimal state machine for one active tap/drag sequence.
+/// The minimal state machine for one active tap/drag/long-press sequence.
 ///
 /// This intentionally handles one pointer at a time. Pointer capture begins
 /// when a pointer-down hits a tap or drag region and remains with that
@@ -36,6 +36,8 @@ public struct GestureRuntime: Sendable {
         let startLocation: Point
         let tap: ResolvedTapGesture?
         let drag: ResolvedDragGesture?
+        let longPress: ResolvedLongPressGesture?
+        let startTime: Double
         var tapEligible: Bool
         var dragStarted: Bool
     }
@@ -60,7 +62,8 @@ public struct GestureRuntime: Sendable {
             guard activeSequence == nil else { return false }
             let tap = render.tapGestures.first(where: { $0.rect.contains(input.position) })
             let drag = render.dragGestures.first(where: { $0.rect.contains(input.position) })
-            guard tap != nil || drag != nil else {
+            let longPress = render.longPressGestures.first(where: { $0.rect.contains(input.position) })
+            guard tap != nil || drag != nil || longPress != nil else {
                 return false
             }
             activeSequence = ActiveSequence(
@@ -68,6 +71,8 @@ public struct GestureRuntime: Sendable {
                 startLocation: input.position,
                 tap: tap,
                 drag: drag,
+                longPress: longPress,
+                startTime: input.timestamp,
                 tapEligible: true,
                 dragStarted: drag?.minimumDistance == 0
             )
@@ -106,6 +111,10 @@ public struct GestureRuntime: Sendable {
             let value = makeValue(input: input, startLocation: active.startLocation)
             if active.dragStarted, let drag = active.drag {
                 drag.performEnded(value)
+            } else if active.tapEligible, let longPress = active.longPress,
+                      input.timestamp - active.startTime >= longPress.minimumDuration,
+                      input.timestamp > active.startTime {
+                longPress.perform()
             } else if active.tapEligible, let tap = active.tap {
                 tap.perform()
             }
