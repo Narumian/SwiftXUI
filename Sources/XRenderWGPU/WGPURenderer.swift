@@ -4,7 +4,7 @@ import XShader
 
 /// Cross-platform WebGPU renderer. Platform code supplies only the surface.
 /// Everything submitted here is backend-neutral geometry compiled from a `Scene`.
-public final class WGPURenderer: XRenderer {
+public final class WGPURenderer: XTextureRenderer {
     private static let maxShaderRegions = 16
     // resolution/time/intensity/effectCount/composition, the three depth-linearising
     // constants, and padding up to a 16-byte boundary (12 floats), then 16 Effect
@@ -368,7 +368,11 @@ public final class WGPURenderer: XRenderer {
     /// premultiplied values) and uploaded, so art authored large and drawn small
     /// doesn't shimmer. Leave it off for a texture that `updateTexture` rewrites
     /// (the glyph atlas): only the base level would change.
-    public func registerTexture(_ id: TextureID, rgba: [UInt8], width: Int, height: Int, mipmaps: Bool = false) {
+    public func registerTexture(_ id: TextureID, rgba: [UInt8], width: Int, height: Int) {
+        registerTexture(id, rgba: rgba, width: width, height: height, mipmaps: false)
+    }
+
+    public func registerTexture(_ id: TextureID, rgba: [UInt8], width: Int, height: Int, mipmaps: Bool) {
         guard width > 0, height > 0, rgba.count >= width * height * 4 else { return }
         let levels = mipmaps ? Self.mipChain(rgba: rgba, width: width, height: height) : [(rgba: rgba, width: width, height: height)]
         registerTexture(id, levels: levels)

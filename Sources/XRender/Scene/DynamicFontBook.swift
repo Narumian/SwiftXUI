@@ -11,14 +11,17 @@ public final class DynamicFontBook: @unchecked Sendable {
     public struct SizeKey: Hashable, Sendable {
         public var role: FontRole
         public var pixelSize: Int
+        public var fontIndex: Int
 
-        public init(role: FontRole, pixelSize: Int) {
+        public init(role: FontRole, pixelSize: Int, fontIndex: Int = 0) {
             self.role = role
             self.pixelSize = pixelSize
+            self.fontIndex = fontIndex
         }
     }
 
     private let fonts: [FontRole: TrueTypeFont]
+    private let fallbackFonts: [FontRole: [TrueTypeFont]]
     private var pages: [SizeKey: [DynamicFontAtlas]] = [:]
     private var missing: [SizeKey: Set<Character>] = [:]
     private var registered: Set<TextureID> = []
@@ -30,8 +33,9 @@ public final class DynamicFontBook: @unchecked Sendable {
     /// every intermediate scale.
     public var pixelSizes = [8, 10, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 128, 160, 192]
 
-    public init(fonts: [FontRole: TrueTypeFont], textureBase: UInt32 = 100_000) {
+    public init(fonts: [FontRole: TrueTypeFont], fallbackFonts: [FontRole: [TrueTypeFont]] = [:], textureBase: UInt32 = 100_000) {
         self.fonts = fonts
+        self.fallbackFonts = fallbackFonts
         self.nextTexture = textureBase
     }
 
@@ -74,7 +78,23 @@ public final class DynamicFontBook: @unchecked Sendable {
         for (role, atlases) in sized {
             let ordered = atlases.sorted { $0.pixelSize < $1.pixelSize }
             sized[role] = ordered
-            reference[role] = ordered.last
+            guard var measure = ordered.last else { continue }
+            // Measurement needs metrics for every prepared character, including
+            // glyphs on older sizes or additional pages. Draws still use the
+            // original per-glyph pages in `sized`.
+            for page in ordered.reversed() {
+                let factor = measure.pixelSize / max(page.pixelSize, 1)
+                for (character, glyph) in page.glyphs where measure.glyphs[character] == nil {
+                    var scaled = glyph
+                    scaled.advance *= factor
+                    scaled.left *= factor
+                    scaled.top *= factor
+                    scaled.w *= factor
+                    scaled.h *= factor
+                    measure.glyphs[character] = scaled
+                }
+            }
+            reference[role] = measure
         }
         return FontBook(atlases: reference, sized: sized)
     }
@@ -129,11 +149,15 @@ public final class DynamicFontBook: @unchecked Sendable {
     }
 
     private func ensure<S: StringProtocol>(_ string: S, role: FontRole, pixelSize: Int) {
-        guard let font = fonts[role] else { return }
-        let key = SizeKey(role: role, pixelSize: pixelSize)
-        if pages[key] == nil { _ = makePage(for: key, font: font) }
+        guard let primary = fonts[role] else { return }
+        let candidates = [primary] + (fallbackFonts[role] ?? [])
 
         for character in string {
+            guard character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first,
+                  let index = candidates.firstIndex(where: { $0.glyphIndex(for: scalar) != nil }) else { continue }
+            let font = candidates[index]
+            let key = SizeKey(role: role, pixelSize: pixelSize, fontIndex: index)
+            if pages[key] == nil { _ = makePage(for: key, font: font) }
             if missing[key, default: []].contains(character) { continue }
             if pages[key]?.contains(where: { $0.contains(character) }) == true { continue }
 
