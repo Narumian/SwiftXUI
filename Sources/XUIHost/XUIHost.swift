@@ -79,7 +79,7 @@ public final class XUIHost: @unchecked Sendable {
             in: layout.controls,
             current: focusStore.selectedID
         )
-        let frame = XUIFrame(scene: surface.scene, layout: layout)
+        let frame = XUIFrame(scene: surface.scene, layout: layout, stats: XUIFrameStats(measureCalls: surface.measureCalls))
         lastFrame = frame
         return frame
     }
@@ -171,9 +171,18 @@ public final class XUIHost: @unchecked Sendable {
 public struct XUIFrame {
     public let scene: Scene
     public let layout: RenderResult
+    public let stats: XUIFrameStats
 
-    public init(scene: Scene, layout: RenderResult) {
+    public init(scene: Scene, layout: RenderResult, stats: XUIFrameStats = XUIFrameStats()) {
         self.scene = scene
         self.layout = layout
+        self.stats = stats
     }
+}
+
+/// Counters from building one frame, for finding what a view costs.
+public struct XUIFrameStats: Sendable, Equatable {
+    /// Text-width requests made by layout and drawing.
+    public var measureCalls = 0
+    public init(measureCalls: Int = 0) { self.measureCalls = measureCalls }
 }

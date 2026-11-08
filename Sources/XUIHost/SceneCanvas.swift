@@ -20,6 +20,8 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     public var imageResolver: (@Sendable (ImageSource) -> TextureID?)?
     /// Layer every XUI primitive paints into unless a leaf overrides it.
     public var layer: RenderLayer
+    /// How many times layout asked for a text width this frame; text measurement is the usual hidden cost of a view.
+    public private(set) var measureCalls = 0
 
     public init(
         size: RenderSize,
@@ -176,6 +178,7 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     }
 
     public func measureText(_ string: String, fontSize: Double, font: TextFont) -> XUI.Size {
+        measureCalls &+= 1
         let scale = Self.renderScale(for: fontSize)
         let font = font.render
         let width = builder.textWidth(string, scale: scale, font: font, fonts: fonts)

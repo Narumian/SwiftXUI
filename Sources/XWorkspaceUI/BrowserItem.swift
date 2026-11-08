@@ -27,12 +27,23 @@ public struct BrowserItem: Sendable {
     /// ASCII-case-folded UTF-8 of the display name.
     let key: ContiguousArray<UInt8>
     private let title: String?
+    /// UTF-8 offset in `path` where the last component starts, and where its extension starts in `key` (-1: none).
+    /// Found once while loading so drawing a cell never searches a string.
+    private let nameOffset: Int32
+    private let extensionOffset: Int32
 
     public var isDirectory: Bool { entry.kind == .directory }
     public var path: String { entry.path }
-    public var name: String { title ?? entry.name }
+    public var name: String {
+        if let title { return title }
+        return String(decoding: entry.path.utf8.dropFirst(Int(nameOffset)), as: UTF8.self)
+    }
     /// Up to four uppercase extension letters for the type icon.
-    var badge: String { String(entry.fileExtension.prefix(4)).uppercased() }
+    var badge: String {
+        guard extensionOffset >= 0 else { return "" }
+        let start = Int(extensionOffset) + 1
+        return String(decoding: key[start..<min(key.count, start + 4)], as: UTF8.self).uppercased()
+    }
 
     public init(entry: WorkspaceEntry, displayName: String? = nil) {
         self.entry = entry
@@ -40,11 +51,13 @@ public struct BrowserItem: Sendable {
         // One pass over the path: the folded last component, and where its extension starts.
         var key = ContiguousArray<UInt8>()
         var dot = -1
+        var nameStart = 0
         if let displayName {
             key = BrowserOrdering.foldedBytes(displayName)
         } else {
             let all = entry.path.utf8
             let utf8 = all.lastIndex(of: 0x2F).map { all[all.index(after: $0)...] } ?? all[...]
+            nameStart = all.distance(from: all.startIndex, to: utf8.startIndex)
             key.reserveCapacity(utf8.count)
             for byte in utf8 {
                 if byte == 0x2E { dot = key.count }
@@ -52,6 +65,8 @@ public struct BrowserItem: Sendable {
             }
         }
         self.key = key
+        nameOffset = Int32(nameStart)
+        extensionOffset = dot > 0 ? Int32(dot) : -1
         if entry.kind == .directory {
             category = .folder
         } else if dot > 0, dot < key.count - 1 {

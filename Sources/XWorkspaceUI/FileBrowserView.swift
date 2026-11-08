@@ -7,12 +7,13 @@ import XWorkspace
 public typealias BrowserThumbnailProvider = @Sendable (BrowserItem) -> ImageSource?
 
 private enum Palette {
-    static let background = XColorValue(hex: 0x171b1c)
-    static let panel = XColorValue(hex: 0x252b2a)
-    static let selected = XColorValue(hex: 0x384641)
-    static let text = XColorValue(hex: 0xe6eeea)
-    static let muted = XColorValue(hex: 0xa5b4ac)
-    static let accent = XColorValue(hex: 0x86d1b5)
+    // Neutral greys and a near-white accent: the surfaces and the accent used to be green. File-type colours are unchanged.
+    static let background = XColorValue(hex: 0x181a1c)
+    static let panel = XColorValue(hex: 0x26292c)
+    static let selected = XColorValue(hex: 0x3a3e42)
+    static let text = XColorValue(hex: 0xeaeced)
+    static let muted = XColorValue(hex: 0xa6abae)
+    static let accent = XColorValue(hex: 0xf0f2f3)
 
     static func color(_ category: FileCategory) -> XColorValue {
         switch category {
@@ -23,8 +24,8 @@ private enum Palette {
         case .shader: XColorValue(hex: 0x86d1b5)
         case .laser: XColorValue(hex: 0x7ee08a)
         case .project: XColorValue(hex: 0xe0a07e)
-        case .text: XColorValue(hex: 0xc4ccc8)
-        case .other: XColorValue(hex: 0x7f8c86)
+        case .text: XColorValue(hex: 0xc4c8cc)
+        case .other: XColorValue(hex: 0x868b90)
         }
     }
 }
@@ -69,12 +70,12 @@ struct BrowserScene: XView {
         let gridSize = Size(width: max(0, size.width - layout.chromeWidth), height: max(0, size.height - layout.headerHeight))
         if layout.chrome == .leading {
             HStack(spacing: 0) {
-                BrowserLeadingBar(model: model, snapshot: snapshot, height: size.height).frame(width: layout.chromeWidth, height: size.height)
+                BrowserLeadingBar(model: model, snapshot: snapshot, width: layout.chromeWidth, height: size.height)
                 grid(gridSize)
             }
         } else if layout.chrome == .sidebar {
             HStack(spacing: 0) {
-                BrowserSidebar(model: model, snapshot: snapshot).frame(width: layout.chromeWidth, height: size.height)
+                BrowserSidebar(model: model, snapshot: snapshot, width: layout.chromeWidth, height: size.height)
                 VStack(spacing: 0) {
                     BrowserHeader(model: model, snapshot: snapshot, onAddFolder: onAddFolder).frame(width: gridSize.width, height: layout.headerHeight)
                     grid(gridSize)
@@ -181,6 +182,7 @@ struct BrowserHeader: XView {
 struct BrowserLeadingBar: XView {
     let model: FileBrowserModel
     let snapshot: FileBrowserModel.Snapshot
+    let width: Double
     let height: Double
 
     var body: some XView {
@@ -194,13 +196,17 @@ struct BrowserLeadingBar: XView {
             Text(snapshot.title, size: 11, color: Palette.text).lineLimit(2).frame(width: 60)
             Spacer()
             Text("\(snapshot.visible.count)", size: 11, color: Palette.muted)
-        }.padding(6).background { Rectangle(fill: Palette.panel) }
+        }.padding(6)
+            .frame(width: width, height: height, alignment: .top)
+            .background { Rectangle(fill: Palette.panel) }
     }
 }
 
 struct BrowserSidebar: XView {
     let model: FileBrowserModel
     let snapshot: FileBrowserModel.Snapshot
+    let width: Double
+    let height: Double
 
     var body: some XView {
         let model = model
@@ -209,12 +215,14 @@ struct BrowserSidebar: XView {
             Text("FOLDERS", size: 11, color: Palette.muted).padding(6)
             ForEach(snapshot.folders) { folder in
                 Text(folder.name, size: 13, color: Palette.text).lineLimit(1).padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(width: max(0, width - 16), alignment: .leading)
                     .background { RoundedRectangle(cornerRadius: 6, fill: folder.id == current ? Palette.selected : Palette.panel) }
                     .onTapGesture(id: "browser.root.\(folder.id)", label: folder.name) { model.open(.folder(id: folder.id, path: "")) }
             }
             Spacer()
-        }.padding(8).background { Rectangle(fill: Palette.panel) }
+        }.padding(8)
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background { Rectangle(fill: Palette.panel) }
     }
 }
 
@@ -250,13 +258,13 @@ struct BrowserCell: XView {
             paintIcon(item, image: image, in: iconRect, canvas: canvas, measure: measure)
             var right = rect.x + rect.width - 8
             if let detail = detail(item) {
-                let width = measure(detail, 11, .ui).width
+                let width = BrowserTextFit.shared.width(detail, size: 11, context: context)
                 canvas.drawText(detail, in: Rect(x: right - width, y: rect.y + (rect.height - 14) / 2, width: width, height: 14),
                                 fontSize: 11, font: .ui, color: Palette.muted, alignment: .trailing, outline: nil)
                 right -= width + 8
             }
             let left = iconRect.x + side + 10
-            let name = fit(item.name, size: 13, maxWidth: max(0, right - left), measure: measure)
+            let name = BrowserTextFit.shared.fit(item.name, size: 13, maxWidth: max(0, right - left), middle: !item.isDirectory, context: context)
             canvas.drawText(name, in: Rect(x: left, y: rect.y + (rect.height - 16) / 2, width: max(0, right - left), height: 16),
                             fontSize: 13, font: .ui, color: Palette.text, alignment: .leading, outline: nil)
         } else {
@@ -264,7 +272,7 @@ struct BrowserCell: XView {
             let iconRect = Rect(x: rect.x + (rect.width - side) / 2, y: rect.y + 6, width: side, height: side)
             paintIcon(item, image: image, in: iconRect, canvas: canvas, measure: measure)
             let width = max(0, rect.width - 12)
-            let name = fit(item.name, size: 11, maxWidth: width, measure: measure)
+            let name = BrowserTextFit.shared.fit(item.name, size: 11, maxWidth: width, middle: !item.isDirectory, context: context)
             canvas.drawText(name, in: Rect(x: rect.x + 6, y: iconRect.y + side + 4, width: width, height: 14),
                             fontSize: 11, font: .ui, color: Palette.text, alignment: .center, outline: nil)
         }
@@ -285,18 +293,6 @@ struct BrowserCell: XView {
         let fontSize = max(9, min(14, rect.width * 0.3))
         canvas.drawText(badge, in: Rect(x: rect.x, y: rect.y + (rect.height - fontSize * 1.2) / 2, width: rect.width, height: fontSize * 1.2),
                         fontSize: fontSize, font: .ui, color: Palette.background, alignment: .center, outline: nil)
-    }
-
-    /// One line that fits `maxWidth`, ending in an ellipsis when it had to be cut.
-    static func fit(_ string: String, size: Double, maxWidth: Double, measure: (String, Double, TextFont) -> Size) -> String {
-        if measure(string, size, .ui).width <= maxWidth { return string }
-        let characters = Array(string)
-        var low = 0, high = characters.count
-        while low < high {
-            let mid = (low + high + 1) / 2
-            if measure(String(characters[..<mid]) + "…", size, .ui).width <= maxWidth { low = mid } else { high = mid - 1 }
-        }
-        return low == 0 ? "…" : String(characters[..<low]) + "…"
     }
 
     static func detail(_ item: BrowserItem) -> String? {
