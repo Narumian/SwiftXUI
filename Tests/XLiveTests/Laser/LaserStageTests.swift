@@ -156,3 +156,56 @@ final class LaserMaskingTests: XCTestCase {
         XCTAssertEqual(none.process(chunk).elements, chunk.elements)
     }
 }
+
+final class LaserCornerDwellTests: XCTestCase {
+    private func p(_ x: Float, _ y: Float, _ mode: LaserPointMode = .normal) -> LaserPoint {
+        try! LaserPoint(xy: SIMD2(x, y), rgb: mode == .blank ? .zero : SIMD3(repeating: 0.5), mode: mode)
+    }
+
+    func testARightAngleGetsHalfTheMaximumAndTheHoldsStayOnTheCorner() {
+        var stage = LaserCornerDwell(maximum: 8)
+        let out = stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0, 0.5)], runs: [LaserRun(id: 2, range: 0..<3)], frameEnds: [3]))
+        XCTAssertEqual(out.elements.map(\.mode), [.normal, .normal, .dwell, .dwell, .dwell, .dwell, .normal])
+        XCTAssertTrue(out.elements[2...5].allSatisfy { $0.xy == SIMD2<Float>(0, 0) && $0.rgb == SIMD3<Float>(repeating: 0.5) })
+        XCTAssertEqual(out.runs, [LaserRun(id: 2, range: 0..<7)])
+        XCTAssertEqual(out.frameEnds, [7])
+    }
+
+    func testAFullReversalGetsTheMaximumAndAGentleTurnGetsNothing() {
+        var stage = LaserCornerDwell(maximum: 8)
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(-0.5, 0)], shape: 1)).count, 3 + 8)
+        // a 10 degree turn is under the 20 degree threshold
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0.5, 0.088)], shape: 1)).count, 3)
+    }
+
+    func testTheSharperTheTurnTheMoreDwell() {
+        var stage = LaserCornerDwell(maximum: 10)
+        func hold(_ degrees: Double) -> Int {
+            let turn = degrees * .pi / 180
+            let end = p(Float(0.5 * cos(turn)), Float(0.5 * sin(turn)))
+            return stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), end], shape: 1)).count - 3
+        }
+        XCTAssertLessThan(hold(30), hold(60))
+        XCTAssertLessThan(hold(60), hold(120))
+    }
+
+    func testEndsBlankNeighboursExistingDwellAndZeroLengthEdgesAreNotCorners() {
+        var stage = LaserCornerDwell(maximum: 8)
+        // the ends of the shape
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(0, 0), p(0.5, 0), p(0.5, 0.5)], shape: 1)).count, 3 + 4)
+        // a corner next to a blank sample, or that is already a dwell
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0, .blank), p(0, 0), p(0, 0.5)], shape: 1)).count, 3)
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0, .dwell), p(0, 0.5)], shape: 1)).count, 3)
+        // padding already holds before the first vertex: no direction there
+        XCTAssertEqual(stage.process(LaserChunk(elements: [p(0, 0, .dwell), p(0, 0), p(0, 0.5), p(0.5, 0.5)], shape: 1)).count, 4 + 4)
+        XCTAssertEqual(LaserCornerDwell(maximum: 0).maximum, 0)
+    }
+
+    func testEachShapeIsHandledOnItsOwn() {
+        var stage = LaserCornerDwell(maximum: 8)
+        // two shapes of 2 points each: neither has an interior vertex, so no corner across the seam
+        let chunk = LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0, 0.5), p(0.5, 0.5)],
+                               runs: [LaserRun(id: 1, range: 0..<2), LaserRun(id: 2, range: 2..<4)])
+        XCTAssertEqual(stage.process(chunk).count, 4)
+    }
+}
