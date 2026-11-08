@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 /// What happens to a path where it leaves the scanner's -1...1 square.
-public enum LaserScreenMode: Sendable, Equatable {
+public enum LaserScreenMode: String, Sendable, Equatable, Codable, CaseIterable {
     /// Nothing special: coordinates beyond the square are clamped to its edge, so a
     /// shape that runs off the screen is drawn squashed along the edge. (Legacy's
     /// "OOScreen" switch on.)

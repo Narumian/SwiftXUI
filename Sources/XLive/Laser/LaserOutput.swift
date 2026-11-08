@@ -7,8 +7,20 @@ public struct LaserOutput: Codable, Equatable, Sendable, Identifiable {
     public var device: Device
     public var address: String
     public var masks: LaserMaskSettings
-    public init(id: UUID = UUID(), name: String, device: Device = .unassigned, address: String = "", masks: LaserMaskSettings = .init()) {
-        self.id = id; self.name = name; self.device = device; self.address = address; self.masks = masks
+    public var scanner: LaserScannerProfile
+    public init(id: UUID = UUID(), name: String, device: Device = .unassigned, address: String = "", masks: LaserMaskSettings = .init(), scanner: LaserScannerProfile = .init()) {
+        self.id = id; self.name = name; self.device = device; self.address = address; self.masks = masks; self.scanner = scanner
+    }
+    private enum CodingKeys: String, CodingKey { case id, name, device, address, masks, scanner }
+    /// Outputs saved before the scanner profile existed have no `scanner` key.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        device = try c.decode(Device.self, forKey: .device)
+        address = try c.decode(String.self, forKey: .address)
+        masks = try c.decode(LaserMaskSettings.self, forKey: .masks)
+        scanner = try c.decodeIfPresent(LaserScannerProfile.self, forKey: .scanner) ?? .init()
     }
     public static func isValidIPv4(_ address: String) -> Bool {
         let parts = address.split(separator: ".", omittingEmptySubsequences: false)
