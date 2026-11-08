@@ -5,6 +5,11 @@ import Foundation
 /// samples and one blank. This is Legacy's `dwellBlankInserted`, applied per shape
 /// run. A vertex that is not a normal drawing vertex gets no padding at that end,
 /// and a chunk without runs is treated as one shape.
+///
+/// Every run in a chunk is taken to be a whole shape, so the shape-domain source
+/// feeding this must hand out whole shapes (as `LaserFrameLooper` does). A shape
+/// split over two chunks would be padded at the split. A stage that needs to see a
+/// shape across chunks, like `LaserProjector`, keeps its own state instead.
 public struct LaserDwellBlank: LaserStage {
     public var dwell: Int
     public var blank: Int
@@ -13,7 +18,7 @@ public struct LaserDwellBlank: LaserStage {
 
     public mutating func process(_ chunk: LaserChunk<LaserVertex>) -> LaserChunk<LaserVertex> {
         guard dwell > 0 || blank > 0, !chunk.isEmpty else { return chunk }
-        let runs = chunk.runs.isEmpty ? [LaserRun(id: 0, range: 0..<chunk.count)] : chunk.runs
+        let runs = chunk.runs.isEmpty ? [LaserRun(id: 0, range: 0..<chunk.count)] : chunk.wellFormedRuns
         var out: [LaserVertex] = []
         out.reserveCapacity(chunk.count + runs.count * (2 * dwell + 2 * blank))
         var starts = [Int](repeating: 0, count: chunk.count + 1)

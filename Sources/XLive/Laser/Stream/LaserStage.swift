@@ -1,13 +1,28 @@
 import Foundation
 
 extension LaserChunk {
+    /// The runs that can be trusted to index `elements`: cut to the chunk, in order,
+    /// not overlapping, and not empty. A stage works from these so that a source
+    /// with a bad run costs that run, not a trap on the output thread.
+    var wellFormedRuns: [LaserRun] {
+        var result: [LaserRun] = []
+        var cursor = 0
+        for run in runs {
+            let range = run.range.clamped(to: 0..<count)
+            guard !range.isEmpty, range.lowerBound >= cursor else { continue }
+            result.append(LaserRun(id: run.id, range: range))
+            cursor = range.upperBound
+        }
+        return result
+    }
+
     /// A chunk of `elements` that carries over the runs and frame ends of `source`.
     /// `starts[i]` is where the output for source element `i` begins and
     /// `starts[source.count]` is the output's end, so a stage that adds or drops
     /// elements only has to say where each input landed.
     init<Source>(elements: [Element], carrying source: LaserChunk<Source>, starts: [Int]) {
         self.init(elements: elements)
-        for run in source.runs {
+        for run in source.wellFormedRuns {
             let range = starts[run.range.lowerBound]..<starts[run.range.upperBound]
             if !range.isEmpty { runs.append(LaserRun(id: run.id, range: range)) }
         }
@@ -39,8 +54,20 @@ public struct LaserStagedStream<Upstream: LaserStream, Stage: LaserStage>: Laser
         self.upstream = upstream; self.stage = stage; self.format = format
     }
 
+    /// Reads again when the stage had nothing to show for a chunk (a shape wholly
+    /// out of view, say), so an empty answer means the upstream has nothing now and
+    /// not that this round's chunk happened to be hidden. Stops after
+    /// `maximumReads` so a long hidden stretch cannot hold the caller up.
+    public var maximumReads = 8
+
     public mutating func read(wanting count: Int) -> LaserChunk<Stage.Output> {
-        stage.process(upstream.read(wanting: count))
+        for _ in 0..<max(1, maximumReads) {
+            let input = upstream.read(wanting: count)
+            if input.isEmpty { return LaserChunk() }
+            let output = stage.process(input)
+            if !output.isEmpty { return output }
+        }
+        return LaserChunk()
     }
 }
 
