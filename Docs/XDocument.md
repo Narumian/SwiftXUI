@@ -24,3 +24,9 @@ Storage calls are synchronous on the session actor. This first implementation
 keeps full snapshots for every undo step and does not bound history; it is suited
 to small documents, not large assets. Persist access tokens and restore locations
 in the host; neither is serialized into the document or history.
+
+`DocumentProjectController` adds a single-project lifecycle, ordered autosave,
+restoration and navigation state on top of `DocumentSession`. The host supplies
+`DocumentProjectEnvironment` for default locations, access leases and restoring
+preferences; project formats and settings remain application-owned. If a save
+fails, switching projects retries it and preserves the current session on error.
