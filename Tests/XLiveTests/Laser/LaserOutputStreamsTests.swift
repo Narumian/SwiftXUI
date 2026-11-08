@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import XCTest
 @testable import XLive
 
@@ -154,5 +155,76 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         XCTAssertGreaterThan(fastWrites, 3)   // and so does the idle one
         try await streams.disconnect(slow)
         try await streams.disconnect(fast)
+    }
+}
+
+final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
+    private func projection() -> LaserProjection {
+        var camera = matrix_identity_double4x4
+        camera.columns.3 = SIMD4(0, 0, 2, 1)
+        return LaserProjection(camera: camera,
+                               projection: LaserProjection.perspective(fovxDegrees: 90, near: 0.1, far: 50),
+                               dwell: 2, blank: 2)
+    }
+
+    func testAStageChainPlaysOnAnOutputAndStopsCleanly() async throws {
+        let recorder = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let id = UUID()
+        try await streams.connect(id) { StubSession(recorder) }
+        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
+        looper.submit(LaserChunk(elements: [LaserVertex(x: 0.4, y: 0), LaserVertex(x: -0.4, y: 0)], shape: 1))
+        let padded = LaserStagedStream(looper, stage: LaserDwellBlank(dwell: 2, blank: 2), format: LaserStreamFormat(domain: .shapes))
+        let projected = LaserStagedStream(padded, stage: LaserProjector(projection()), format: LaserStreamFormat(domain: .scanner, rate: 30000))
+        let sampled = LaserStagedStream(projected, stage: LaserSampler(maximumStep: 0.05), format: projected.format)
+        try await streams.play(stream: sampled, for: id)
+        for _ in 0..<200 {
+            if await recorder.litWrites > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let lit = await recorder.litWrites, active = await streams.sourceActive(id)
+        XCTAssertGreaterThan(lit, 0)
+        XCTAssertTrue(active)
+        try await streams.stopPattern(for: id)
+        let failure = await streams.streamFailure(id), stillActive = await streams.sourceActive(id)
+        XCTAssertNil(failure)
+        XCTAssertFalse(stillActive)
+        try await streams.disconnect(id)
+    }
+
+    func testAStreamWithNoRateIsRefused() async throws {
+        let streams = LaserOutputStreams()
+        let id = UUID()
+        try await streams.connect(id) { StubSession(Recorder()) }
+        let looper = LaserFrameLooper<LaserPoint>(format: LaserStreamFormat(domain: .scanner))
+        struct Output: LaserOutputStream {
+            let looper: LaserFrameLooper<LaserPoint>
+            var format: LaserStreamFormat { looper.format }
+            mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
+        }
+        do { try await streams.play(stream: Output(looper: looper), for: id); XCTFail("expected unsupportedPointRate") } catch {
+            XCTAssertEqual(error as? LaserOutputError, .unsupportedPointRate)
+        }
+        try await streams.disconnect(id)
+    }
+
+    func testAnIdleStreamKeepsTheOutputDarkWithoutFailing() async throws {
+        let recorder = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let id = UUID()
+        try await streams.connect(id) { StubSession(recorder) }
+        let looper = LaserFrameLooper<LaserPoint>(format: LaserStreamFormat(domain: .scanner, rate: 30000))   // nothing submitted
+        struct Output: LaserOutputStream {
+            let looper: LaserFrameLooper<LaserPoint>
+            var format: LaserStreamFormat { looper.format }
+            mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
+        }
+        try await streams.play(stream: Output(looper: looper), for: id)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        let lit = await recorder.litWrites, black = await recorder.blackWrites, failure = await streams.streamFailure(id)
+        XCTAssertEqual(lit, 0)
+        XCTAssertGreaterThan(black, 0)
+        XCTAssertNil(failure)
+        try await streams.disconnect(id)
     }
 }
