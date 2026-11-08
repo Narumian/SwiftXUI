@@ -6,7 +6,7 @@ import XWorkspace
 /// Called for visible items every frame, so it must be a cache lookup.
 public typealias BrowserThumbnailProvider = @Sendable (BrowserItem) -> ImageSource?
 
-private enum Palette {
+enum Palette {
     // Neutral greys and a near-white accent: the surfaces and the accent used to be green. File-type colours are unchanged.
     static let background = XColorValue(hex: 0x181a1c)
     static let panel = XColorValue(hex: 0x26292c)
@@ -289,7 +289,16 @@ struct BrowserCell: XView {
             return
         }
         canvas.fillRoundedRect(rect, cornerRadius: 6, color: Palette.color(item.category))
-        let badge = item.isDirectory ? "▸" : item.badge
+        if item.isDirectory {
+            // Drawn as a shape: the bundled font has no folder symbol.
+            let g = rect.width * 0.5, h = g * 0.72
+            let x = rect.midX - g / 2, y = rect.midY - h / 2
+            let points = [Point(x: x, y: y), Point(x: x + g * 0.4, y: y), Point(x: x + g * 0.5, y: y + h * 0.2),
+                          Point(x: x + g, y: y + h * 0.2), Point(x: x + g, y: y + h), Point(x: x, y: y + h)]
+            canvas.fillPath(Path(points: points), in: Rect(x: x, y: y, width: g, height: h), color: Palette.background)
+            return
+        }
+        let badge = item.badge
         let fontSize = max(9, min(14, rect.width * 0.3))
         canvas.drawText(badge, in: Rect(x: rect.x, y: rect.y + (rect.height - fontSize * 1.2) / 2, width: rect.width, height: fontSize * 1.2),
                         fontSize: fontSize, font: .ui, color: Palette.background, alignment: .center, outline: nil)

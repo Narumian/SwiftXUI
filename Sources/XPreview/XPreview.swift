@@ -104,6 +104,12 @@ public final class PreviewDriver {
         return began
     }
 
+    /// Puts a finger down and leaves it there (a held key, a press in progress).
+    @discardableResult
+    public func press(at point: Point, id: Int = 1) -> Bool {
+        pointerEvent(PointerEvent(id: id, phase: .began, position: RenderPoint(x: Float(point.x), y: Float(point.y)), timestamp: time))
+    }
+
     /// Drags from one point to another in `steps` moves.
     public func drag(from a: Point, to b: Point, steps: Int = 6) {
         func rp(_ p: Point) -> RenderPoint { RenderPoint(x: Float(p.x), y: Float(p.y)) }

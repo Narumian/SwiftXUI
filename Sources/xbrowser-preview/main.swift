@@ -40,6 +40,13 @@ try FileManager.default.createDirectory(at: media, withIntermediateDirectories: 
 for folder in ["Shaders", "Laser Shows", "Footage", "Logos"] {
     try FileManager.default.createDirectory(at: media.appendingPathComponent(folder), withIntermediateDirectories: true)
 }
+for folder in ["Shaders/Old", "Shaders/Tests", "Footage/2025", "Laser Shows/Club"] {
+    try FileManager.default.createDirectory(at: media.appendingPathComponent(folder), withIntermediateDirectories: true)
+}
+for file in ["Shaders/plasma.fs", "Shaders/tunnel.isf", "Shaders/Old/spiral v1.fs", "Shaders/Old/burst v1.fs", "Footage/loop.mov",
+             "Footage/2025/intro.mp4", "Footage/2025/outro.mp4", "Laser Shows/Club/set 1.ild", "Laser Shows/Club/set 2.ild", "Logos/mark.svg"] {
+    try Data([1]).write(to: media.appendingPathComponent(file))
+}
 let extensions = ["png", "jpg", "mov", "mp4", "wav", "isf", "fs", "ild", "txt", "json", "svg", "trident"]
 let stems = ["plasma", "tunnel", "alpha mask", "logo", "wave", "burst", "spiral", "fractal", "grid", "title card", "loop"]
 for i in 0..<fileCount {
@@ -88,4 +95,106 @@ for shape in PreviewShape.standard where onlyShape == nil || shape.name == onlyS
         print(String(format: "%-16@ %-9@ %@", shape.name as NSString, scenario.name as NSString, result.stats.summary as NSString))
     }
 }
+
+// The on-screen keyboard on its own (a bare field, no browser behind it), so its cost is not
+// mixed up with the page's. "opening" times the slide-in frames, which no settled run sees.
+if onlyScenario == nil || onlyScenario == "keyboard" {
+    struct KeyboardCase { var name: String; var script: @XUIActor (PreviewDriver, PreviewShape) async -> Void }
+    nonisolated(unsafe) var openingMs: [Double] = []
+    let cases: [KeyboardCase] = [
+        KeyboardCase(name: "field-only") { driver, _ in driver.host.textFocus.keyboardPolicy = .never; await driver.advance(frames: 3) },
+        KeyboardCase(name: "kb-idle") { driver, _ in
+            driver.host.textFocus.keyboardPolicy = .always
+            await driver.advance(frames: 3)
+            driver.host.textFocus.focus("kb.field")
+            await driver.advance(frames: 20)
+        },
+        KeyboardCase(name: "kb-held") { driver, shape in
+            driver.host.textFocus.keyboardPolicy = .always
+            await driver.advance(frames: 3)
+            driver.host.textFocus.focus("kb.field")
+            await driver.advance(frames: 20)
+            let m = KeyboardMetrics.compute(container: Size(width: Double(shape.width), height: Double(shape.height)), rowCount: 4)
+            driver.press(at: Point(x: m.rect.midX, y: m.rect.y + m.padding + m.keyHeight * 1.5 + m.gap), id: 7)
+            await driver.advance(frames: 5)
+        },
+        KeyboardCase(name: "kb-opening") { driver, _ in
+            driver.host.textFocus.keyboardPolicy = .always
+            await driver.advance(frames: 3)
+            driver.host.textFocus.focus("kb.field")
+            openingMs = []
+            for _ in 0..<20 {
+                let t0 = DispatchTime.now().uptimeNanoseconds
+                await driver.advance()
+                openingMs.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
+            }
+        },
+    ]
+    print("")
+    print(String(format: "%-16@ %-11@ %@", "shape" as NSString, "keyboard" as NSString, "cost per frame" as NSString))
+    for shape in PreviewShape.standard where onlyShape == nil || shape.name == onlyShape {
+        for kase in cases {
+            let result = try await XPreview(fonts: fonts, measuredFrames: measuredFrames).render(shape, script: { driver in
+                await kase.script(driver, shape)
+            }) {
+                TextInputArea { KeyboardBench() }
+            }
+            try result.png.write(to: outDirectory.appendingPathComponent("keyboard-\(shape.name)-\(kase.name).png"))
+            var line = result.stats.summary
+            if kase.name == "kb-opening", !openingMs.isEmpty {
+                line += String(format: "   slide-in 20 frames: mean %.2f max %.2f ms", openingMs.reduce(0, +) / Double(openingMs.count), openingMs.max() ?? 0)
+            }
+            print(String(format: "%-16@ %-11@ %@", shape.name as NSString, kase.name as NSString, line as NSString))
+        }
+    }
+}
+
+@Stateful
+struct KeyboardBench: XView {
+    @XState private var text: String = ""
+    var body: some XView {
+        let box = _text
+        VStack(spacing: 12) {
+            Text("KEYBOARD", size: 14, color: .white)
+            TextField("type here", text: Binding(get: { box?.value ?? "" }, set: { box?.value = $0 }), id: "kb.field")
+        }.padding(16).frame(width: .fraction(1), height: .fraction(1), alignment: .topLeading)
+    }
+}
+
+
+// The outline view: folders open in place.
+if onlyScenario == nil || onlyScenario == "tree" {
+    print("")
+    print(String(format: "%-16@ %-11@ %@", "shape" as NSString, "tree" as NSString, "cost per frame" as NSString))
+    for shape in PreviewShape.standard where onlyShape == nil || shape.name == onlyShape {
+        let model = FileTreeModel(workspace: workspace, folderID: folderID)
+        await model.reload()
+        let result = try await XPreview(fonts: fonts, measuredFrames: measuredFrames).render(shape, script: { driver in
+            await driver.advance(frames: 3)
+            // Open folders the way a finger would: tap the row by its name.
+            for name in ["Shaders", "Old", "Footage", "Laser Shows"] {
+                let frame = await driver.advance()
+                if let row = frame.layout.tapGestures.first(where: { $0.id == "tree.row" && $0.label == name }) {
+                    driver.tap(at: Point(x: row.rect.midX, y: row.rect.midY))
+                    for _ in 0..<100 where model.snapshot().rows.contains(where: { $0.isLoading }) { try? await Task.sleep(nanoseconds: 10_000_000) }
+                }
+            }
+            await driver.advance(frames: 3)
+        }) {
+            FileTreeView(model: model)
+        }
+        try result.png.write(to: outDirectory.appendingPathComponent("tree-\(shape.name).png"))
+        print(String(format: "%-16@ %-11@ %@", shape.name as NSString, "open" as NSString, result.stats.summary as NSString))
+    }
+
+    // The cost of opening one big folder: list, order, flatten.
+    let model = FileTreeModel(workspace: workspace, folderID: folderID)
+    await model.reload()
+    let start = DispatchTime.now().uptimeNanoseconds
+    model.expand(.init(folderID: folderID, path: "Shaders"))
+    model.collapse(.init(folderID: folderID, path: "Shaders"))
+    let toggle = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
+    print("rows with Media open: \(model.snapshot().rows.count) (\(fileCount) files + folders); expand+collapse of a small folder: \(String(format: "%.3f", toggle)) ms")
+}
+
 print("wrote PNGs to \(outDirectory.path)")
