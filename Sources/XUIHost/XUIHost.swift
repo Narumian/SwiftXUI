@@ -14,6 +14,10 @@ public final class XUIHost: @unchecked Sendable {
     public var images: [ImageSource: TextureID]
     public var imageResolver: (@Sendable (ImageSource) -> TextureID?)?
     public let focusStore: FocusStore
+    /// Which text field has the keyboard. Shared with every `TextField` in the tree.
+    public let textFocus: TextFocusStore
+    /// Where copy / cut / paste go. The platform shell replaces this with the system pasteboard.
+    public var clipboard: any XClipboard = InMemoryClipboard()
 
     private let store = StateStore()
     /// Slop is in logical canvas units. A phone shows the canvas at about 0.36pt per unit, so the
@@ -29,7 +33,8 @@ public final class XUIHost: @unchecked Sendable {
         fonts: FontBook? = nil,
         images: [ImageSource: TextureID] = [:],
         imageResolver: (@Sendable (ImageSource) -> TextureID?)? = nil,
-        focusStore: FocusStore = FocusStore()
+        focusStore: FocusStore = FocusStore(),
+        textFocus: TextFocusStore = TextFocusStore()
     ) {
         self.size = size
         self.background = background
@@ -38,6 +43,8 @@ public final class XUIHost: @unchecked Sendable {
         self.images = images
         self.imageResolver = imageResolver
         self.focusStore = focusStore
+        self.textFocus = textFocus
+        textFocus.hostManagesFrames = true
     }
 
     /// Renders one XView declaration pass into a renderer-neutral frame.
@@ -52,6 +59,7 @@ public final class XUIHost: @unchecked Sendable {
         var frameEnvironment = environment
         if let time { frameEnvironment.fxTime = time }
         frameEnvironment.environmentObject(focusStore)
+        frameEnvironment.environmentObject(textFocus)
 
         let surface = SceneCanvas(
             size: size,
@@ -60,10 +68,12 @@ public final class XUIHost: @unchecked Sendable {
             images: images,
             imageResolver: imageResolver
         )
+        textFocus.beginFrame()
         let layout = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
             environment: frameEnvironment
         ).render(view, into: surface, store: store)
+        textFocus.endFrame()
 
         focusStore.selectedID = FocusNavigator.selectInitial(
             in: layout.controls,
@@ -79,16 +89,16 @@ public final class XUIHost: @unchecked Sendable {
     @discardableResult
     @XUIActor
     public func pointer(_ event: PointerEvent, in frame: XUIFrame) -> Bool {
-        gestureRuntime.handle(
-            PointerInput(
-                id: event.id,
-                phase: Self.pointerPhase(event.phase),
-                position: Point(
-                    x: Double(event.position.x),
-                    y: Double(event.position.y)
-                ),
-                timestamp: event.timestamp
-            ),
+        let position = Point(x: Double(event.position.x), y: Double(event.position.y))
+        // A press outside every field and outside the keyboard dismisses the keyboard.
+        if event.phase == .began { textFocus.blurIfOutside(position) }
+        // The on-screen keyboard takes its own fingers (several can type at once) before gestures do.
+        let input = PointerInput(
+            id: event.id, phase: Self.pointerPhase(event.phase), position: position, timestamp: event.timestamp
+        )
+        if textFocus.handleKeyboardPointer(input) { return true }
+        return gestureRuntime.handle(
+            input,
             in: frame.layout
         )
     }

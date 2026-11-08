@@ -108,6 +108,18 @@ public final class XAppSession<App: XApp> {
         return host.pointer(event, in: lastFrame)
     }
 
+    /// A hardware key press. Returns whether a focused text field consumed it.
+    @discardableResult
+    public func key(_ event: KeyEvent) -> Bool {
+        host.key(event)
+    }
+
+    /// Text from the on-screen keyboard or an input method.
+    @discardableResult
+    public func textInput(_ event: TextInputEvent) -> Bool {
+        host.textInput(event)
+    }
+
     /// Creates a server for this session when enabled by the app configuration.
     /// The host supplies a capture of the presented surface and redraw callback.
     public func mcpServer(port: UInt16 = 47321,

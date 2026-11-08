@@ -134,6 +134,43 @@ public struct PointerEvent: Sendable, Equatable {
     }
 }
 
+/// Modifier keys held during a key event.
+public struct KeyModifiers: OptionSet, Sendable, Hashable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+    public static let shift = KeyModifiers(rawValue: 1 << 0)
+    public static let control = KeyModifiers(rawValue: 1 << 1)
+    public static let option = KeyModifiers(rawValue: 1 << 2)
+    public static let command = KeyModifiers(rawValue: 1 << 3)
+}
+
+/// One key press, normalized by the platform shell. Printable keys carry the
+/// text the platform produced for them (layout, shift and dead keys already
+/// applied), so XUI never needs to know a keyboard layout.
+public struct KeyEvent: Sendable, Equatable {
+    public enum Key: Sendable, Equatable {
+        case character(String)
+        case returnKey
+        case backspace
+        case deleteForward
+        case left, right, up, down
+        case home, end
+        case tab
+        case escape
+    }
+
+    public var key: Key
+    public var modifiers: KeyModifiers
+    /// An auto-repeat of a held key.
+    public var isRepeat: Bool
+
+    public init(_ key: Key, modifiers: KeyModifiers = [], isRepeat: Bool = false) {
+        self.key = key
+        self.modifiers = modifiers
+        self.isRepeat = isRepeat
+    }
+}
+
 /// A moment worth a haptic tap and/or a short sound. The vendor shell maps
 /// these to native feedback; presentation decides when they fire.
 public enum PresentationFeedback: Sendable, Equatable, CaseIterable {

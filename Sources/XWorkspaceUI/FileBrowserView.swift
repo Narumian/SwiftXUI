@@ -118,8 +118,39 @@ struct BrowserHeader: XView {
     let onAddFolder: (@Sendable () -> Void)?
 
     var body: some XView {
-        let model = model, add = onAddFolder
-        HStack(spacing: 8) {
+        let model = model
+        if model.isSearching {
+            searchRow(model)
+        } else {
+            titleRow(model)
+        }
+    }
+
+    private func searchRow(_ model: FileBrowserModel) -> some XView {
+        var style = TextFieldStyle()
+        style.fontSize = 14
+        style.verticalPadding = 7
+        style.background = Palette.background
+        style.border = Palette.selected
+        style.focusedBorder = Palette.accent
+        style.caret = Palette.accent
+        style.selection = Palette.accent.opacity(0.3)
+        style.textColor = Palette.text
+        style.placeholderColor = Palette.muted
+        style.cornerRadius = 8
+        return HStack(spacing: 8) {
+            TextField("Search \(snapshot.title)", text: Binding(get: { model.queryText }, set: { model.setQuery($0) }),
+                      id: "browser.search", returnKey: .search, style: style, autofocus: true)
+            Text("\(snapshot.visible.count)", size: 12, color: Palette.muted)
+            Text("DONE", size: 13, color: Palette.background).padding(10)
+                .background { RoundedRectangle(cornerRadius: 8, fill: Palette.accent) }
+                .onTapGesture(id: "browser.search.close", label: "Close search") { model.setSearching(false) }
+        }.padding(8).background { Rectangle(fill: Palette.panel) }
+    }
+
+    private func titleRow(_ model: FileBrowserModel) -> some XView {
+        let add = onAddFolder
+        return HStack(spacing: 8) {
             if snapshot.canGoUp {
                 Text("‹", size: 22, color: Palette.text).frame(width: 36, height: 36)
                     .background { RoundedRectangle(cornerRadius: 8, fill: Palette.panel) }
@@ -128,6 +159,11 @@ struct BrowserHeader: XView {
             Text(snapshot.title, size: 14, color: Palette.text).lineLimit(1)
             Spacer()
             Text("\(snapshot.visible.count)", size: 12, color: Palette.muted)
+            if snapshot.location != .roots {
+                Text("SEARCH", size: 12, color: Palette.text).padding(10)
+                    .background { RoundedRectangle(cornerRadius: 8, fill: Palette.selected) }
+                    .onTapGesture(id: "browser.search.open", label: "Search") { model.setSearching(true) }
+            }
             if snapshot.choosesFolders, snapshot.canGoUp {
                 Text("OPEN", size: 13, color: Palette.background).padding(10)
                     .background { RoundedRectangle(cornerRadius: 8, fill: Palette.accent) }

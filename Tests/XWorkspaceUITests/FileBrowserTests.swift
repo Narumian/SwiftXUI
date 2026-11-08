@@ -167,3 +167,41 @@ func folderModeChoosesTheCurrentFolder() async throws {
     model.chooseCurrentFolder()
     #expect(chosen.all == ["Project A"])
 }
+
+@Test @XUIActor
+func searchRowFiltersAsYouType() async throws {
+    let fixture = try await Fixture(files: ["alpha.png", "alphabet.txt", "beta.png"])
+    defer { fixture.cleanup() }
+    let model = FileBrowserModel(workspace: fixture.workspace)
+    model.open(.folder(id: fixture.folderID, path: ""))
+    await model.reload()
+    let focus = TextFocusStore()
+    let state = StateStore()
+    func render() async -> RenderResult {
+        await LayoutHost(canvas: Size(width: 600, height: 400)).render(
+            FileBrowserView(model: model).environment(focus), into: RecordingSurface(), store: state)
+    }
+
+    var result = await render()
+    #expect(result.tapGestures.contains { $0.id == "browser.search.open" })
+    #expect(!result.tapGestures.contains { $0.id == "browser.search" })
+
+    // Opening the search row focuses its field so the keyboard can appear at once.
+    model.setSearching(true)
+    result = await render()
+    #expect(focus.focusedID == "browser.search")
+
+    focus.send(.insert("alp"))
+    #expect(model.queryText == "alp")
+    #expect(model.snapshot().visible.count == 2)
+
+    focus.send(.insert("ha."))
+    #expect(model.snapshot().visible.count == 1)
+
+    // Closing the row clears the query and shows everything again.
+    model.setSearching(false)
+    #expect(model.queryText.isEmpty)
+    #expect(model.snapshot().visible.count == 3)
+    result = await render()
+    #expect(result.tapGestures.contains { $0.id == "browser.search.open" })
+}

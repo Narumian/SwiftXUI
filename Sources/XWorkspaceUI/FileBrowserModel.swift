@@ -49,6 +49,7 @@ public final class FileBrowserModel: @unchecked Sendable {
     private var state = Snapshot()
     private var filter: BrowserFilter
     private var query = ""
+    private var searching = false
     private var stamp: Date?
     private var loadToken = 0
     private var shape: BrowserLayout.Shape?
@@ -130,6 +131,20 @@ public final class FileBrowserModel: @unchecked Sendable {
             invalidate()
             pick?(item.entry)
         }
+    }
+
+    /// The text being searched for.
+    public var queryText: String { lock.withLock { query } }
+
+    /// Whether the search row is open. Closing it clears the query.
+    public var isSearching: Bool { lock.withLock { searching } }
+
+    public func setSearching(_ on: Bool) {
+        lock.withLock {
+            searching = on
+            if !on, !query.isEmpty { query = ""; refilter() }
+        }
+        invalidate()
     }
 
     public func setQuery(_ text: String) {
