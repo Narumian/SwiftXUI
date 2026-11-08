@@ -6,15 +6,18 @@ public struct XAppConfiguration {
     public var size: RenderSize
     public var background: RenderColor
     public var environment: EnvironmentValues
+    public var mcpEnabled: Bool
 
     public init(
         size: RenderSize = RenderSize(width: 1920, height: 1080),
         background: RenderColor = RenderColor(0, 0, 0, 0),
-        environment: EnvironmentValues = EnvironmentValues()
+        environment: EnvironmentValues = EnvironmentValues(),
+        mcpEnabled: Bool = false
     ) {
         self.size = size
         self.background = background
         self.environment = environment
+        self.mcpEnabled = mcpEnabled
     }
 }
 
@@ -67,6 +70,37 @@ public final class XAppSession<App: XApp> {
     public func pointer(_ event: PointerEvent) -> Bool {
         guard let lastFrame else { return false }
         return host.pointer(event, in: lastFrame)
+    }
+
+    /// Creates a server for this session when enabled by the app configuration.
+    /// The host supplies a capture of the presented surface and redraw callback.
+    public func mcpServer(port: UInt16 = 47321,
+                          capture: @escaping XUIMCPServer.Capture,
+                          invalidate: @escaping @Sendable () -> Void) -> XUIMCPServer? {
+        guard app.configuration.mcpEnabled else { return nil }
+        return XUIMCPServer(port: port,
+            state: { [weak self] in
+                guard let self else { throw XUIMCPError.noFrame }
+                return try self.mcpState()
+            }, tap: { [weak self] id in
+                guard let self else { throw XUIMCPError.noFrame }
+                let handled = try self.mcpTap(id: id)
+                if handled { invalidate() }
+                return handled
+            }, pointer: { [weak self] phase, x, y in
+                guard let self else { throw XUIMCPError.noFrame }
+                let converted: PointerPhase
+                switch phase {
+                case "began": converted = .began
+                case "moved": converted = .moved
+                case "ended": converted = .ended
+                case "cancelled": converted = .cancelled
+                default: throw XUIMCPError.invalidRequest("Invalid pointer phase")
+                }
+                let handled = self.pointer(PointerEvent(phase: converted, position: RenderPoint(x: Float(x), y: Float(y))))
+                if handled { invalidate() }
+                return handled
+            }, capture: capture)
     }
 }
 
