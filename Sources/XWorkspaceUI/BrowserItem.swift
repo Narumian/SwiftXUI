@@ -1,11 +1,26 @@
 import Foundation
 import XWorkspace
 
-/// What a file is, for icons and filtering. Decided once per listing from the extension.
-public enum FileCategory: UInt8, CaseIterable, Sendable {
-    case folder, image, video, audio, shader, laser, project, text, other
+/// What a file is, for icons and filtering. A small number, so a listing of tens of thousands stays compact.
+/// The ones below are built in; a host defines its own in `FileTypes` (numbers from `firstCustom` up).
+public struct FileCategory: RawRepresentable, Hashable, Sendable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
 
-    public static func category(forExtension ext: String) -> FileCategory {
+    public static let folder = FileCategory(rawValue: 0)
+    public static let image = FileCategory(rawValue: 1)
+    public static let video = FileCategory(rawValue: 2)
+    public static let audio = FileCategory(rawValue: 3)
+    public static let shader = FileCategory(rawValue: 4)
+    public static let laser = FileCategory(rawValue: 5)
+    public static let project = FileCategory(rawValue: 6)
+    public static let text = FileCategory(rawValue: 7)
+    public static let other = FileCategory(rawValue: 8)
+
+    /// The first number a host may use for a category of its own.
+    public static let firstCustom: UInt8 = 64
+
+    static func builtIn(forExtension ext: String) -> FileCategory {
         switch ext {
         case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp": .image
         case "mp4", "mov", "m4v", "hap": .video
@@ -45,7 +60,7 @@ public struct BrowserItem: Sendable {
         return String(decoding: key[start..<min(key.count, start + 4)], as: UTF8.self).uppercased()
     }
 
-    public init(entry: WorkspaceEntry, displayName: String? = nil) {
+    public init(entry: WorkspaceEntry, displayName: String? = nil, types: FileTypes = .standard) {
         self.entry = entry
         title = displayName
         // One pass over the path: the folded last component, and where its extension starts.
@@ -70,7 +85,7 @@ public struct BrowserItem: Sendable {
         if entry.kind == .directory {
             category = .folder
         } else if dot > 0, dot < key.count - 1 {
-            category = FileCategory.category(forExtension: String(decoding: key[(dot + 1)...], as: UTF8.self))
+            category = types.category(forExtension: String(decoding: key[(dot + 1)...], as: UTF8.self))
         } else {
             category = .other
         }

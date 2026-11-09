@@ -113,7 +113,7 @@ let package = Package(
         .target(name: "XWorkspaceApple", dependencies: ["XWorkspace"]),
         .target(name: "XWorkspaceUI", dependencies: ["XUI", "XWorkspace"]),
         .testTarget(name: "XWorkspaceUITests", dependencies: ["XWorkspaceUI", "XWorkspace", "XUI"]),
-        .executableTarget(name: "xworkspace-bench", dependencies: ["XWorkspaceUI", "XWorkspace", "XUI"]),
+        .executableTarget(name: "xworkspace-bench", dependencies: ["XWorkspaceUI", "XWorkspace", "XWorkspaceApple", "XUI"]),
         .target(name: "XLive", dependencies: ["XUI", "XCombine"]),
         .target(name: "XLiveApple", dependencies: ["XLive"]),
         .testTarget(name: "XLiveTests", dependencies: ["XLive", "XLiveApple", "XUI"]),

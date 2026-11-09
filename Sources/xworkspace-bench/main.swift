@@ -9,6 +9,7 @@ import Foundation
 import XUI
 import XWorkspace
 import XWorkspaceUI
+import XWorkspaceApple
 
 nonisolated(unsafe) var checksum = 0
 
@@ -231,6 +232,30 @@ for n in [1_000, 10_000, 50_000] where only == nil || only!.contains("disk") {
     checksum &+= model.snapshot().items.count
 
     let stamp = median(runs: 9) { blocking { checksum &+= (try! await workspace.directoryStamp(folderID: id)) == nil ? 0 : 1 } }
-    line("change check (directory stamp)", n: n, nanoseconds: stamp, unit: "µs")
+    line("change check (directory stamp, one hop)", n: n, nanoseconds: stamp, unit: "µs")
+    // The hop onto the workspace actor and back costs most of that; this is the stamp itself, called back to back.
+    let repeats = 2_000
+    let inLoop = median(runs: 5) { blocking { for _ in 0..<repeats { checksum &+= (try! await workspace.directoryStamp(folderID: id)) == nil ? 0 : 1 } } }
+    line("change check (directory stamp, amortized)", n: n, nanoseconds: inLoop / Double(repeats), unit: "µs")
+}
+// The provider the app really uses: bookmarks, and every operation coordinated with document providers.
+print("\n# real directory through the Apple provider (bookmark + NSFileCoordinator, as in the app)")
+for n in [1_000, 10_000] where only == nil || only!.contains("apple") || only!.contains("disk") {
+    if let onlyN, onlyN != n { continue }
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent("xworkspace-bench-apple-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    for i in 0..<n { FileManager.default.createFile(atPath: base.appendingPathComponent("clip \(i).png").path, contents: nil) }
+    let workspace = try! Workspace(access: AppleWorkspaceAccessProvider(), coordinator: AppleWorkspaceFileCoordinator())
+    nonisolated(unsafe) var folderID = UUID()
+    blocking { folderID = try! await workspace.register(directory: base).id }
+    let id = folderID
+    let listing = median(runs: 5) { blocking { checksum &+= (try! await workspace.list(folderID: id, sorted: false)).count } }
+    line("apple: Workspace.list (unsorted)", n: n, nanoseconds: listing, per: n)
+    let repeats = 500
+    let stamp = median(runs: 5) { blocking { for _ in 0..<repeats { checksum &+= (try! await workspace.directoryStamp(folderID: id)) == nil ? 0 : 1 } } }
+    line("apple: change check (directory stamp)", n: n, nanoseconds: stamp / Double(repeats), unit: "µs")
+    let file = median(runs: 5) { blocking { for _ in 0..<repeats { checksum &+= (try! await workspace.read(folderID: id, path: "clip 1.png")).count } } }
+    line("apple: read an empty file", n: n, nanoseconds: file / Double(repeats), unit: "µs")
 }
 print("\nchecksum \(checksum)")

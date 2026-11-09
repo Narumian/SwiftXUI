@@ -126,3 +126,39 @@ final class WorkspaceTests: XCTestCase {
         catch { XCTAssertEqual(error as? WorkspaceError, .readOnly) }
     }
 }
+
+final class DirectoryScannerTests: XCTestCase {
+    /// The bulk listing must see exactly what the `readdir` + `stat` listing sees.
+    func testBulkAndReaddirListingsAgree() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: base.appendingPathComponent("sub dir/ネスト"), withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 12).write(to: base.appendingPathComponent("a.bin"))
+        try Data().write(to: base.appendingPathComponent(".hidden"))
+        try Data(repeating: 2, count: 70_000).write(to: base.appendingPathComponent("日本語 ファイル.ILD"))
+        try fm.createSymbolicLink(at: base.appendingPathComponent("link"), withDestinationURL: base.appendingPathComponent("a.bin"))
+        mkfifo(base.appendingPathComponent("pipe").path, 0o644)
+        for i in 0..<3000 { try Data([UInt8(i % 250)]).write(to: base.appendingPathComponent("many \(i).txt")) }
+
+        func summary(_ entries: [(String, Bool, Int64, Date?)]) -> [String] {
+            entries.map { "\($0.0)|\($0.1)|\($0.2)|\(String(format: "%.6f", $0.3?.timeIntervalSince1970 ?? -1))" }.sorted()
+        }
+        let bulk = try DirectoryScanner.scan(base) { ($0, $1, $2, $3) }
+        let reference = try DirectoryScanner.scanWithReaddirForTesting(base) { ($0, $1, $2, $3) }
+        XCTAssertEqual(summary(bulk), summary(reference))
+        XCTAssertEqual(bulk.count, 3000 + 4)   // many*, a.bin, .hidden, 日本語, sub dir — no link, no fifo
+        XCTAssertTrue(bulk.contains { $0.0 == "日本語 ファイル.ILD" && $0.2 == 70_000 })
+        XCTAssertTrue(bulk.contains { $0.0 == "sub dir" && $0.1 && $0.2 == 0 })
+        XCTAssertThrowsError(try DirectoryScanner.scan(base.appendingPathComponent("a.bin")) { ($0, $1, $2, $3) })
+    }
+
+    func testModificationOfAPath() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let found = try XCTUnwrap(DirectoryScanner.modification(of: base.path))
+        XCTAssertTrue(found.isDirectory)
+        XCTAssertNil(DirectoryScanner.modification(of: base.appendingPathComponent("missing").path))
+    }
+}

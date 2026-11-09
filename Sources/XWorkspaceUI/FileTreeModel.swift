@@ -38,6 +38,8 @@ public final class FileTreeModel: @unchecked Sendable {
     private let lock = NSLock()
 
     private var filter: BrowserFilter
+    /// Which category each extension is, and how it is drawn.
+    public let fileTypes: FileTypes
     private var roots: [BrowserItem] = []
     private var children: [NodeKey: [BrowserItem]] = [:]
     private var expanded: Set<NodeKey> = []
@@ -46,9 +48,10 @@ public final class FileTreeModel: @unchecked Sendable {
     private var pick: (@Sendable (WorkspaceEntry) -> Void)?
 
     /// - Parameter folderID: show just this registered folder as the root; nil shows every registered folder.
-    public init(workspace: Workspace, folderID: UUID? = nil, filter: BrowserFilter = .all,
+    public init(workspace: Workspace, folderID: UUID? = nil, filter: BrowserFilter = .all, fileTypes: FileTypes = .standard,
                 invalidate: @escaping @Sendable () -> Void = {}) {
         self.workspace = workspace
+        self.fileTypes = fileTypes
         self.only = folderID
         self.filter = filter
         self.invalidate = invalidate
@@ -118,7 +121,7 @@ public final class FileTreeModel: @unchecked Sendable {
         do {
             let entries = try await workspace.list(folderID: key.folderID, path: key.path, sorted: false)
             let filter = lock.withLock { self.filter }
-            let items = entries.map { BrowserItem(entry: $0) }.filter { filter.admits($0) }
+            let items = entries.map { BrowserItem(entry: $0, types: fileTypes) }.filter { filter.admits($0) }
             listed = await Task.detached(priority: .userInitiated) { BrowserOrdering.sorted(items) }.value
         } catch {
             failure = (error as NSError).localizedDescription

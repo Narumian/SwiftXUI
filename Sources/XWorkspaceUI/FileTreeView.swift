@@ -52,12 +52,13 @@ struct FileTreeRow: XView {
     var body: some XView {
         if let row {
             let model = model, index = index, size = size, indent = indent
+            let types = model.fileTypes
             let key = row.key
             let entry = row.item.entry
             let isSelected = selected == key
             let isTarget = dropTarget == key
             DrawLayer(size: { _ in size }) { rect, context in
-                FileTreeRow.paint(row, selected: isSelected, targeted: isTarget, indent: indent, in: rect, context: context)
+                FileTreeRow.paint(row, selected: isSelected, targeted: isTarget, indent: indent, types: types, in: rect, context: context)
             }
             .onTapGesture(id: "tree.row", label: row.item.name) { model.activate(row: index) }
             .draggable(entry, cornerRadius: 6, id: key)
@@ -71,7 +72,7 @@ struct FileTreeRow: XView {
         }
     }
 
-    static func paint(_ row: FileTreeModel.Row, selected: Bool, targeted: Bool, indent: Double, in rect: Rect, context: RenderContext) {
+    static func paint(_ row: FileTreeModel.Row, selected: Bool, targeted: Bool, indent: Double, types: FileTypes, in rect: Rect, context: RenderContext) {
         let canvas = context.canvas
         if targeted {
             let box = Rect(x: rect.x + 4, y: rect.y + 1, width: rect.width - 8, height: rect.height - 2)
@@ -97,7 +98,7 @@ struct FileTreeRow: XView {
 
         let icon = rect.height * 0.5
         let iconRect = Rect(x: left + triangle + 2, y: cy - icon / 2, width: icon, height: icon)
-        paintIcon(row.item, in: iconRect, canvas: canvas)
+        paintIcon(row.item, types: types, in: iconRect, canvas: canvas)
 
         let textLeft = iconRect.x + icon + 8
         let width = max(0, rect.x + rect.width - 10 - textLeft)
@@ -106,8 +107,8 @@ struct FileTreeRow: XView {
                         fontSize: 13, font: .ui, color: Palette.text, alignment: .leading, outline: nil)
     }
 
-    private static func paintIcon(_ item: BrowserItem, in rect: Rect, canvas: any XCanvas) {
-        let color = Palette.color(item.category)
+    private static func paintIcon(_ item: BrowserItem, types: FileTypes, in rect: Rect, canvas: any XCanvas) {
+        let color = types.color(for: item.category)
         if item.isDirectory {
             // A folder: a tab and a body, drawn as shapes (the bundled font has no folder symbol).
             let tab = [Point(x: rect.x, y: rect.y + rect.height * 0.18), Point(x: rect.x + rect.width * 0.42, y: rect.y + rect.height * 0.18),

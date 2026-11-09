@@ -72,6 +72,8 @@ public enum WorkspaceError: Error, Equatable, Sendable {
     case folderNotFound, invalidFolder, invalidPath, readOnly, unsupportedItem
     /// Something with that name is already there.
     case alreadyExists
+    /// A URL named a folder by a name that more than one registered folder has.
+    case ambiguousName
 }
 
 public struct WorkspaceFolder: Codable, Equatable, Identifiable, Sendable {
@@ -115,165 +117,150 @@ public struct WorkspaceEntry: Equatable, Sendable {
     }
 }
 
-/// One workspace with multiple explicitly registered roots. Persistence belongs to its host.
-public actor Workspace {
-    private let access: any WorkspaceAccessProvider
-    private let coordinator: any WorkspaceFileCoordinator
-    private var registrations: [WorkspaceRegistration]
+/// A volume the host provides, under a fixed `id` so that references to it stay valid across launches.
+/// Its name is how a URL reaches it (`xw://bundle/…`), and it wins over a registered folder of the same name.
+public struct WorkspaceMount: Sendable {
+    public var id: UUID
+    public var name: String
+    public var volume: any WorkspaceVolume
+    public var readOnly: Bool
+    public init(id: UUID, name: String, volume: any WorkspaceVolume, readOnly: Bool = false) {
+        self.id = id; self.name = name; self.volume = volume; self.readOnly = readOnly
+    }
+}
 
-    public init(access: any WorkspaceAccessProvider, coordinator: any WorkspaceFileCoordinator = DirectWorkspaceFileCoordinator(), registrations: [WorkspaceRegistration] = []) throws {
-        guard Set(registrations.map(\.folder.id)).count == registrations.count else { throw WorkspaceError.invalidFolder }
-        self.access = access; self.coordinator = coordinator; self.registrations = registrations
+/// One workspace: a set of folders, each backed by a `WorkspaceVolume`. Folders the user registers are
+/// directories on disk (`DiskVolume`) and are saved as `WorkspaceRegistration`s; a host can also mount
+/// volumes of its own, which are not saved and come back only when the host mounts them again.
+/// Persistence belongs to the host.
+public actor Workspace {
+    private struct Mount {
+        var folder: WorkspaceFolder
+        var volume: any WorkspaceVolume
+        /// The access token of a registered directory; nil for a volume the host mounted.
+        var token: Data?
+        /// Mounted by the host, so a URL can name it without being ambiguous.
+        var isProvided: Bool
     }
 
-    public func folders() -> [WorkspaceFolder] { registrations.map(\.folder) }
-    public func snapshot() -> [WorkspaceRegistration] { registrations }
+    private let access: any WorkspaceAccessProvider
+    private let coordinator: any WorkspaceFileCoordinator
+    private var mounts: [Mount]
+
+    /// `provided` volumes come first in `folders()`, ahead of the registered directories.
+    public init(access: any WorkspaceAccessProvider, coordinator: any WorkspaceFileCoordinator = DirectWorkspaceFileCoordinator(),
+                registrations: [WorkspaceRegistration] = [], provided: [WorkspaceMount] = []) throws {
+        let ids = registrations.map(\.folder.id) + provided.map(\.id)
+        guard Set(ids).count == ids.count, Set(provided.map(\.name)).count == provided.count else { throw WorkspaceError.invalidFolder }
+        self.access = access; self.coordinator = coordinator
+        mounts = provided.map(Self.mount(for:)) + registrations.map {
+            Mount(folder: $0.folder, volume: DiskVolume(access: access, coordinator: coordinator, token: $0.accessToken), token: $0.accessToken, isProvided: false)
+        }
+    }
+
+    private static func mount(for provided: WorkspaceMount) -> Mount {
+        Mount(folder: WorkspaceFolder(id: provided.id, name: provided.name, isReadOnly: provided.readOnly || !provided.volume.isWritable),
+              volume: provided.volume, token: nil, isProvided: true)
+    }
+
+    public func folders() -> [WorkspaceFolder] { mounts.map(\.folder) }
+    /// The registered directories, for the host to save. Mounted volumes are not part of it.
+    public func snapshot() -> [WorkspaceRegistration] {
+        mounts.compactMap { mount in mount.token.map { WorkspaceRegistration(folder: mount.folder, accessToken: $0) } }
+    }
 
     @discardableResult
     public func register(directory: URL, name: String? = nil, readOnly: Bool = false) throws -> WorkspaceFolder {
         let token = try access.register(directory: directory)
-        try access.withAccess(token: token) { root in try Self.validateRoot(root) }
+        let volume = DiskVolume(access: access, coordinator: coordinator, token: token)
+        try volume.validate()
         let folder = WorkspaceFolder(name: name ?? directory.lastPathComponent, isReadOnly: readOnly)
-        registrations.append(WorkspaceRegistration(folder: folder, accessToken: token))
+        mounts.append(Mount(folder: folder, volume: volume, token: token, isProvided: false))
         return folder
     }
 
+    /// Adds a volume that the host provides, under a fixed `id` so that references to it stay valid across launches.
+    @discardableResult
+    public func mount(_ volume: any WorkspaceVolume, id: UUID = UUID(), name: String, readOnly: Bool = false) throws -> WorkspaceFolder {
+        guard !mounts.contains(where: { $0.folder.id == id || ($0.isProvided && $0.folder.name == name) }) else { throw WorkspaceError.invalidFolder }
+        let mount = Self.mount(for: WorkspaceMount(id: id, name: name, volume: volume, readOnly: readOnly))
+        mounts.append(mount)
+        return mount.folder
+    }
+
+    /// Turns a URL written with a folder name into the UUID form that is safe to save.
+    /// A volume the host mounted wins over a registered folder of the same name. Otherwise a name matches
+    /// exactly first, then ignoring case; a name shared by several folders is ambiguous.
+    public func resolve(_ url: WorkspaceURL) throws -> WorkspaceURL {
+        switch url.volume {
+        case .id(let id):
+            _ = try index(id)
+            return url
+        case .name(let name):
+            let tiers: [[Mount]] = [
+                mounts.filter { $0.isProvided && $0.folder.name == name },
+                mounts.filter { $0.folder.name == name },
+                mounts.filter { $0.folder.name.caseInsensitiveCompare(name) == .orderedSame },
+            ]
+            guard let matches = tiers.first(where: { !$0.isEmpty }) else { throw WorkspaceError.folderNotFound }
+            guard matches.count == 1 else { throw WorkspaceError.ambiguousName }
+            return WorkspaceURL(folderID: matches[0].folder.id, path: url.path)
+        }
+    }
+
+    /// Points a registered directory at a new place. A mounted volume has no directory to change.
     public func reconnect(folderID: UUID, directory: URL) throws {
         let index = try index(folderID)
+        guard mounts[index].token != nil else { throw WorkspaceError.unsupportedItem }
         let token = try access.register(directory: directory)
-        try access.withAccess(token: token) { root in try Self.validateRoot(root) }
-        registrations[index].accessToken = token
+        let volume = DiskVolume(access: access, coordinator: coordinator, token: token)
+        try volume.validate()
+        mounts[index].token = token
+        mounts[index].volume = volume
     }
 
     /// Keeps a registered folder accessible until the lease is released.
     public func lease(folderID: UUID) throws -> WorkspaceLease {
-        let registration = registrations[try index(folderID)]
-        let lease = try access.beginAccess(token: registration.accessToken)
-        do { try Self.validateRoot(lease.root) } catch { lease.release(); throw error }
-        return lease
+        try mounts[try index(folderID)].volume.lease()
     }
 
-    public func remove(folderID: UUID) throws { registrations.remove(at: try index(folderID)) }
+    public func remove(folderID: UUID) throws { mounts.remove(at: try index(folderID)) }
 
     /// Lists a directory. Pass `sorted: false` when the caller orders the entries itself.
     public func list(folderID: UUID, path: String = "", sorted: Bool = true) throws -> [WorkspaceEntry] {
-        try withRoot(folderID, writing: false) { root in
-            let directory = try Self.resolve(path, root: root, allowRoot: true)
-            return try coordinator.coordinate(at: directory, writing: false) { directory in
-                let prefix = path.isEmpty ? "" : path + "/"
-                var entries: [WorkspaceEntry]
-                if DirectoryScanner.isAvailable {
-                    entries = try DirectoryScanner.scan(directory).map {
-                        WorkspaceEntry(folderID: folderID, path: prefix + $0.name, kind: $0.isDirectory ? .directory : .file,
-                                       size: $0.isDirectory ? nil : $0.size, modified: $0.modified)
-                    }
-                } else {
-                    entries = try Self.listWithFileManager(directory, folderID: folderID, prefix: prefix)
-                }
-                return sorted ? entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : entries
-            }
-        }
-    }
-
-    private static func listWithFileManager(_ directory: URL, folderID: UUID, prefix: String) throws -> [WorkspaceEntry] {
-        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: listingKeys).compactMap { url in
-            let values = try url.resourceValues(forKeys: listingKeySet)
-            guard values.isSymbolicLink != true else { return nil }
-            let kind: WorkspaceEntry.Kind
-            if values.isDirectory == true { kind = .directory }
-            else if values.isRegularFile == true { kind = .file }
-            else { return nil }
-            return WorkspaceEntry(folderID: folderID, path: prefix + url.lastPathComponent, kind: kind,
-                                  size: kind == .file ? values.fileSize.map(Int64.init) : nil, modified: values.contentModificationDate)
-        }
+        let entries = try volume(folderID, writing: false).list(folderID: folderID, path: path)
+        return sorted ? entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : entries
     }
 
     /// A cheap token that changes when the direct contents of a directory change
-    /// (entries added, removed or renamed). One `stat`, so a browser can poll it
-    /// and only list again when it moves.
-    public func directoryStamp(folderID: UUID, path: String = "") throws -> Date? {
-        try withRoot(folderID, writing: false) { root in
-            let directory = try Self.resolve(path, root: root, allowRoot: true)
-            return try coordinator.coordinate(at: directory, writing: false) { directory in
-                try directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-            }
-        }
+    /// (entries added, removed or renamed). A browser can poll it and only list again when it moves.
+    public func directoryStamp(folderID: UUID, path: String = "") throws -> WorkspaceStamp? {
+        try volume(folderID, writing: false).stamp(path: path)
     }
 
     public func read(folderID: UUID, path: String) throws -> Data {
-        try withRoot(folderID, writing: false) { root in
-            let url = try Self.resolve(path, root: root)
-            return try coordinator.coordinate(at: url, writing: false) { url in
-                guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw WorkspaceError.unsupportedItem }
-                return try Data(contentsOf: url)
-            }
-        }
+        try volume(folderID, writing: false).read(path: path)
     }
 
     /// Writes an existing file or creates a file in an existing directory.
     public func write(folderID: UUID, path: String, data: Data) throws {
-        try withRoot(folderID, writing: true) { root in
-            let url = try Self.resolve(path, root: root, allowMissingLeaf: true)
-            try coordinator.coordinate(at: url, writing: true) { url in
-                if FileManager.default.fileExists(atPath: url.path), try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile != true {
-                    throw WorkspaceError.unsupportedItem
-                }
-                try data.write(to: url, options: .atomic)
-            }
-        }
+        try volume(folderID, writing: true).write(path: path, data: data)
     }
 
     /// Moves a file or directory into another directory of the same folder, keeping its name. Returns the new path.
     /// Refuses to overwrite, and to move a directory into itself.
     @discardableResult
     public func move(folderID: UUID, path: String, toDirectory directory: String) throws -> String {
-        try withRoot(folderID, writing: true) { root in
-            if directory == path || directory.hasPrefix(path + "/") { throw WorkspaceError.invalidPath }
-            let source = try Self.resolve(path, root: root)
-            let destination = try Self.resolve(directory, root: root, allowRoot: true)
-            let name = source.lastPathComponent
-            let target = destination.appendingPathComponent(name)
-            guard try destination.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw WorkspaceError.unsupportedItem }
-            guard !FileManager.default.fileExists(atPath: target.path) else { throw WorkspaceError.alreadyExists }
-            try coordinator.coordinate(at: source, writing: true) { source in
-                try FileManager.default.moveItem(at: source, to: target)
-            }
-            return directory.isEmpty ? name : directory + "/" + name
-        }
+        try volume(folderID, writing: true).move(path: path, toDirectory: directory)
     }
-
-    private static let listingKeys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
-    private static let listingKeySet = Set(listingKeys)
 
     private func index(_ id: UUID) throws -> Int {
-        guard let index = registrations.firstIndex(where: { $0.folder.id == id }) else { throw WorkspaceError.folderNotFound }
+        guard let index = mounts.firstIndex(where: { $0.folder.id == id }) else { throw WorkspaceError.folderNotFound }
         return index
     }
-    private func withRoot<T>(_ id: UUID, writing: Bool, _ body: (URL) throws -> T) throws -> T {
-        let registration = registrations[try index(id)]
-        if writing && registration.folder.isReadOnly { throw WorkspaceError.readOnly }
-        return try access.withAccess(token: registration.accessToken) { root in
-            try Self.validateRoot(root)
-            return try body(root)
-        }
-    }
-    private static func validateRoot(_ root: URL) throws {
-        guard root.isFileURL, try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw WorkspaceError.invalidFolder }
-    }
-    private static func resolve(_ path: String, root: URL, allowRoot: Bool = false, allowMissingLeaf: Bool = false) throws -> URL {
-        if path.isEmpty && allowRoot { return root }
-        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !path.isEmpty, !path.contains("\\"), !path.contains("\0"), parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw WorkspaceError.invalidPath }
-        var url = root
-        for (index, part) in parts.enumerated() {
-            url.appendPathComponent(String(part))
-            do {
-                let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
-                guard values.isSymbolicLink != true else { throw WorkspaceError.invalidPath }
-            } catch let error as NSError {
-                guard allowMissingLeaf && index == parts.count - 1 && error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError else { throw error }
-            }
-        }
-        return url
+    private func volume(_ id: UUID, writing: Bool) throws -> any WorkspaceVolume {
+        let mount = mounts[try index(id)]
+        if writing && mount.folder.isReadOnly { throw WorkspaceError.readOnly }
+        return mount.volume
     }
 }

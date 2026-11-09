@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import XUI
 import XWorkspace
 @testable import XWorkspaceUI
 
@@ -55,4 +56,23 @@ func categoriesComeFromTheExtension() {
     #expect(item("x.ild").category == .laser)
     #expect(item("noext").category == .other)
     #expect(item("sub", directory: true).category == .folder)
+}
+
+@Test func aHostCanAddCategoriesWithTheirOwnExtensionsAndColors() {
+    let custom = FileCategory(rawValue: FileCategory.firstCustom)
+    let color = XColorValue(hex: 0x123456)
+    let types = FileTypes.standard.adding(custom, color: color, extensions: ["geometry", "fs"])
+    func item(_ name: String, _ types: FileTypes) -> BrowserItem {
+        BrowserItem(entry: WorkspaceEntry(folderID: UUID(), path: name, kind: .file), types: types)
+    }
+    #expect(item("circle.geometry", types).category == custom)
+    #expect(types.color(for: custom) == color)
+    // An extension given by the host wins over a built-in one; the others are untouched.
+    #expect(item("x.fs", types).category == custom)
+    #expect(item("x.fs", .standard).category == .shader)
+    #expect(item("x.png", types).category == .image)
+    // Without the host's types, the extension is just an unknown file.
+    #expect(item("circle.geometry", .standard).category == .other)
+    // A category the host gave no colour falls back to the neutral one.
+    #expect(FileTypes.standard.color(for: custom) == FileTypes.standard.color(for: .other))
 }

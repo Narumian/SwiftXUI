@@ -48,9 +48,11 @@ public final class FileBrowserModel: @unchecked Sendable {
     private let lock = NSLock()
     private var state = Snapshot()
     private var filter: BrowserFilter
+    /// Which category each extension is, and how it is drawn.
+    public let fileTypes: FileTypes
     private var query = ""
     private var searching = false
-    private var stamp: Date?
+    private var stamp: WorkspaceStamp?
     private var loadToken = 0
     private var shape: BrowserLayout.Shape?
     private var watcher: Task<Void, Never>?
@@ -73,8 +75,9 @@ public final class FileBrowserModel: @unchecked Sendable {
         if case .folder(let id, let path) = location { choose?(id, path) }
     }
 
-    public init(workspace: Workspace, filter: BrowserFilter = .all, invalidate: @escaping @Sendable () -> Void = {}) {
+    public init(workspace: Workspace, filter: BrowserFilter = .all, fileTypes: FileTypes = .standard, invalidate: @escaping @Sendable () -> Void = {}) {
         self.workspace = workspace
+        self.fileTypes = fileTypes
         self.filter = filter
         self.invalidate = invalidate
     }
@@ -219,7 +222,7 @@ public final class FileBrowserModel: @unchecked Sendable {
     private func load(_ location: Location, token: Int) async {
         let folders = await workspace.folders()
         var items: [BrowserItem] = []
-        var newStamp: Date?
+        var newStamp: WorkspaceStamp?
         var failure: String?
         var readOnly = false
         switch location {
@@ -230,7 +233,8 @@ public final class FileBrowserModel: @unchecked Sendable {
             do {
                 newStamp = try await workspace.directoryStamp(folderID: id, path: path)
                 let entries = try await workspace.list(folderID: id, path: path, sorted: false)
-                items = entries.map { BrowserItem(entry: $0) }
+                let types = fileTypes
+                items = entries.map { BrowserItem(entry: $0, types: types) }
             } catch {
                 failure = Self.describe(error)
             }

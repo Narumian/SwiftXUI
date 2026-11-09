@@ -25,7 +25,7 @@ enum Palette {
         case .laser: XColorValue(hex: 0x7ee08a)
         case .project: XColorValue(hex: 0xe0a07e)
         case .text: XColorValue(hex: 0xc4c8cc)
-        case .other: XColorValue(hex: 0x868b90)
+        default: XColorValue(hex: 0x868b90)   // other, and any category the host defined without a colour
         }
     }
 }
@@ -240,22 +240,23 @@ struct BrowserCell: XView {
     var body: some XView {
         if let item {
             let model = model, index = index, size = size, rows = rows
+            let types = model.fileTypes
             let isSelected = selected == item.path && !item.isDirectory
             let image = thumbnail?(item)
             DrawLayer(size: { _ in size }) { rect, context in
-                BrowserCell.paint(item, image: image, selected: isSelected, rows: rows, in: rect, context: context)
+                BrowserCell.paint(item, image: image, selected: isSelected, rows: rows, types: types, in: rect, context: context)
             }.onTapGesture(id: "browser.item", label: item.name) { model.activate(visibleIndex: index) }
         }
     }
 
-    static func paint(_ item: BrowserItem, image: ImageSource?, selected: Bool, rows: Bool, in rect: Rect, context: RenderContext) {
+    static func paint(_ item: BrowserItem, image: ImageSource?, selected: Bool, rows: Bool, types: FileTypes, in rect: Rect, context: RenderContext) {
         let canvas = context.canvas
         canvas.fillRoundedRect(rect, cornerRadius: 8, color: selected ? Palette.selected : Palette.panel)
         let measure = context.environment.measureText
         if rows {
             let side = max(0, min(rect.height - 12, 40))
             let iconRect = Rect(x: rect.x + 6, y: rect.y + (rect.height - side) / 2, width: side, height: side)
-            paintIcon(item, image: image, in: iconRect, canvas: canvas, measure: measure)
+            paintIcon(item, image: image, types: types, in: iconRect, canvas: canvas, measure: measure)
             var right = rect.x + rect.width - 8
             if let detail = detail(item) {
                 let width = BrowserTextFit.shared.width(detail, size: 11, context: context)
@@ -270,7 +271,7 @@ struct BrowserCell: XView {
         } else {
             let side = max(0, min(rect.width - 16, rect.height - 34))
             let iconRect = Rect(x: rect.x + (rect.width - side) / 2, y: rect.y + 6, width: side, height: side)
-            paintIcon(item, image: image, in: iconRect, canvas: canvas, measure: measure)
+            paintIcon(item, image: image, types: types, in: iconRect, canvas: canvas, measure: measure)
             let width = max(0, rect.width - 12)
             let name = BrowserTextFit.shared.fit(item.name, size: 11, maxWidth: width, middle: !item.isDirectory, context: context)
             canvas.drawText(name, in: Rect(x: rect.x + 6, y: iconRect.y + side + 4, width: width, height: 14),
@@ -278,7 +279,7 @@ struct BrowserCell: XView {
         }
     }
 
-    private static func paintIcon(_ item: BrowserItem, image: ImageSource?, in rect: Rect, canvas: any XCanvas,
+    private static func paintIcon(_ item: BrowserItem, image: ImageSource?, types: FileTypes, in rect: Rect, canvas: any XCanvas,
                                   measure: (String, Double, TextFont) -> Size) {
         guard rect.width > 0, rect.height > 0 else { return }
         if let image, image.naturalSize.width > 0, image.naturalSize.height > 0 {
@@ -288,7 +289,7 @@ struct BrowserCell: XView {
                                              width: fitted.width, height: fitted.height), opacity: 1)
             return
         }
-        canvas.fillRoundedRect(rect, cornerRadius: 6, color: Palette.color(item.category))
+        canvas.fillRoundedRect(rect, cornerRadius: 6, color: types.color(for: item.category))
         if item.isDirectory {
             // Drawn as a shape: the bundled font has no folder symbol.
             let g = rect.width * 0.5, h = g * 0.72
