@@ -112,6 +112,9 @@ public final class RenderContext {
     public private(set) var tapGestures: [ResolvedTapGesture] = []
     public private(set) var dragGestures: [ResolvedDragGesture] = []
     public private(set) var longPressGestures: [ResolvedLongPressGesture] = []
+    public private(set) var dragSources: [ResolvedDragSource] = []
+    public private(set) var dropTargets: [ResolvedDropTarget] = []
+    public private(set) var contextMenus: [ResolvedContextMenu] = []
     public private(set) var anchors = AnchorMap()
     var inputSuspendedDepth = 0
     var focusScopeStack: [FocusScopeID] = []
@@ -163,6 +166,21 @@ public final class RenderContext {
         longPressGestures.append(ResolvedLongPressGesture(rect: rect, gesture: gesture))
     }
 
+    func addDragSource(_ rect: Rect, _ spec: DragSourceSpec) {
+        guard acceptsInput else { return }
+        dragSources.append(ResolvedDragSource(rect: rect, spec: spec))
+    }
+
+    func addDropTarget(_ rect: Rect, _ spec: DropTargetSpec) {
+        guard acceptsInput else { return }
+        dropTargets.append(ResolvedDropTarget(rect: rect, spec: spec))
+    }
+
+    func addContextMenu(_ rect: Rect, _ spec: ContextMenuSpec) {
+        guard acceptsInput else { return }
+        contextMenus.append(ResolvedContextMenu(rect: rect, spec: spec))
+    }
+
     func setAnchor(_ id: AnchorID, _ rect: Rect) {
         anchors[id] = rect
     }
@@ -197,6 +215,9 @@ public struct RenderResult {
     public var tapGestures: [ResolvedTapGesture]
     public var dragGestures: [ResolvedDragGesture]
     public var longPressGestures: [ResolvedLongPressGesture]
+    public var dragSources: [ResolvedDragSource]
+    public var dropTargets: [ResolvedDropTarget]
+    public var contextMenus: [ResolvedContextMenu]
     public var anchors: AnchorMap
 
     public init(
@@ -206,6 +227,9 @@ public struct RenderResult {
         tapGestures: [ResolvedTapGesture] = [],
         dragGestures: [ResolvedDragGesture] = [],
         longPressGestures: [ResolvedLongPressGesture] = [],
+        dragSources: [ResolvedDragSource] = [],
+        dropTargets: [ResolvedDropTarget] = [],
+        contextMenus: [ResolvedContextMenu] = [],
         anchors: AnchorMap
     ) {
         self.regions = regions
@@ -214,6 +238,9 @@ public struct RenderResult {
         self.tapGestures = tapGestures
         self.dragGestures = dragGestures
         self.longPressGestures = longPressGestures
+        self.dragSources = dragSources
+        self.dropTargets = dropTargets
+        self.contextMenus = contextMenus
         self.anchors = anchors
     }
 

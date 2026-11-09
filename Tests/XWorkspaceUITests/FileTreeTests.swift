@@ -110,3 +110,40 @@ func reloadKeepsWhatWasOpenAndSeesNewFiles() async throws {
     #expect(names(model).contains("    new.fs"))
     #expect(model.snapshot().rows[2].isExpanded)
 }
+
+@Test
+func foldersAcceptOnlyRealMoves() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    let id = fixture.folderID
+    func entry(_ path: String, dir: Bool = false) -> WorkspaceEntry { WorkspaceEntry(folderID: id, path: path, kind: dir ? .directory : .file) }
+    func key(_ path: String) -> FileTreeModel.NodeKey { .init(folderID: id, path: path) }
+
+    // Folders take nothing until the app says what a drop does.
+    #expect(!model.accepts(entry("readme.txt"), on: key("Shaders")))
+    model.onDrop = { _, _ in true }
+    #expect(model.accepts(entry("readme.txt"), on: key("Shaders")))
+    // Already there, onto itself, into its own subtree, and a whole root are not moves.
+    #expect(!model.accepts(entry("Shaders/plasma.fs"), on: key("Shaders")))
+    #expect(!model.accepts(entry("Shaders", dir: true), on: key("Shaders")))
+    #expect(!model.accepts(entry("Shaders", dir: true), on: key("Shaders/Old")))
+    #expect(!model.accepts(entry("", dir: true), on: key("Shaders")))
+    #expect(model.accepts(entry("Shaders/Old/tunnel.fs"), on: key("")))
+}
+
+@Test
+func aDropCallsBackAndReloads() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let picks = Picks()
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    await model.reload()
+    model.onDrop = { entry, destination in picks.add("\(entry.path)->\(destination.path)"); return true }
+    let entry = model.snapshot().rows[3].item.entry // readme.txt
+    #expect(model.drop(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
+    #expect(picks.all == ["readme.txt->Footage"])
+
+    model.onDrop = { _, _ in false }
+    #expect(!model.drop(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
+}

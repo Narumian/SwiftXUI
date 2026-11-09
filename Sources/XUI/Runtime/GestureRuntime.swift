@@ -129,6 +129,12 @@ public struct GestureRuntime: Sendable {
         }
     }
 
+    /// Drops the active sequence without finishing it: the pointer now belongs to something else
+    /// (a lifted drag). Nothing is performed, as with `.cancelled`.
+    public mutating func cancel(pointerID: Int) {
+        if activeSequence?.pointerID == pointerID { activeSequence = nil }
+    }
+
     private func makeValue(
         input: PointerInput,
         startLocation: Point

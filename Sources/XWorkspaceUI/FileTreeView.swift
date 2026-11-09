@@ -2,6 +2,8 @@ import Foundation
 import XUI
 import XWorkspace
 
+extension WorkspaceEntry: XTransferable {}
+
 /// Folders and files as an outline, like the project navigator in an IDE: a disclosure
 /// triangle opens a folder in place, children are indented under it, and the rows scroll
 /// lazily, so only the ones on screen cost anything.
@@ -26,7 +28,8 @@ public struct FileTreeView: XView {
                 LazyGrid(axis: .vertical, tracks: 1, count: snapshot.rows.count, length: .fixed(rowHeight),
                          spacing: 0, resetKey: "") { index, size in
                     FileTreeRow(model: model, row: snapshot.rows.indices.contains(index) ? snapshot.rows[index] : nil,
-                                index: index, size: size, indent: indent, selected: snapshot.selected)
+                                index: index, size: size, indent: indent, selected: snapshot.selected,
+                                dropTarget: snapshot.dropTarget)
                 }
                 if snapshot.rows.isEmpty {
                     Text(snapshot.error ?? "NO FOLDERS", size: 13, color: Palette.muted)
@@ -44,19 +47,37 @@ struct FileTreeRow: XView {
     let size: Size
     let indent: Double
     let selected: FileTreeModel.NodeKey?
+    let dropTarget: FileTreeModel.NodeKey?
 
     var body: some XView {
         if let row {
             let model = model, index = index, size = size, indent = indent
-            let isSelected = selected.map { $0.folderID == row.item.entry.folderID && $0.path == row.item.entry.path } ?? false
+            let key = row.key
+            let entry = row.item.entry
+            let isSelected = selected == key
+            let isTarget = dropTarget == key
             DrawLayer(size: { _ in size }) { rect, context in
-                FileTreeRow.paint(row, selected: isSelected, indent: indent, in: rect, context: context)
-            }.onTapGesture(id: "tree.row", label: row.item.name) { model.activate(row: index) }
+                FileTreeRow.paint(row, selected: isSelected, targeted: isTarget, indent: indent, in: rect, context: context)
+            }
+            .onTapGesture(id: "tree.row", label: row.item.name) { model.activate(row: index) }
+            .draggable(entry, cornerRadius: 6, id: key)
+            .contextMenu { model.contextMenu?(entry) ?? [] }
+            .dropDestination(for: WorkspaceEntry.self,
+                             isValid: { row.item.isDirectory && model.accepts($0, on: key) },
+                             springLoaded: row.item.isDirectory && !row.isExpanded ? (delay: 0.7, action: { model.expand(key) }) : nil,
+                             isTargeted: { model.setDropTarget(key, $0) }) { items, _ in
+                model.drop(items[0], on: key)
+            }
         }
     }
 
-    static func paint(_ row: FileTreeModel.Row, selected: Bool, indent: Double, in rect: Rect, context: RenderContext) {
+    static func paint(_ row: FileTreeModel.Row, selected: Bool, targeted: Bool, indent: Double, in rect: Rect, context: RenderContext) {
         let canvas = context.canvas
+        if targeted {
+            let box = Rect(x: rect.x + 4, y: rect.y + 1, width: rect.width - 8, height: rect.height - 2)
+            canvas.fillRoundedRect(box, cornerRadius: 6, color: Palette.accent.opacity(0.14))
+            canvas.strokeRoundedRect(box, cornerRadius: 6, color: Palette.accent, lineWidth: 1.5)
+        }
         if selected { canvas.fillRoundedRect(Rect(x: rect.x + 4, y: rect.y + 1, width: rect.width - 8, height: rect.height - 2),
                                              cornerRadius: 6, color: Palette.selected) }
         // Deep trees squeeze their steps instead of pushing the names out of the box.

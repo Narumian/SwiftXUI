@@ -108,6 +108,12 @@ public final class XAppSession<App: XApp> {
         return host.pointer(event, in: lastFrame)
     }
 
+    /// A secondary click at `position`: opens the context menu of the view under it, if it has one.
+    @discardableResult
+    public func contextClick(at position: RenderPoint) -> Bool {
+        host.contextClick(at: position)
+    }
+
     /// A hardware key press. Returns whether a focused text field consumed it.
     @discardableResult
     public func key(_ event: KeyEvent) -> Bool {

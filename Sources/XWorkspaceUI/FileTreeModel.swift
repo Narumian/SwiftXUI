@@ -1,4 +1,5 @@
 import Foundation
+import XUI
 import XWorkspace
 
 /// The state behind an outline of folders and files, like a project navigator.
@@ -24,6 +25,8 @@ public final class FileTreeModel: @unchecked Sendable {
     public struct Snapshot: Sendable {
         public var rows: [Row] = []
         public var selected: NodeKey?
+        /// The folder a drag is hovering over.
+        public var dropTarget: NodeKey?
         public var error: String?
         /// Bumps whenever `rows` change.
         public var generation = 0
@@ -50,6 +53,21 @@ public final class FileTreeModel: @unchecked Sendable {
         self.filter = filter
         self.invalidate = invalidate
     }
+
+    /// Called when something dragged from the tree lands on a folder. Return whether it was taken; the model
+    /// reloads afterwards. Without it, folders do not accept drops.
+    public var onDrop: (@Sendable (_ entry: WorkspaceEntry, _ destination: NodeKey) -> Bool)? {
+        get { lock.withLock { drop } }
+        set { lock.withLock { drop = newValue } }
+    }
+    private var drop: (@Sendable (WorkspaceEntry, NodeKey) -> Bool)?
+
+    /// The context menu for a row (a secondary click, or a row lifted and released in place). Empty means none.
+    public var contextMenu: (@Sendable (WorkspaceEntry) -> [ContextMenuItem])? {
+        get { lock.withLock { menu } }
+        set { lock.withLock { menu = newValue } }
+    }
+    private var menu: (@Sendable (WorkspaceEntry) -> [ContextMenuItem])?
 
     /// Called when a file (not a folder) is chosen.
     public var onPick: (@Sendable (WorkspaceEntry) -> Void)? {
@@ -129,6 +147,28 @@ public final class FileTreeModel: @unchecked Sendable {
     public func collapse(_ key: NodeKey) {
         lock.withLock { _ = expanded.remove(key) }
         rebuild()
+    }
+
+    /// Whether `entry` may be dropped on the folder `destination`: not on itself, its parent (no change) or a descendant.
+    func accepts(_ entry: WorkspaceEntry, on destination: NodeKey) -> Bool {
+        guard lock.withLock({ drop != nil }), entry.folderID == destination.folderID, !entry.path.isEmpty else { return false }
+        let from = entry.path, to = destination.path
+        if from == to || to.hasPrefix(from + "/") { return false }
+        let parent = from.split(separator: "/").dropLast().joined(separator: "/")
+        return parent != to
+    }
+
+    func drop(_ entry: WorkspaceEntry, on destination: NodeKey) -> Bool {
+        guard let drop = lock.withLock({ self.drop }), drop(entry, destination) else { return false }
+        Task { await self.reload() }
+        return true
+    }
+
+    func setDropTarget(_ key: NodeKey, _ on: Bool) {
+        lock.withLock {
+            if on { state.dropTarget = key } else if state.dropTarget == key { state.dropTarget = nil }
+        }
+        invalidate()
     }
 
     public func setFilter(_ filter: BrowserFilter) {

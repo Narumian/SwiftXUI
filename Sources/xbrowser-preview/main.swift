@@ -169,6 +169,8 @@ if onlyScenario == nil || onlyScenario == "tree" {
     for shape in PreviewShape.standard where onlyShape == nil || shape.name == onlyShape {
         let model = FileTreeModel(workspace: workspace, folderID: folderID)
         await model.reload()
+        model.onDrop = { _, _ in true }
+        model.contextMenu = { entry in [ContextMenuItem("Rename") {}, ContextMenuItem("Duplicate") {}, ContextMenuItem("Delete", role: .destructive) {}] }
         let result = try await XPreview(fonts: fonts, measuredFrames: measuredFrames).render(shape, script: { driver in
             await driver.advance(frames: 3)
             // Open folders the way a finger would: tap the row by its name.
@@ -181,10 +183,40 @@ if onlyScenario == nil || onlyScenario == "tree" {
             }
             await driver.advance(frames: 3)
         }) {
-            FileTreeView(model: model)
+            DragDropArea { FileTreeView(model: model) }
         }
         try result.png.write(to: outDirectory.appendingPathComponent("tree-\(shape.name).png"))
         print(String(format: "%-16@ %-11@ %@", shape.name as NSString, "open" as NSString, result.stats.summary as NSString))
+    }
+
+    // Drag a file row over a folder row (held, mid-flight), and lift one and release it in place (menu).
+    for (name, scenario) in [("tree-drag", "drag"), ("tree-menu", "menu")] {
+        for shape in [PreviewShape.phonePortrait, .tablet] where onlyShape == nil || shape.name == onlyShape {
+            let model = FileTreeModel(workspace: workspace, folderID: folderID)
+            await model.reload()
+            model.onDrop = { _, _ in true }
+            model.contextMenu = { _ in [ContextMenuItem("Rename") {}, ContextMenuItem("Duplicate") {}, ContextMenuItem("Delete", role: .destructive) {}] }
+            let result = try await XPreview(fonts: fonts, measuredFrames: measuredFrames).render(shape, script: { driver in
+                driver.host.dragDrop.slop = 24
+                await driver.advance(frames: 3)
+                @XUIActor func row(_ label: String) -> Rect? { driver.frame?.layout.tapGestures.first { $0.id == "tree.row" && $0.label == label }?.rect }
+                await driver.advance()
+                guard let file = row("alpha mask 1.mov"), let folder = row("Footage") else { return }
+                driver.press(at: Point(x: file.midX, y: file.midY))
+                await driver.advance(frames: 20)
+                if scenario == "drag" {
+                    driver.move(to: Point(x: folder.midX, y: folder.midY))
+                    await driver.advance(frames: 8)
+                } else {
+                    driver.release(at: Point(x: file.midX, y: file.midY))
+                    await driver.advance(frames: 14)
+                }
+            }) {
+                DragDropArea { FileTreeView(model: model) }
+            }
+            try result.png.write(to: outDirectory.appendingPathComponent("\(name)-\(shape.name).png"))
+            print(String(format: "%-16@ %-11@ %@", shape.name as NSString, scenario as NSString, result.stats.summary as NSString))
+        }
     }
 
     // The cost of opening one big folder: list, order, flatten.

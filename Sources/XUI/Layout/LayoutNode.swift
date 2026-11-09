@@ -55,6 +55,10 @@ final class LayoutNode {
     var dragGesture: DragGesture?
     /// Long-press gesture registered by `.gesture(LongPressGesture(...))`.
     var longPressGesture: LongPressGesture?
+    /// Registered by `.draggable`, `.dropDestination` and `.contextMenu`.
+    var dragSource: DragSourceSpec?
+    var dropTarget: DropTargetSpec?
+    var contextMenu: ContextMenuSpec?
     /// Register `tapGesture` after the children so anything inside wins the
     /// first-match hit test (a scrim behind a sheet's content).
     var tapGestureAfterChildren = false

@@ -110,6 +110,18 @@ public final class PreviewDriver {
         pointerEvent(PointerEvent(id: id, phase: .began, position: RenderPoint(x: Float(point.x), y: Float(point.y)), timestamp: time))
     }
 
+    /// Moves a finger that is down (see `press(at:)`).
+    @discardableResult
+    public func move(to point: Point, id: Int = 1) -> Bool {
+        pointerEvent(PointerEvent(id: id, phase: .moved, position: RenderPoint(x: Float(point.x), y: Float(point.y)), timestamp: time))
+    }
+
+    /// Lifts a finger that is down.
+    @discardableResult
+    public func release(at point: Point, id: Int = 1) -> Bool {
+        pointerEvent(PointerEvent(id: id, phase: .ended, position: RenderPoint(x: Float(point.x), y: Float(point.y)), timestamp: time))
+    }
+
     /// Drags from one point to another in `steps` moves.
     public func drag(from a: Point, to b: Point, steps: Int = 6) {
         func rp(_ p: Point) -> RenderPoint { RenderPoint(x: Float(p.x), y: Float(p.y)) }

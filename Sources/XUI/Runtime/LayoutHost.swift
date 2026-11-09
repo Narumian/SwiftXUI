@@ -55,6 +55,9 @@ public struct LayoutHost {
                 tapGestures: renderContext.tapGestures,
                 dragGestures: renderContext.dragGestures,
                 longPressGestures: renderContext.longPressGestures,
+                dragSources: renderContext.dragSources,
+                dropTargets: renderContext.dropTargets,
+                contextMenus: renderContext.contextMenus,
                 anchors: renderContext.anchors
             )
         }

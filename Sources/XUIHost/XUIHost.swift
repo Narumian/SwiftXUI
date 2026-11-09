@@ -16,6 +16,8 @@ public final class XUIHost: @unchecked Sendable {
     public let focusStore: FocusStore
     /// Which text field has the keyboard. Shared with every `TextField` in the tree.
     public let textFocus: TextFocusStore
+    /// Which drag is under way, and the context menu. Shared with every draggable view in the tree.
+    public let dragDrop: DragDropStore
     /// Where copy / cut / paste go. The platform shell replaces this with the system pasteboard.
     public var clipboard: any XClipboard = InMemoryClipboard()
 
@@ -34,7 +36,8 @@ public final class XUIHost: @unchecked Sendable {
         images: [ImageSource: TextureID] = [:],
         imageResolver: (@Sendable (ImageSource) -> TextureID?)? = nil,
         focusStore: FocusStore = FocusStore(),
-        textFocus: TextFocusStore = TextFocusStore()
+        textFocus: TextFocusStore = TextFocusStore(),
+        dragDrop: DragDropStore = DragDropStore()
     ) {
         self.size = size
         self.background = background
@@ -44,7 +47,9 @@ public final class XUIHost: @unchecked Sendable {
         self.imageResolver = imageResolver
         self.focusStore = focusStore
         self.textFocus = textFocus
+        self.dragDrop = dragDrop
         textFocus.hostManagesFrames = true
+        dragDrop.capturePointer = { [weak self] id in self?.gestureRuntime.cancel(pointerID: id) }
     }
 
     /// Renders one XView declaration pass into a renderer-neutral frame.
@@ -60,6 +65,8 @@ public final class XUIHost: @unchecked Sendable {
         if let time { frameEnvironment.fxTime = time }
         frameEnvironment.environmentObject(focusStore)
         frameEnvironment.environmentObject(textFocus)
+        frameEnvironment.environmentObject(dragDrop)
+        dragDrop.beginFrame(clock: frameEnvironment.fxTime)
 
         let surface = SceneCanvas(
             size: size,
@@ -74,6 +81,7 @@ public final class XUIHost: @unchecked Sendable {
             environment: frameEnvironment
         ).render(view, into: surface, store: store)
         textFocus.endFrame()
+        dragDrop.endFrame(layout)
 
         focusStore.selectedID = FocusNavigator.selectInitial(
             in: layout.controls,
@@ -97,10 +105,19 @@ public final class XUIHost: @unchecked Sendable {
             id: event.id, phase: Self.pointerPhase(event.phase), position: position, timestamp: event.timestamp
         )
         if textFocus.handleKeyboardPointer(input) { return true }
+        // A lifted drag owns its pointer; a press that might lift is only watched until it does.
+        if dragDrop.handle(input, in: frame.layout) { return true }
         return gestureRuntime.handle(
             input,
             in: frame.layout
         )
+    }
+
+    /// A secondary click (or the platform's long-press gesture for a menu) at `position`.
+    @discardableResult
+    @XUIActor
+    public func contextClick(at position: RenderPoint) -> Bool {
+        dragDrop.contextClick(at: Point(x: Double(position.x), y: Double(position.y)))
     }
 
     /// Routes a gamepad direction or button into the current focus tree.
