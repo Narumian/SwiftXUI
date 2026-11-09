@@ -83,6 +83,7 @@ public final class XApplicationRuntime<App: XApp>: XApplicationRuntimeProtocol {
     public func resignActive() {
         guard isActive else { return }
         isActive = false
+        driver.session.cancelPointers()          // a held press must not outlive the app's focus
         app.delegate.applicationWillResignActive()
     }
 

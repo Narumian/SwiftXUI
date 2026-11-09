@@ -37,6 +37,7 @@ public struct GestureRuntime: Sendable {
         let tap: ResolvedTapGesture?
         let drag: ResolvedDragGesture?
         let longPress: ResolvedLongPressGesture?
+        let press: ResolvedPressGesture?
         let startTime: Double
         var tapEligible: Bool
         var dragStarted: Bool
@@ -63,7 +64,8 @@ public struct GestureRuntime: Sendable {
             let tap = render.tapGestures.first(where: { $0.rect.contains(input.position) })
             let drag = render.dragGestures.first(where: { $0.rect.contains(input.position) })
             let longPress = render.longPressGestures.first(where: { $0.rect.contains(input.position) })
-            guard tap != nil || drag != nil || longPress != nil else {
+            let press = render.pressGestures.first(where: { $0.rect.contains(input.position) })
+            guard tap != nil || drag != nil || longPress != nil || press != nil else {
                 return false
             }
             activeSequence = ActiveSequence(
@@ -72,10 +74,12 @@ public struct GestureRuntime: Sendable {
                 tap: tap,
                 drag: drag,
                 longPress: longPress,
+                press: press,
                 startTime: input.timestamp,
                 tapEligible: true,
                 dragStarted: drag?.minimumDistance == 0
             )
+            press?.performPressed()
             // A drag with no minimum distance begins at touch-down: tell it so right away, with no movement yet,
             // so a press can be shown before the finger moves or lifts.
             if let drag, drag.minimumDistance == 0 {
@@ -109,6 +113,7 @@ public struct GestureRuntime: Sendable {
             }
             defer { activeSequence = nil }
             let value = makeValue(input: input, startLocation: active.startLocation)
+            active.press?.performReleased()
             if active.dragStarted, let drag = active.drag {
                 drag.performEnded(value)
             } else if active.tapEligible, let longPress = active.longPress,
@@ -125,14 +130,25 @@ public struct GestureRuntime: Sendable {
                 return false
             }
             activeSequence = nil
+            active.press?.performCancelled()
             return true
         }
     }
 
     /// Drops the active sequence without finishing it: the pointer now belongs to something else
-    /// (a lifted drag). Nothing is performed, as with `.cancelled`.
+    /// (a lifted drag). Nothing is performed but the press's cancellation, as with `.cancelled`.
     public mutating func cancel(pointerID: Int) {
-        if activeSequence?.pointerID == pointerID { activeSequence = nil }
+        guard let active = activeSequence, active.pointerID == pointerID else { return }
+        activeSequence = nil
+        active.press?.performCancelled()
+    }
+
+    /// Ends the active sequence, if any, as cancelled: the app lost focus or the view is going away. A held
+    /// press is told, so whatever it started can stop.
+    public mutating func cancelAll() {
+        guard let active = activeSequence else { return }
+        activeSequence = nil
+        active.press?.performCancelled()
     }
 
     private func makeValue(

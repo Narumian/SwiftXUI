@@ -67,6 +67,9 @@ enum LayoutEngine {
         if let gesture = node.longPressGesture {
             context.addLongPressGesture(node.frame, gesture: gesture)
         }
+        if let gesture = node.pressGesture {
+            context.addPressGesture(node.frame, gesture: gesture)
+        }
         if let spec = node.dragSource { context.addDragSource(node.frame, spec) }
         if let spec = node.dropTarget { context.addDropTarget(node.frame, spec) }
         if let spec = node.contextMenu { context.addContextMenu(node.frame, spec) }

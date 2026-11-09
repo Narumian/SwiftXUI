@@ -82,6 +82,19 @@ public struct _LongPressGestureModifier<Content: XView>: XView, _PrimitiveXView 
     }
 }
 
+public struct _PressGestureModifier<Content: XView>: XView, _PrimitiveXView {
+    public typealias Body = Never
+    let content: Content
+    let gesture: PressGesture
+
+    @XUIActor
+    func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
+        let wrapper = LayoutNode(layout: PassthroughLayout(), children: await lower(content, id: stateID, store: store))
+        wrapper.pressGesture = gesture
+        return [wrapper]
+    }
+}
+
 public extension XView {
     /// Attach a value-style gesture to this view.
     ///
@@ -99,6 +112,18 @@ public extension XView {
     /// Attach a value-style drag gesture to this view.
     func gesture(_ gesture: DragGesture) -> _DragGestureModifier<Self> {
         _DragGestureModifier(content: self, gesture: gesture)
+    }
+
+    /// Attach a press gesture to this view: it reports the pointer going down and coming up. See `PressGesture`.
+    func gesture(_ gesture: PressGesture) -> _PressGestureModifier<Self> {
+        _PressGestureModifier(content: self, gesture: gesture)
+    }
+
+    /// Perform `pressed` when the pointer goes down on this view, and `ended` when that press ends (it is lifted
+    /// or the touch is cancelled). `ended` always follows `pressed`.
+    func onPressGesture(pressed: @escaping @Sendable () -> Void,
+                        ended: @escaping @Sendable () -> Void) -> _PressGestureModifier<Self> {
+        gesture(PressGesture().onPressed(pressed).onReleased(ended).onCancelled(ended))
     }
 
     /// Attach a long-press gesture to this view. See `LongPressGesture` for how it is recognized.

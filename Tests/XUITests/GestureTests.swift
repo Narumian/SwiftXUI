@@ -136,3 +136,74 @@ private final class LongPressRecorder: @unchecked Sendable {
     _ = runtime.handle(PointerInput(phase: .ended, position: Point(x: 30, y: 10), timestamp: 2), in: render)
     #expect(recorder.longPresses == 0)
 }
+
+private final class PressRecorder: @unchecked Sendable {
+    var events: [String] = []
+}
+
+@Test @XUIActor func aPressReportsDownAndUpAndRunsAlongsideTheTap() async {
+    let recorder = PressRecorder()
+    let view = Color.black
+        .frame(width: 100, height: 100, alignment: .topLeading)
+        .onTapGesture { recorder.events.append("tap") }
+        .gesture(PressGesture().onPressed { recorder.events.append("down") }.onReleased { recorder.events.append("up") }.onCancelled { recorder.events.append("cancel") })
+    let render = await renderGestureView(view)
+    var runtime = GestureRuntime()
+
+    let began = runtime.handle(PointerInput(phase: .began, position: Point(x: 10, y: 10), timestamp: 1), in: render)
+    #expect(began)
+    #expect(recorder.events == ["down"])                       // at pointer-down, before anything is lifted
+    _ = runtime.handle(PointerInput(phase: .ended, position: Point(x: 10, y: 10), timestamp: 1.1), in: render)
+    #expect(recorder.events == ["down", "up", "tap"])
+}
+
+@Test @XUIActor func aPressSurvivesMovingOutOfTheViewAndAHeldDrag() async {
+    let recorder = PressRecorder()
+    let view = Color.black
+        .frame(width: 100, height: 100, alignment: .topLeading)
+        .gesture(DragGesture(minimumDistance: 4).onChanged { _ in })
+        .onPressGesture(pressed: { recorder.events.append("down") }, ended: { recorder.events.append("end") })
+    let render = await renderGestureView(view)
+    var runtime = GestureRuntime()
+    _ = runtime.handle(PointerInput(phase: .began, position: Point(x: 10, y: 10), timestamp: 1), in: render)
+    _ = runtime.handle(PointerInput(phase: .moved, position: Point(x: 250, y: 150), timestamp: 1.1), in: render)
+    #expect(recorder.events == ["down"])                       // still held, outside the view
+    _ = runtime.handle(PointerInput(phase: .ended, position: Point(x: 250, y: 150), timestamp: 2), in: render)
+    #expect(recorder.events == ["down", "end"])
+}
+
+@Test @XUIActor func everyPressEndsExactlyOnceWhateverEndsIt() async {
+    let recorder = PressRecorder()
+    let view = Color.black
+        .frame(width: 100, height: 100, alignment: .topLeading)
+        .gesture(PressGesture().onPressed { recorder.events.append("down") }.onReleased { recorder.events.append("up") }.onCancelled { recorder.events.append("cancel") })
+    let render = await renderGestureView(view)
+    var runtime = GestureRuntime()
+
+    _ = runtime.handle(PointerInput(id: 1, phase: .began, position: Point(x: 10, y: 10)), in: render)
+    _ = runtime.handle(PointerInput(id: 1, phase: .cancelled, position: Point(x: 10, y: 10)), in: render)
+    _ = runtime.handle(PointerInput(id: 1, phase: .cancelled, position: Point(x: 10, y: 10)), in: render)   // again: nothing
+    _ = runtime.handle(PointerInput(id: 2, phase: .began, position: Point(x: 10, y: 10)), in: render)
+    runtime.cancel(pointerID: 2)                               // a drag-and-drop took the pointer
+    _ = runtime.handle(PointerInput(id: 3, phase: .began, position: Point(x: 10, y: 10)), in: render)
+    runtime.cancelAll()                                         // the app lost focus
+    runtime.cancelAll()
+    _ = runtime.handle(PointerInput(id: 4, phase: .ended, position: Point(x: 10, y: 10)), in: render)       // an up without a down
+    #expect(recorder.events == ["down", "cancel", "down", "cancel", "down", "cancel"])
+}
+
+@Test @XUIActor func aSecondFingerDoesNotStartAnotherPress() async {
+    let recorder = PressRecorder()
+    let view = Color.black
+        .frame(width: 100, height: 100, alignment: .topLeading)
+        .onPressGesture(pressed: { recorder.events.append("down") }, ended: { recorder.events.append("end") })
+    let render = await renderGestureView(view)
+    var runtime = GestureRuntime()
+    _ = runtime.handle(PointerInput(id: 1, phase: .began, position: Point(x: 10, y: 10)), in: render)
+    let second = runtime.handle(PointerInput(id: 2, phase: .began, position: Point(x: 20, y: 20)), in: render)
+    #expect(!second)
+    _ = runtime.handle(PointerInput(id: 2, phase: .ended, position: Point(x: 20, y: 20)), in: render)
+    #expect(recorder.events == ["down"])
+    _ = runtime.handle(PointerInput(id: 1, phase: .ended, position: Point(x: 10, y: 10)), in: render)
+    #expect(recorder.events == ["down", "end"])
+}

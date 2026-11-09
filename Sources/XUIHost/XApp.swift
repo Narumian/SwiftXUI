@@ -108,6 +108,10 @@ public final class XAppSession<App: XApp> {
         return host.pointer(event, in: lastFrame)
     }
 
+    /// Cancels the pointer sequence in progress; a held press is told it was cancelled.
+    @XUIActor
+    public func cancelPointers() { host.cancelPointers() }
+
     /// A secondary click at `position`: opens the context menu of the view under it, if it has one.
     @discardableResult
     public func contextClick(at position: RenderPoint) -> Bool {

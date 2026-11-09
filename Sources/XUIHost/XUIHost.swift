@@ -113,6 +113,10 @@ public final class XUIHost: @unchecked Sendable {
         )
     }
 
+    /// Cancels the pointer sequence in progress (the app lost focus): a held `PressGesture` is told.
+    @XUIActor
+    public func cancelPointers() { gestureRuntime.cancelAll() }
+
     /// A secondary click (or the platform's long-press gesture for a menu) at `position`.
     @discardableResult
     @XUIActor

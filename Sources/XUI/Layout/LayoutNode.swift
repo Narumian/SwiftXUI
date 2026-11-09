@@ -55,6 +55,8 @@ final class LayoutNode {
     var dragGesture: DragGesture?
     /// Long-press gesture registered by `.gesture(LongPressGesture(...))`.
     var longPressGesture: LongPressGesture?
+    /// Press gesture registered by `.gesture(PressGesture())`.
+    var pressGesture: PressGesture?
     /// Registered by `.draggable`, `.dropDestination` and `.contextMenu`.
     var dragSource: DragSourceSpec?
     var dropTarget: DropTargetSpec?

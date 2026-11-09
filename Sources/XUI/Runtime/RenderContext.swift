@@ -112,6 +112,7 @@ public final class RenderContext {
     public private(set) var tapGestures: [ResolvedTapGesture] = []
     public private(set) var dragGestures: [ResolvedDragGesture] = []
     public private(set) var longPressGestures: [ResolvedLongPressGesture] = []
+    public private(set) var pressGestures: [ResolvedPressGesture] = []
     public private(set) var dragSources: [ResolvedDragSource] = []
     public private(set) var dropTargets: [ResolvedDropTarget] = []
     public private(set) var contextMenus: [ResolvedContextMenu] = []
@@ -166,6 +167,11 @@ public final class RenderContext {
         longPressGestures.append(ResolvedLongPressGesture(rect: rect, gesture: gesture))
     }
 
+    func addPressGesture(_ rect: Rect, gesture: PressGesture) {
+        guard acceptsInput else { return }
+        pressGestures.append(ResolvedPressGesture(rect: rect, gesture: gesture))
+    }
+
     func addDragSource(_ rect: Rect, _ spec: DragSourceSpec) {
         guard acceptsInput else { return }
         dragSources.append(ResolvedDragSource(rect: rect, spec: spec))
@@ -215,6 +221,7 @@ public struct RenderResult {
     public var tapGestures: [ResolvedTapGesture]
     public var dragGestures: [ResolvedDragGesture]
     public var longPressGestures: [ResolvedLongPressGesture]
+    public var pressGestures: [ResolvedPressGesture]
     public var dragSources: [ResolvedDragSource]
     public var dropTargets: [ResolvedDropTarget]
     public var contextMenus: [ResolvedContextMenu]
@@ -227,6 +234,7 @@ public struct RenderResult {
         tapGestures: [ResolvedTapGesture] = [],
         dragGestures: [ResolvedDragGesture] = [],
         longPressGestures: [ResolvedLongPressGesture] = [],
+        pressGestures: [ResolvedPressGesture] = [],
         dragSources: [ResolvedDragSource] = [],
         dropTargets: [ResolvedDropTarget] = [],
         contextMenus: [ResolvedContextMenu] = [],
@@ -238,6 +246,7 @@ public struct RenderResult {
         self.tapGestures = tapGestures
         self.dragGestures = dragGestures
         self.longPressGestures = longPressGestures
+        self.pressGestures = pressGestures
         self.dragSources = dragSources
         self.dropTargets = dropTargets
         self.contextMenus = contextMenus
