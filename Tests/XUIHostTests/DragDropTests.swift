@@ -193,3 +193,58 @@ func aSecondaryClickOutsideEveryMenuViewDoesNothing() async throws {
     _ = await s.render()
     #expect(!s.host.dragDrop.isMenuOpen)
 }
+
+@Test @XUIActor
+func holdingALiftedViewNearTheEdgeScrollsTheList() async {
+    let host = XUIHost(size: screen)
+    var time = 0.0
+    var frame: XUIFrame?
+    func render() async {
+        time += 0.02
+        frame = await host.render(DragDropArea {
+            LazyGrid(count: 1000, length: .fixed(50), spacing: 0) { index, size in
+                Color.red.frame(width: .pt(size.width), height: .pt(size.height))
+                    .onTapGesture(id: "cell.\(index)", label: "\(index)") {}
+                    .draggable(index, id: index)
+            }
+        }, time: time)
+    }
+    func firstCell() -> Int {
+        (frame?.layout.tapGestures.compactMap { $0.id.flatMap { $0.hasPrefix("cell.") ? Int($0.dropFirst(5)) : nil } }.min()) ?? -1
+    }
+    func send(_ phase: PointerPhase, _ y: Float) {
+        _ = host.pointer(PointerEvent(phase: phase, position: RenderPoint(x: 100, y: y), timestamp: time), in: frame!)
+    }
+
+    await render()
+    #expect(firstCell() == 0)
+    send(.began, 125)
+    for _ in 0..<16 { await render() }
+    #expect(host.dragDrop.isDragging)
+
+    // In the middle of the list nothing moves.
+    send(.moved, 200)
+    for _ in 0..<30 { await render() }
+    #expect(firstCell() == 0)
+
+    // At the bottom edge it scrolls, faster the longer and deeper it is held.
+    send(.moved, 395)
+    for _ in 0..<50 { await render() }
+    let early = firstCell()
+    #expect(early > 5)
+    for _ in 0..<50 { await render() }
+    #expect(firstCell() > early + 10)
+
+    // Back to the middle: it stops.
+    send(.moved, 200)
+    for _ in 0..<5 { await render() }
+    let stopped = firstCell()
+    for _ in 0..<30 { await render() }
+    #expect(firstCell() == stopped)
+
+    // The top edge brings it back.
+    send(.moved, 5)
+    for _ in 0..<60 { await render() }
+    #expect(firstCell() < stopped)
+    send(.ended, 5)
+}

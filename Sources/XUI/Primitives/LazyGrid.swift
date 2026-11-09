@@ -191,10 +191,15 @@ private struct _LazyGridPrimitive<Content: XView>: XView, _PrimitiveXView {
         let (tracks, count, length, spacing, content) = (tracks, count, length, spacing, content)
         let (anchorItem, intra, normalize) = (anchorItem, intra, normalize)
         let contentType: Any.Type = Content.self
+        let dragDrop = _EnvironmentObjectContext.currentOrEmpty.object(DragDropStore.self)
         node.lazyChildren = { rect, _ in
             let geometry = LazyGridGeometry(axis: axis, tracks: tracks, count: count, spacing: spacing,
                                             length: length, viewport: rect.size)
-            let offset = geometry.clamped(geometry.offset(anchorItem: anchorItem, intra: intra))
+            var offset = geometry.clamped(geometry.offset(anchorItem: anchorItem, intra: intra))
+            // A lifted view held near an edge scrolls the list under it.
+            if let distance = dragDrop?.autoScrollDistance(in: rect, axis: axis), distance != 0 {
+                offset = geometry.clamped(offset + distance)
+            }
             let anchor = geometry.anchor(for: offset)
             if anchor.item != anchorItem || anchor.intra != intra { normalize(anchor.item, anchor.intra) }
             let rows = geometry.visibleRows(at: offset)

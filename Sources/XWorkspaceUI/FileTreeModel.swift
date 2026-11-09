@@ -62,6 +62,21 @@ public final class FileTreeModel: @unchecked Sendable {
     }
     private var drop: (@Sendable (WorkspaceEntry, NodeKey) -> Bool)?
 
+    /// Lets a drop move the file or folder into the target folder on disk (`Workspace.move`). The drop is taken at once
+    /// and the tree reloads when the move is done; a failure goes to `onError`. Ignored when `onDrop` is set.
+    public var movesOnDrop: Bool {
+        get { lock.withLock { moves } }
+        set { lock.withLock { moves = newValue } }
+    }
+    private var moves = false
+
+    /// Told why a move failed (a name already there, a read-only folder).
+    public var onError: (@Sendable (String) -> Void)? {
+        get { lock.withLock { failed } }
+        set { lock.withLock { failed = newValue } }
+    }
+    private var failed: (@Sendable (String) -> Void)?
+
     /// The context menu for a row (a secondary click, or a row lifted and released in place). Empty means none.
     public var contextMenu: (@Sendable (WorkspaceEntry) -> [ContextMenuItem])? {
         get { lock.withLock { menu } }
@@ -91,6 +106,8 @@ public final class FileTreeModel: @unchecked Sendable {
         }
         let wanted = lock.withLock { expanded.union(open) }
         for key in wanted.sorted(by: { $0.path.count < $1.path.count }) { await loadChildren(of: key) }
+        // Folders that are shut are listed again when they next open, not from a listing that may be stale.
+        lock.withLock { children = children.filter { expanded.contains($0.key) } }
         rebuild()
     }
 
@@ -151,7 +168,7 @@ public final class FileTreeModel: @unchecked Sendable {
 
     /// Whether `entry` may be dropped on the folder `destination`: not on itself, its parent (no change) or a descendant.
     func accepts(_ entry: WorkspaceEntry, on destination: NodeKey) -> Bool {
-        guard lock.withLock({ drop != nil }), entry.folderID == destination.folderID, !entry.path.isEmpty else { return false }
+        guard lock.withLock({ drop != nil || moves }), entry.folderID == destination.folderID, !entry.path.isEmpty else { return false }
         let from = entry.path, to = destination.path
         if from == to || to.hasPrefix(from + "/") { return false }
         let parent = from.split(separator: "/").dropLast().joined(separator: "/")
@@ -159,9 +176,32 @@ public final class FileTreeModel: @unchecked Sendable {
     }
 
     func drop(_ entry: WorkspaceEntry, on destination: NodeKey) -> Bool {
-        guard let drop = lock.withLock({ self.drop }), drop(entry, destination) else { return false }
-        Task { await self.reload() }
+        let (custom, moves) = lock.withLock { (drop, self.moves) }
+        if let custom {
+            guard custom(entry, destination) else { return false }
+            Task { await self.reload() }
+            return true
+        }
+        guard moves else { return false }
+        Task {
+            do {
+                try await self.workspace.move(folderID: entry.folderID, path: entry.path, toDirectory: destination.path)
+                self.expand(destination)
+            } catch {
+                self.onError?(Self.describe(error))
+            }
+            await self.reload()
+        }
         return true
+    }
+
+    private static func describe(_ error: Error) -> String {
+        switch error as? WorkspaceError {
+        case .alreadyExists?: "Something with that name is already there"
+        case .readOnly?: "That folder is read-only"
+        case .invalidPath?: "A folder cannot move into itself"
+        default: (error as NSError).localizedDescription
+        }
     }
 
     func setDropTarget(_ key: NodeKey, _ on: Bool) {

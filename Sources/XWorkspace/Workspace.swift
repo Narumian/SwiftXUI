@@ -70,6 +70,8 @@ public struct LocalWorkspaceAccessProvider: WorkspaceAccessProvider {
 
 public enum WorkspaceError: Error, Equatable, Sendable {
     case folderNotFound, invalidFolder, invalidPath, readOnly, unsupportedItem
+    /// Something with that name is already there.
+    case alreadyExists
 }
 
 public struct WorkspaceFolder: Codable, Equatable, Identifiable, Sendable {
@@ -218,6 +220,25 @@ public actor Workspace {
                 }
                 try data.write(to: url, options: .atomic)
             }
+        }
+    }
+
+    /// Moves a file or directory into another directory of the same folder, keeping its name. Returns the new path.
+    /// Refuses to overwrite, and to move a directory into itself.
+    @discardableResult
+    public func move(folderID: UUID, path: String, toDirectory directory: String) throws -> String {
+        try withRoot(folderID, writing: true) { root in
+            if directory == path || directory.hasPrefix(path + "/") { throw WorkspaceError.invalidPath }
+            let source = try Self.resolve(path, root: root)
+            let destination = try Self.resolve(directory, root: root, allowRoot: true)
+            let name = source.lastPathComponent
+            let target = destination.appendingPathComponent(name)
+            guard try destination.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw WorkspaceError.unsupportedItem }
+            guard !FileManager.default.fileExists(atPath: target.path) else { throw WorkspaceError.alreadyExists }
+            try coordinator.coordinate(at: source, writing: true) { source in
+                try FileManager.default.moveItem(at: source, to: target)
+            }
+            return directory.isEmpty ? name : directory + "/" + name
         }
     }
 

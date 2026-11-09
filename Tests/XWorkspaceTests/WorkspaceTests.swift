@@ -96,4 +96,33 @@ final class WorkspaceTests: XCTestCase {
         lease.release()
         lease.release()
     }
+
+    func testMoveKeepsTheNameAndRefusesToOverwriteOrEnterItself() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        for dir in ["a/inner", "b"] { try FileManager.default.createDirectory(at: base.appendingPathComponent(dir), withIntermediateDirectories: true) }
+        try Data([1]).write(to: base.appendingPathComponent("a/file.txt"))
+        try Data([2]).write(to: base.appendingPathComponent("b/file.txt"))
+        let workspace = try Workspace(access: LocalWorkspaceAccessProvider())
+        let folder = try await workspace.register(directory: base)
+        let readOnly = try await workspace.register(directory: base, readOnly: true)
+
+        // Into a sibling directory, and out to the root.
+        let moved = try await workspace.move(folderID: folder.id, path: "a/inner", toDirectory: "b")
+        XCTAssertEqual(moved, "b/inner")
+        let back = try await workspace.move(folderID: folder.id, path: "b/inner", toDirectory: "")
+        XCTAssertEqual(back, "inner")
+
+        // Same name already there.
+        do { try await workspace.move(folderID: folder.id, path: "a/file.txt", toDirectory: "b"); XCTFail("expected a clash") }
+        catch { XCTAssertEqual(error as? WorkspaceError, .alreadyExists) }
+        // A directory cannot go into itself or its own subtree.
+        do { try await workspace.move(folderID: folder.id, path: "a", toDirectory: "a/inner"); XCTFail("expected a refusal") }
+        catch { XCTAssertEqual(error as? WorkspaceError, .invalidPath) }
+        // Nor into a file, nor out of a read-only folder.
+        do { try await workspace.move(folderID: folder.id, path: "inner", toDirectory: "b/file.txt"); XCTFail("expected a refusal") }
+        catch { XCTAssertEqual(error as? WorkspaceError, .unsupportedItem) }
+        do { try await workspace.move(folderID: readOnly.id, path: "inner", toDirectory: "b"); XCTFail("expected read-only") }
+        catch { XCTAssertEqual(error as? WorkspaceError, .readOnly) }
+    }
 }

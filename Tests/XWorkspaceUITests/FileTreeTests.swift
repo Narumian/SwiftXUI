@@ -147,3 +147,35 @@ func aDropCallsBackAndReloads() async throws {
     model.onDrop = { _, _ in false }
     #expect(!model.drop(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
 }
+
+@Test
+func aDropCanMoveTheFileOnDisk() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    model.movesOnDrop = true
+    await model.reload()
+    let entry = model.snapshot().rows[3].item.entry // readme.txt
+    #expect(model.accepts(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
+    #expect(model.drop(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
+    await settle(model, rows: 5)
+    #expect(names(model) == ["Media", "  Footage", "    loop.mov", "    readme.txt", "  Shaders"])
+    #expect(FileManager.default.fileExists(atPath: fixture.base.appendingPathComponent("Footage/readme.txt").path))
+}
+
+@Test
+func aFailedMoveIsReportedAndLeavesTheTreeAlone() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    try Data([1]).write(to: fixture.base.appendingPathComponent("Footage/readme.txt"))
+    let errors = Picks()
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    model.movesOnDrop = true
+    model.onError = { errors.add($0) }
+    await model.reload()
+    let entry = model.snapshot().rows[3].item.entry // readme.txt
+    #expect(model.drop(entry, on: .init(folderID: fixture.folderID, path: "Footage")))
+    for _ in 0..<200 where errors.all.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+    #expect(errors.all == ["Something with that name is already there"])
+    #expect(FileManager.default.fileExists(atPath: fixture.base.appendingPathComponent("readme.txt").path))
+}

@@ -86,6 +86,9 @@ public final class DragDropStore: @unchecked Sendable {
     private(set) var phase: Phase = .idle
     private(set) var menu: MenuState?
     private(set) var clock = 0.0
+    private var frameDelta = 0.0
+    private var edgeSince: Double?
+    private var autoScrolled = false
     private var layout: RenderResult?
 
     static let lift = Animation.spring(response: 0.3, dampingFraction: 0.75)
@@ -117,11 +120,16 @@ public final class DragDropStore: @unchecked Sendable {
     // MARK: Frame
 
     /// Called by the host before it builds a frame.
-    public func beginFrame(clock: Double) { self.clock = clock }
+    public func beginFrame(clock: Double) {
+        frameDelta = clock > self.clock ? min(0.05, clock - self.clock) : 0
+        self.clock = clock
+    }
 
     /// Called by the host with the frame it just built: time-driven steps happen here.
     public func endFrame(_ layout: RenderResult) {
         self.layout = layout
+        if !autoScrolled { edgeSince = nil }
+        autoScrolled = false
         switch phase {
         case .pressing(let p):
             if let source = p.source {
@@ -203,6 +211,31 @@ public final class DragDropStore: @unchecked Sendable {
             return false
         }
     }
+
+    /// How far a scrolling view whose viewport is `rect` should scroll this frame, in canvas units (negative toward the
+    /// start), because a lifted view is held near its edge. Speed grows with how deep into the edge zone the pointer
+    /// is and eases in over the first third of a second, so passing over an edge does not fling the list.
+    public func autoScrollDistance(in rect: Rect, axis: Axis) -> Double {
+        guard case .dragging(let s) = phase, frameDelta > 0 else { return 0 }
+        let main = axis == .vertical ? s.position.y : s.position.x
+        let cross = axis == .vertical ? s.position.x : s.position.y
+        let start = axis == .vertical ? rect.y : rect.x
+        let length = axis == .vertical ? rect.height : rect.width
+        let crossStart = axis == .vertical ? rect.x : rect.y
+        let crossLength = axis == .vertical ? rect.width : rect.height
+        guard cross >= crossStart, cross <= crossStart + crossLength, main >= start, main <= start + length else { return 0 }
+        let zone = max(24, min(80, length * 0.2))
+        let depth: Double
+        if main < start + zone { depth = -(start + zone - main) / zone }
+        else if main > start + length - zone { depth = (main - (start + length - zone)) / zone }
+        else { return 0 }
+        autoScrolled = true
+        if edgeSince == nil { edgeSince = clock }
+        let ramp = min(1, (clock - (edgeSince ?? clock)) / 0.35)
+        return Self.autoScrollSpeed * depth * ramp * frameDelta
+    }
+
+    static let autoScrollSpeed = 1100.0
 
     /// A secondary click (or a long press the shell reports): opens the context menu under `point`.
     @discardableResult
