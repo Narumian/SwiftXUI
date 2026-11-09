@@ -44,35 +44,14 @@ public struct LaserScannerSettings: Codable, Equatable, Sendable {
         minimumStep = try c.decodeIfPresent(Double.self, forKey: .minimumStep) ?? d.minimumStep
     }
 
-    /// The whole chain before the shared buffer: shapes in, scanner samples out.
-    /// Padding, projection (with the cut and screen handling of the settings), corner
-    /// dwell and sampling, in that order. The settings are read again for every
-    /// chunk, so changing `live` changes what is made from the next chunk on, while
-    /// the chain plays. The output's own safety masks are not here: they apply
-    /// after the buffer, per output.
-    public static func stream<Shapes: LaserStream>(from shapes: Shapes, projection template: LaserProjection,
-                                                   live: LaserLive<LaserScannerSettings>, rate: UInt32 = 30000) -> some LaserOutputStream
-    where Shapes.Element == LaserVertex {
-        let shapeFormat = LaserStreamFormat(domain: .shapes), scanner = LaserStreamFormat(domain: .scanner, rate: rate)
-        let initial = live.value
-        let padding = LaserTuned(LaserDwellBlank(dwell: initial.paddingDwell, blank: initial.paddingBlank), live: live) { stage, s in
-            stage.dwell = max(0, s.paddingDwell); stage.blank = max(0, s.paddingBlank)
-        }
-        let projecting = LaserTuned(LaserProjector(template), live: live) { stage, s in
-            var projection = template
-            projection.dwell = max(0, s.paddingDwell); projection.blank = max(0, s.paddingBlank); projection.screen = s.screen
-            if stage.settings != projection { stage.settings = projection }
-        }
-        let cornering = LaserTuned(LaserCornerDwell(maximum: initial.cornerDwell), live: live) { stage, s in
-            stage.maximum = max(0, s.cornerDwell); stage.thresholdDegrees = min(180, max(0, s.cornerThresholdDegrees))
-        }
-        let sampling = LaserTuned(LaserSampler(maximumStep: initial.maximumStep), live: live) { stage, s in
-            stage.maximumStep = max(1e-9, s.maximumStep); stage.minimumStep = max(0, s.minimumStep)
-        }
-        let padded = LaserStagedStream(shapes, stage: padding, format: shapeFormat)
-        let projected = LaserStagedStream(padded, stage: projecting, format: scanner)
-        let cornered = LaserStagedStream(projected, stage: cornering, format: scanner)
-        return LaserStagedStream(cornered, stage: sampling, format: scanner)
+    /// The whole chain before the shared buffer: shapes in, scanner samples out. See
+    /// `LaserScannerChain`. The settings are read again for every frame, so changing
+    /// `live` changes what is made from the next frame on, while the chain plays. The
+    /// output's own safety masks are not here: they apply after the buffer, per output.
+    public static func stream<Shapes: Laser3DStream>(from shapes: Shapes, projection template: LaserProjection,
+                                                   live: LaserLive<LaserScannerSettings>,
+                                                   mastering: LaserLive<LaserMastering> = LaserLive(LaserMastering()), rate: UInt32 = 30000) -> LaserScannerChain<Shapes> {
+        LaserScannerChain(shapes, projection: template, live: live, mastering: mastering, rate: rate)
     }
 }
 
@@ -87,22 +66,11 @@ public final class LaserLive<Value: Sendable>: @unchecked Sendable {
     }
 }
 
-/// A stage whose settings are brought up to date from `live` before every chunk.
-public struct LaserTuned<Stage: LaserStage>: LaserStage {
-    public typealias Input = Stage.Input
-    public typealias Output = Stage.Output
-    public var stage: Stage
-    private let live: LaserLive<LaserScannerSettings>
-    private let tune: @Sendable (inout Stage, LaserScannerSettings) -> Void
-
-    public init(_ stage: Stage, live: LaserLive<LaserScannerSettings>, tune: @escaping @Sendable (inout Stage, LaserScannerSettings) -> Void) {
-        self.stage = stage; self.live = live; self.tune = tune
-    }
-
-    public mutating func process(_ chunk: LaserChunk<Stage.Input>) -> LaserChunk<Stage.Output> {
-        tune(&stage, live.value)
-        return stage.process(chunk)
-    }
+/// A box of shapes is a front-stage source: each read answers with what the box holds now. The
+/// producer writes the next frame into it from its own clock, so the pump that reads it never
+/// waits for the producer, and a frame that is not replaced is read again.
+extension LaserLive: Laser3DStream where Value == [Laser3DShape] {
+    public func read() -> [Laser3DShape] { value }
 }
 
 /// One adjustable number of a `LaserScannerSettings`, with what a control needs to

@@ -7,7 +7,7 @@ import Foundation
 ///
 /// This is where a stream's "never waits" rule meets the pump's bounded ring: the
 /// stream is read on the source's own task, at the pace the ring accepts samples.
-public struct LaserStreamChunks<Stream: LaserOutputStream>: AsyncSequence, Sendable {
+public struct LaserStreamChunks<Stream: Laser2DStream>: AsyncSequence, Sendable {
     public typealias Element = [LaserPoint]
 
     private let stream: Stream
@@ -30,7 +30,7 @@ public struct LaserStreamChunks<Stream: LaserOutputStream>: AsyncSequence, Senda
         public mutating func next() async -> [LaserPoint]? {
             while !Task.isCancelled {
                 let chunk = reader.take(chunkSize)
-                if !chunk.isEmpty { return chunk.elements }
+                if !chunk.isEmpty { return chunk }
                 try? await Task.sleep(nanoseconds: idleNanoseconds)
             }
             return nil
@@ -39,10 +39,10 @@ public struct LaserStreamChunks<Stream: LaserOutputStream>: AsyncSequence, Senda
 }
 
 extension LaserOutputStreams {
-    /// Plays a scanner stream on every connected output at the rate the stream
-    /// declares, replacing any pattern or earlier source.
-    public func play<Stream: LaserOutputStream>(stream: Stream, chunkSize: Int = 512) throws {
-        guard let rate = stream.format.rate, rate > 0 else { throw LaserOutputError.unsupportedPointRate }
-        try play(source: LaserStreamChunks(stream, chunkSize: chunkSize), sampleRate: rate)
+    /// Plays a scanner stream in a zone at the rate the stream declares, replacing any
+    /// pattern on the zone's outputs and the zone's earlier source.
+    public func play<Stream: Laser2DStream>(stream: Stream, chunkSize: Int = 512, zone: UUID = LaserOutputStreams.defaultZone) throws {
+        guard let rate = stream.rate, rate > 0 else { throw LaserOutputError.unsupportedPointRate }
+        try play(source: LaserStreamChunks(stream, chunkSize: chunkSize), sampleRate: rate, zone: zone)
     }
 }

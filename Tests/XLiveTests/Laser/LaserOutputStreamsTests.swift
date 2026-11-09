@@ -249,6 +249,127 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
     }
 }
 
+final class LaserZoneTests: XCTestCase, @unchecked Sendable {
+    private func chunks(_ level: Float) -> AsyncStream<[LaserPoint]> {
+        let lit = try! LaserPoint(xy: .zero, rgb: SIMD3<Float>(repeating: level))
+        let dark = try! LaserPoint(xy: .zero, rgb: .zero, isBlanked: true)
+        return AsyncStream<[LaserPoint]> { continuation in
+            Task { while !Task.isCancelled { continuation.yield(Array(repeating: lit, count: 139) + [dark]); try? await Task.sleep(nanoseconds: 2_000_000) }; continuation.finish() }
+        }
+    }
+    private func waitForLight(_ recorder: Recorder) async throws {
+        for _ in 0..<300 {
+            if await recorder.glowWrites > 0 { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    func testEachZonePlaysItsOwnSourceOnItsOwnOutputsOnly() async throws {
+        let first = Recorder(), second = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let zoneA = UUID(), zoneB = UUID()
+        let a = UUID(), b = UUID()
+        try await streams.connect(a, zone: zoneA) { StubSession(first) }
+        try await streams.connect(b, zone: zoneB) { StubSession(second) }
+        try await streams.play(source: chunks(0.1), sampleRate: 30000, zone: zoneA)
+        try await waitForLight(first)
+        try await Task.sleep(nanoseconds: 60_000_000)
+        let lightA = await first.glowWrites, lightB = await second.glowWrites
+        let activeA = await streams.sourceActive(a), activeB = await streams.sourceActive(b)
+        XCTAssertGreaterThan(lightA, 0)
+        XCTAssertEqual(lightB, 0, "the other zone is not playing")
+        XCTAssertTrue(activeA)
+        XCTAssertFalse(activeB)
+        try await streams.play(source: chunks(0.2), sampleRate: 30000, zone: zoneB)
+        try await waitForLight(second)
+        let afterB = await second.glowWrites, stillA = await streams.sourceActive(a)
+        XCTAssertGreaterThan(afterB, 0)
+        XCTAssertTrue(stillA, "playing a zone does not touch another")
+        await streams.stopSource(zone: zoneA)
+        let stoppedA = await streams.sourceActive(a), playingB = await streams.sourceActive(b)
+        XCTAssertFalse(stoppedA)
+        XCTAssertTrue(playingB)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testAnAssignmentMadeBeforeConnectingIsKeptForTheConnection() async throws {
+        let recorder = Recorder()
+        let connections = LaserOutputConnections(blockSize: 140, pauseMilliseconds: 1) { _ in StubSession(recorder) }
+        let zone = UUID()
+        let output = LaserOutput(name: "A")
+        await connections.assign(output.id, to: zone)
+        try await connections.connect(output)
+        let streamZone = await connections.zoneOf(output.id)
+        XCTAssertEqual(streamZone, zone)
+        await connections.disconnectAll()
+    }
+
+    func testABoxOfShapesIsASourceThatAnswersWithWhatItHoldsNow() {
+        let box = LaserLive<[Laser3DShape]>([])
+        var stream = box
+        XCTAssertTrue(stream.read().isEmpty)
+        box.value = [.blackCenter]
+        XCTAssertEqual(stream.read().count, 1)
+        XCTAssertEqual(stream.read().count, 1, "an unchanged box is read again")
+    }
+
+    func testAnOutputAssignedToAPlayingZoneJoinsItAndLeavesItsOldOne() async throws {
+        let first = Recorder(), moved = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let zoneA = UUID(), zoneB = UUID()
+        let a = UUID(), b = UUID()
+        try await streams.connect(a, zone: zoneA) { StubSession(first) }
+        try await streams.connect(b, zone: zoneA) { StubSession(moved) }
+        try await streams.play(source: chunks(0.1), sampleRate: 30000, zone: zoneA)
+        try await streams.play(source: chunks(0.2), sampleRate: 30000, zone: zoneB)
+        try await waitForLight(moved)
+        await streams.assign(b, to: zoneB)
+        let zone = await streams.zone(of: b), report = await streams.diagnosticsReport()
+        XCTAssertEqual(zone, zoneB)
+        XCTAssertTrue(report.contains("zone=\(zoneB)"), report)
+        let before = await moved.glowWrites
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let after = await moved.glowWrites
+        XCTAssertGreaterThan(after, before, "it keeps playing, now from zone B")
+        // Moving it to a zone that is not playing darkens it.
+        await streams.assign(b, to: UUID())
+        let active = await streams.sourceActive(b)
+        XCTAssertFalse(active)
+        await streams.stopSource()
+        try await streams.disconnect(a); try await streams.disconnect(b)
+    }
+
+    func testAnOutputWithoutAZoneIsInTheDefaultZone() async throws {
+        let recorder = Recorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let id = UUID()
+        try await streams.connect(id) { StubSession(recorder) }
+        let zone = await streams.zone(of: id)
+        XCTAssertEqual(zone, LaserOutputStreams.defaultZone)
+        try await streams.play(source: chunks(0.1), sampleRate: 30000)
+        try await waitForLight(recorder)
+        let active = await streams.sourceActive(id)
+        XCTAssertTrue(active)
+        await streams.stopSource()
+        try await streams.disconnect(id)
+    }
+
+    func testAZoneFailureIsReportedPerZone() async throws {
+        struct Boom: Error {}
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
+        let zoneA = UUID(), zoneB = UUID()
+        let failing = AsyncThrowingStream<[LaserPoint], Error> { $0.finish(throwing: Boom()) }
+        try await streams.play(source: failing, sampleRate: 30000, zone: zoneA)
+        try await streams.play(source: chunks(0.1), sampleRate: 30000, zone: zoneB)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let failureA = await streams.sourceFailure(zone: zoneA), failureB = await streams.sourceFailure(zone: zoneB)
+        XCTAssertNotNil(failureA)
+        XCTAssertNil(failureB)
+        await streams.stopSource()
+    }
+}
+
 final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
     private func projection() -> LaserProjection {
         var camera = matrix_identity_double4x4
@@ -258,17 +379,14 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
                                dwell: 2, blank: 2)
     }
 
-    func testAStageChainPlaysOnAnOutputAndStopsCleanly() async throws {
+    func testAScannerChainPlaysOnAnOutputAndStopsCleanly() async throws {
         let recorder = Recorder()
         let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
         let id = UUID()
         try await streams.connect(id) { StubSession(recorder) }
-        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
-        looper.submit(LaserChunk(elements: [LaserVertex(x: 0.4, y: 0), LaserVertex(x: -0.4, y: 0)], shape: 1))
-        let padded = LaserStagedStream(looper, stage: LaserDwellBlank(dwell: 2, blank: 2), format: LaserStreamFormat(domain: .shapes))
-        let projected = LaserStagedStream(padded, stage: LaserProjector(projection()), format: LaserStreamFormat(domain: .scanner, rate: 30000))
-        let sampled = LaserStagedStream(projected, stage: LaserSampler(maximumStep: 0.05), format: projected.format)
-        try await streams.play(stream: sampled)
+        let looper = FixedFrame([Laser3DShape(id: 1, vertices: [LaserVertex(x: 0.4, y: 0), LaserVertex(x: -0.4, y: 0)])])
+        let chain = LaserScannerChain(looper, projection: projection(), live: LaserLive(LaserScannerSettings(maximumStep: 0.05)), rate: 30000)
+        try await streams.play(stream: chain)
         for _ in 0..<200 {
             if await recorder.litWrites > 0 { break }
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -287,13 +405,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
         let streams = LaserOutputStreams()
         let id = UUID()
         try await streams.connect(id) { StubSession(Recorder()) }
-        let looper = LaserFrameLooper<LaserPoint>(format: LaserStreamFormat(domain: .scanner))
-        struct Output: LaserOutputStream {
-            let looper: LaserFrameLooper<LaserPoint>
-            var format: LaserStreamFormat { looper.format }
-            mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
-        }
-        do { try await streams.play(stream: Output(looper: looper)); XCTFail("expected unsupportedPointRate") } catch {
+        do { try await streams.play(stream: IdleOutput(rate: nil)); XCTFail("expected unsupportedPointRate") } catch {
             XCTAssertEqual(error as? LaserOutputError, .unsupportedPointRate)
         }
         try await streams.disconnect(id)
@@ -304,13 +416,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
         let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
         let id = UUID()
         try await streams.connect(id) { StubSession(recorder) }
-        let looper = LaserFrameLooper<LaserPoint>(format: LaserStreamFormat(domain: .scanner, rate: 30000))   // nothing submitted
-        struct Output: LaserOutputStream {
-            let looper: LaserFrameLooper<LaserPoint>
-            var format: LaserStreamFormat { looper.format }
-            mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> { looper.read(wanting: count) }
-        }
-        try await streams.play(stream: Output(looper: looper))
+        try await streams.play(stream: IdleOutput(rate: 30000))   // nothing to play
         try await Task.sleep(nanoseconds: 80_000_000)
         let lit = await recorder.litWrites, black = await recorder.blackWrites, failure = await streams.streamFailure(id)
         XCTAssertEqual(lit, 0)
@@ -318,4 +424,10 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
         XCTAssertNil(failure)
         try await streams.disconnect(id)
     }
+}
+
+/// A scanner stream with nothing to play.
+private struct IdleOutput: Laser2DStream {
+    var rate: UInt32?
+    mutating func read() -> [Laser2DShape] { [] }
 }

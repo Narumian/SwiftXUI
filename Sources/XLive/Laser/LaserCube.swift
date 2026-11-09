@@ -72,15 +72,21 @@ public enum LaserCubeError: Error, Equatable, Sendable {
     case configurationNotApplied, outputNotDisabled, underrun, deviceFault
 }
 
-/// What the driver does when the device's sample buffer runs dry.
-public enum LaserCubeUnderrunPolicy: Sendable {
-    /// Report the underrun as a failure, switch the output off and end the session.
-    case fail
-    /// Count the underrun and keep streaming. The device resumes as soon as data
-    /// arrives again, so a brief network stall becomes a momentary gap in the
-    /// output instead of a dead session. Hosts must end packets on a blanked
-    /// sample so a gap never leaves the beam lit.
-    case tolerate
+extension LaserCubeError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .timeout: "LaserCube communication timed out."
+        case .malformedResponse: "LaserCube returned an invalid response."
+        case .operationInProgress: "LaserCube is busy."
+        case .sessionFailed: "The LaserCube session failed."
+        case .unsupportedProtocol(let value): "Unsupported LaserCube protocol: \(value)."
+        case .commandRejected(let command, let status): "LaserCube rejected command \(command) (status \(status))."
+        case .configurationNotApplied: "LaserCube did not apply the output configuration."
+        case .outputNotDisabled: "LaserCube did not confirm that output was disabled."
+        case .underrun: "LaserCube's sample buffer ran empty; output was stopped."
+        case .deviceFault: "LaserCube reported a device fault."
+        }
+    }
 }
 
 /// Driver for the Wi-Fi/Ethernet LaserCube protocol, not the USB LaserCube.
@@ -91,18 +97,17 @@ public struct LaserCube: LaserOutputDevice {
     public let id: String
     public let name: String
     private let makeTransport: @Sendable () async throws -> any LaserCubeTransport
-    private let underrunPolicy: LaserCubeUnderrunPolicy
 
-    public init(id: String, name: String = "LaserCube", underrunPolicy: LaserCubeUnderrunPolicy = .fail,
+    public init(id: String, name: String = "LaserCube",
                 makeTransport: @escaping @Sendable () async throws -> any LaserCubeTransport) {
-        self.id = id; self.name = name; self.underrunPolicy = underrunPolicy; self.makeTransport = makeTransport
+        self.id = id; self.name = name; self.makeTransport = makeTransport
     }
 
     public func connect() async throws -> any LaserOutputSession {
         let transport = try await makeTransport()
         do {
             let info = try LaserCubeWire.info(await transport.exchange(Data([0x77]), on: .command, timeout: .seconds(5)))
-            let session = LaserCubeSession(transport: transport, info: info, underrunPolicy: underrunPolicy)
+            let session = LaserCubeSession(transport: transport, info: info)
             try await session.prepare()
             return session
         } catch {
@@ -134,12 +139,10 @@ private actor LaserCubeSession: LaserOutputSession {
     private var sequence: UInt8 = 0
     private var frame: UInt8 = 0
     private let clock = ContinuousClock()
-    private let underrunPolicy: LaserCubeUnderrunPolicy
     private var emptyReported = false
 
-    init(transport: any LaserCubeTransport, info: LaserCubeInfo, underrunPolicy: LaserCubeUnderrunPolicy) {
+    init(transport: any LaserCubeTransport, info: LaserCubeInfo) {
         self.transport = transport; self.initialInfo = info; self.free = info.bufferFree
-        self.underrunPolicy = underrunPolicy
         capabilities = LaserOutputCapabilities(maximumPointRate: info.maximumPointRate)
         (states, events) = AsyncStream.makeStream()
     }
@@ -249,7 +252,7 @@ private actor LaserCubeSession: LaserOutputSession {
                     queued = initialInfo.bufferSize - free
                     LaserCubeTrace.note("wait-credit", since: began, "queued=\(queued)")
                     LaserCubeTrace.level(queued: queued)
-                    if playbackEnabled, queued == 0 { try underrun("in wait loop") }
+                    if playbackEnabled, queued == 0 { underrun("in wait loop") }
                     if clock.now >= deadline { throw LaserCubeError.timeout }
                 } while queued >= targetFill
             }
@@ -285,7 +288,7 @@ private actor LaserCubeSession: LaserOutputSession {
             free = try LaserCubeWire.bufferFree(credit, capacity: initialInfo.bufferSize)
             LaserCubeTrace.note("credit", since: creditBegan, "queued=\(initialInfo.bufferSize - free)")
             LaserCubeTrace.level(queued: initialInfo.bufferSize - free)
-            if free == initialInfo.bufferSize { try underrun("after send (free=\(free))") } else { emptyReported = false }
+            if free == initialInfo.bufferSize { underrun("after send (free=\(free))") } else { emptyReported = false }
             offset += count
             // The wire frame counter follows a network burst, as in the vendor
             // SDK. A large write must not reuse a sequence/frame pair when its
@@ -360,7 +363,7 @@ private actor LaserCubeSession: LaserOutputSession {
                     guard let self else { return }
                     try await self.inspectPlayback(token: token)
                 } catch is CancellationError { return }
-                catch LaserCubeError.timeout where self?.underrunPolicy == .tolerate {
+                catch LaserCubeError.timeout {
                     LaserCubeTrace.event("monitor timeout tolerated")
                     LaserCubeTrace.note("timeout-tolerated", since: LaserCubeTrace.now())
                     continue
@@ -380,19 +383,19 @@ private actor LaserCubeSession: LaserOutputSession {
         try check(token)
         LaserCubeTrace.note("monitor-info", since: began, "queued=\(info.bufferSize - info.bufferFree)")
         guard info.outputEnabled, info.pointRate == rate else { throw LaserCubeError.configurationNotApplied }
-        if info.bufferFree == info.bufferSize { try underrun("seen by monitor") } else { emptyReported = false }
+        if info.bufferFree == info.bufferSize { underrun("seen by monitor") } else { emptyReported = false }
         // Do not overwrite the data-channel credit with an uncorrelated command
         // snapshot while a packet is in flight.
     }
 
-    /// Under `.tolerate` a UDP exchange that gets no reply in time is retried a few
+    /// A UDP exchange that gets no reply in time is retried a few
     /// times instead of ending the session: the link does stall for around a second
     /// now and then, and the device simply resumes once data arrives again.
     private func resilient<T>(_ site: String, token: UInt64, _ body: () async throws -> T) async throws -> T {
         var attempts = 0
         while true {
             do { return try await body() }
-            catch LaserCubeError.timeout where underrunPolicy == .tolerate && attempts < 5 {
+            catch LaserCubeError.timeout where attempts < 5 {
                 attempts += 1
                 LaserCubeTrace.event("timeout tolerated at \(site) (attempt \(attempts))")
                 LaserCubeTrace.note("timeout-tolerated", since: LaserCubeTrace.now())
@@ -401,11 +404,11 @@ private actor LaserCubeSession: LaserOutputSession {
         }
     }
 
-    /// A dry device buffer. Fatal under `.fail`; under `.tolerate` it is counted
-    /// (once per episode) and streaming continues.
-    private func underrun(_ place: String) throws {
+    /// A dry device buffer. The link stalls now and then and the device resumes as
+    /// soon as data arrives, so an underrun is counted (once per episode) and the
+    /// stream goes on.
+    private func underrun(_ place: String) {
         LaserCubeTrace.event("UNDERRUN \(place)")
-        if underrunPolicy == .fail { throw LaserCubeError.underrun }
         if !emptyReported { emptyReported = true; LaserCubeTrace.note("underrun-tolerated", since: LaserCubeTrace.now()) }
     }
 

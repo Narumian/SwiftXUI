@@ -3,121 +3,108 @@ import simd
 import XCTest
 @testable import XLive
 
-private func vertex(_ x: Double, mode: LaserPointMode = .normal) -> LaserVertex {
-    LaserVertex(x: x, y: 0, rgba: mode == .blank ? .zero : .one, mode: mode)
-}
 private func point(_ x: Float, _ mode: LaserPointMode = .normal, lit: Float = 1) -> LaserPoint {
     try! LaserPoint(xy: SIMD2(x, 0), rgb: SIMD3(repeating: mode == .blank ? 0 : lit), mode: mode)
 }
+private func shape(_ id: UInt32, _ points: [LaserPoint]) -> [Laser2DShape] { [Laser2DShape(id: LaserShapeID(id), points: points)] }
+private func flat(_ shapes: [Laser2DShape]) -> [LaserPoint] { shapes.flatMap(\.points) }
 
 final class LaserDwellBlankTests: XCTestCase {
     func testAShapeGetsBlankAndDwellBeforeAndDwellAndOneBlankAfter() {
         var stage = LaserDwellBlank(dwell: 2, blank: 3)
-        let out = stage.process(LaserChunk(elements: [vertex(0.1), vertex(0.2)], shape: 4))
-        XCTAssertEqual(out.elements.map(\.mode), [.blank, .blank, .blank, .dwell, .dwell, .normal, .normal, .dwell, .dwell, .blank])
-        XCTAssertEqual(out.elements.map(\.position.x), [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2])
-        XCTAssertEqual(out.runs, [LaserRun(id: 4, range: 0..<10)])
+        let out = stage.process(shape(4, [point(0.1), point(0.2)]))
+        XCTAssertEqual(flat(out).map(\.mode), [.blank, .blank, .blank, .dwell, .dwell, .normal, .normal, .dwell, .dwell, .blank])
+        XCTAssertEqual(flat(out).map(\.xy.x), [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2])
+        XCTAssertEqual(out.map(\.id), [4])
     }
 
-    func testEachRunIsPaddedOnItsOwnAndFrameEndsFollow() {
+    func testEachShapeIsPaddedOnItsOwnAndKeepsItsIdentity() {
         var stage = LaserDwellBlank(dwell: 1, blank: 1)
-        let chunk = LaserChunk(elements: [vertex(0.1), vertex(0.2), vertex(0.3)],
-                               runs: [LaserRun(id: 1, range: 0..<2), LaserRun(id: 2, range: 2..<3)], frameEnds: [3])
-        let out = stage.process(chunk)
+        let out = stage.process(shape(1, [point(0.1), point(0.2)]) + shape(2, [point(0.3)]))
         // shape 1: blank dwell a b dwell blank = 6; shape 2: blank dwell c dwell blank = 5
-        XCTAssertEqual(out.count, 11)
-        XCTAssertEqual(out.runs, [LaserRun(id: 1, range: 0..<6), LaserRun(id: 2, range: 6..<11)])
-        XCTAssertEqual(out.frameEnds, [11])
+        XCTAssertEqual(out.map(\.id), [1, 2])
+        XCTAssertEqual(out.map(\.points.count), [6, 5])
     }
 
     func testAnEndThatIsNotNormalGetsNoPadding() {
         var stage = LaserDwellBlank(dwell: 2, blank: 2)
-        let out = stage.process(LaserChunk(elements: [vertex(0.1, mode: .blank), vertex(0.2), vertex(0.3, mode: .dwell)], shape: 1))
-        XCTAssertEqual(out.elements.map(\.mode), [.blank, .normal, .dwell])
+        let out = stage.process(shape(1, [point(0.1, .blank), point(0.2), point(0.3, .dwell)]))
+        XCTAssertEqual(flat(out).map(\.mode), [.blank, .normal, .dwell])
     }
 
-    func testNoPaddingConfiguredLeavesTheChunkAlone() {
-        var stage = LaserDwellBlank(dwell: 0, blank: 0)
-        let chunk = LaserChunk(elements: [vertex(0.1)], shape: 1)
-        XCTAssertEqual(stage.process(chunk).elements, chunk.elements)
-    }
-
-    func testAChunkWithoutRunsIsOneShape() {
+    func testEachEndIsJudgedByItself() {
         var stage = LaserDwellBlank(dwell: 1, blank: 1)
-        XCTAssertEqual(stage.process(LaserChunk(elements: [vertex(0.1), vertex(0.2)])).count, 6)
+        let out = stage.process(shape(1, [point(0.1), point(0.2, .blank)]))
+        XCTAssertEqual(flat(out).map(\.mode), [.blank, .dwell, .normal, .blank])
+    }
+
+    func testNoPaddingConfiguredLeavesTheShapesAlone() {
+        var stage = LaserDwellBlank(dwell: 0, blank: 0)
+        let frame = shape(1, [point(0.1)])
+        XCTAssertEqual(stage.process(frame), frame)
     }
 }
 
-final class LaserSamplerTests: XCTestCase {
+final class LaserResamplerTests: XCTestCase {
+    /// A resampler that has already left the centre, so a test sees only the move it is about.
+    private func settled(_ resampler: inout LaserResampler, at x: Float = -0.5) {
+        _ = resampler.process(shape(0, [point(x)]))
+    }
+
     func testALongMoveBetweenDrawnSamplesIsFilledInAndColourIsMixed() {
-        var sampler = LaserSampler(maximumStep: 0.25)
-        let out = sampler.process(LaserChunk(elements: [point(-0.5, lit: 0), point(0.5, lit: 1)], shape: 1))
-        // the first sample passes; length 1 / 0.25 = 4 samples are inserted, evenly, then the end
-        XCTAssertEqual(out.elements.map(\.xy.x).map { ($0 * 10).rounded() / 10 }, [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5])
-        XCTAssertEqual(out.elements[2].rgb.x, 0.4, accuracy: 1e-6)
-        XCTAssertTrue(out.elements.dropFirst().dropLast().allSatisfy { $0.mode == .normal })
+        var resampler = LaserResampler(maximumStep: 0.25)
+        settled(&resampler)
+        let out = flat(resampler.process(shape(1, [point(-0.5, lit: 0.0), point(0.5, lit: 1)])))
+        // length 1 / 0.25 = 4 samples are inserted, evenly, then the end; the first sample is
+        // a move of zero length, which comes out as the sample twice (Legacy's INTER + [dst])
+        XCTAssertEqual(out.count, 2 + 4 + 1)
+        XCTAssertEqual(out.suffix(5).map(\.xy.x).map { ($0 * 10).rounded() / 10 }, [-0.3, -0.1, 0.1, 0.3, 0.5])
+        XCTAssertEqual(out[out.count - 4].rgb.x, 0.4, accuracy: 1e-6)
+        XCTAssertTrue(out.suffix(5).dropLast().allSatisfy { $0.mode == .normal })
+    }
+
+    func testTheFirstSampleStartsFromTheDarkCentre() {
+        var resampler = LaserResampler(maximumStep: 0.25)
+        let out = flat(resampler.process(shape(1, [point(0.5, lit: 1)])))
+        // 0.5 from the centre: 2 samples inserted at 1/3 and 2/3 of the way, colour rising from black
+        XCTAssertEqual(out.count, 2 + 1)
+        XCTAssertEqual(out[0].xy.x, 0.5 / 3, accuracy: 1e-6)
+        XCTAssertEqual(out[0].rgb.x, 1.0 / 3, accuracy: 1e-6)
     }
 
     func testCloseDrawnSamplesAreMerged() {
-        var sampler = LaserSampler(minimumStep: 0.1, maximumStep: 1)
-        let out = sampler.process(LaserChunk(elements: [point(0), point(0.02), point(0.05), point(0.2)], shape: 1))
-        XCTAssertEqual(out.elements.map(\.xy.x), [0, 0.2])    // 0.02 and 0.05 are within 0.1 of the kept 0
+        var resampler = LaserResampler(minimumStep: 0.1, maximumStep: 1)
+        settled(&resampler, at: 0)
+        let out = flat(resampler.process(shape(1, [point(0.02), point(0.05), point(0.2)])))
+        XCTAssertEqual(out.map(\.xy.x), [0.2, 0.2])    // 0.02 and 0.05 are within 0.1 of the kept 0; a short move is the sample twice
     }
 
     func testAMoveBetweenSamplesThatAreNotBothDrawnIsASingleJump() {
-        var sampler = LaserSampler(maximumStep: 0.1)
-        let out = sampler.process(LaserChunk(elements: [point(-0.8, .blank), point(0.8, .dwell), point(0.8, .blank)], shape: 1))
-        XCTAssertEqual(out.count, 3)
-    }
-
-    func testAMoveToABlankSampleIsFilledInDarkInsteadOfFadingOut() {
-        var sampler = LaserSampler(maximumStep: 0.5)
-        let out = sampler.process(LaserChunk(elements: [point(-0.5), point(0.5, .blank)], shape: 1))
-        XCTAssertEqual(out.count, 1 + 2 + 1)          // 2 inserted, then the blank end
-        XCTAssertTrue(out.elements.dropFirst().allSatisfy { $0.rgb == .zero && $0.mode == .blank })
-    }
-
-    func testAMoveFromABlankSampleIsDrawnInTheArrivingColourInsteadOfFadingIn() {
-        var sampler = LaserSampler(maximumStep: 0.5)
-        let out = sampler.process(LaserChunk(elements: [point(-0.5, .blank), point(0.5, lit: 0.8)], shape: 1))
-        XCTAssertEqual(out.count, 1 + 2 + 1)
-        XCTAssertTrue(out.elements.dropFirst().allSatisfy { $0.rgb.x == 0.8 && $0.mode == .normal })
+        var resampler = LaserResampler(maximumStep: 0.1)
+        _ = resampler.process(shape(0, [point(0, .blank)]))           // now the previous sample is not a drawn one
+        let out = flat(resampler.process(shape(1, [point(-0.8, .blank), point(0.8, .dwell), point(0.8, .blank)])))
+        XCTAssertEqual(out.count, 3)                                // each move is the destination alone
     }
 
     func testTheMaximumInsertedCapsTheFill() {
-        var sampler = LaserSampler(maximumStep: 0.001, maximumInserted: 5)
-        XCTAssertEqual(sampler.process(LaserChunk(elements: [point(-1), point(1)], shape: 1)).count, 1 + 5 + 1)
+        var resampler = LaserResampler(maximumStep: 0.001, maximumInserted: 5)
+        settled(&resampler, at: -1)
+        XCTAssertEqual(flat(resampler.process(shape(1, [point(1)]))).count, 5 + 1)
     }
 
-    func testStateAndRunsCarryAcrossChunksAndInsertionsStayInTheirRun() {
-        var sampler = LaserSampler(maximumStep: 0.5)
-        _ = sampler.process(LaserChunk(elements: [point(-0.5)], shape: 1))
-        let out = sampler.process(LaserChunk(elements: [point(0.5)], shape: 1))
-        XCTAssertEqual(out.count, 3)                                   // the move from the previous chunk is filled
-        XCTAssertEqual(out.runs, [LaserRun(id: 1, range: 0..<3)])
+    func testStateCarriesAcrossShapesSoTheMoveBetweenThemBelongsToTheNextOne() {
+        var resampler = LaserResampler(maximumStep: 0.5)
+        settled(&resampler)
+        let out = resampler.process(shape(1, [point(0.5)]) + shape(2, [point(-0.5)]))
+        XCTAssertEqual(out.map(\.id), [1, 2])
+        XCTAssertEqual(out.map(\.points.count), [2 + 1, 2 + 1])
     }
 
-    func testAStagedStreamRunsDwellBlankThenProjectionThenSamplingEndToEnd() {
-        var camera = matrix_identity_double4x4
-        camera.columns.3 = SIMD4(0, 0, 2, 1)
-        let projection = LaserProjection(camera: camera,
-                                         projection: LaserProjection.perspective(fovxDegrees: 90, near: 0.1, far: 50),
-                                         dwell: 2, blank: 2)
-        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
-        looper.submit(LaserChunk(elements: [vertex(0.4), vertex(-0.4)], shape: 5))
-        let padded = LaserStagedStream(looper, stage: LaserDwellBlank(dwell: 2, blank: 2), format: LaserStreamFormat(domain: .shapes))
-        let projected = LaserStagedStream(padded, stage: LaserProjector(projection), format: LaserStreamFormat(domain: .scanner, rate: 30000))
-        let sampled = LaserStagedStream(projected, stage: LaserSampler(maximumStep: 0.05), format: projected.format)
-        var reader = LaserReader(sampled)
-        let frame = reader.take(20)
-        XCTAssertGreaterThanOrEqual(frame.count, 20)
-        XCTAssertFalse(frame.frameEnds.isEmpty)
-        XCTAssertEqual(frame.runs.first?.id, 5)
-        // the drawn stretch between the two vertices (0.4 apart) was filled to <= 0.05 spacing
-        let first = frame.slice(0..<frame.frameEnds[0])
-        let drawn = first.elements.filter { $0.mode == .normal }
-        XCTAssertEqual(drawn.count, 10)
-        for (a, b) in zip(drawn, drawn.dropFirst()) { XCTAssertLessThanOrEqual(abs(b.xy.x - a.xy.x), 0.05 + 1e-5) }
+    func testResetGoesBackToTheDarkCentre() {
+        var resampler = LaserResampler(maximumStep: 0.25)
+        settled(&resampler, at: 0.9)
+        resampler.reset()
+        XCTAssertEqual(flat(resampler.process(shape(1, [point(0.5)]))).count, 2 + 1)
     }
 }
 
@@ -130,30 +117,28 @@ final class LaserMaskingTests: XCTestCase {
     }
 
     func testLightIsCutInsideAMaskAndUntouchedOutsideKeepingEverythingElse() {
-        var stage = LaserMasking(square(dimmer: 0))
-        let chunk = LaserChunk(elements: [point(0), point(0.9), point(0, .dwell)], runs: [LaserRun(id: 3, range: 0..<3)], frameEnds: [3])
-        let out = stage.process(chunk)
-        XCTAssertEqual(out.elements[0].rgb, .zero)                 // the centre is masked
-        XCTAssertEqual(out.elements[0].xy, chunk.elements[0].xy)
-        XCTAssertEqual(out.elements[1], chunk.elements[1])         // outside is the same sample
-        XCTAssertEqual(out.elements[2].rgb, .zero)
-        XCTAssertEqual(out.elements[2].mode, .dwell)
-        XCTAssertEqual(out.runs, chunk.runs)
-        XCTAssertEqual(out.frameEnds, chunk.frameEnds)
+        let stage = LaserMasking(square(dimmer: 0))
+        let points = [point(0), point(0.9), point(0, .dwell)]
+        let out = stage.apply(points)
+        XCTAssertEqual(out.count, 3)
+        XCTAssertEqual(out[0].rgb, .zero)                 // the centre is masked
+        XCTAssertEqual(out[0].xy, points[0].xy)
+        XCTAssertEqual(out[1], points[1])                 // outside is the same sample
+        XCTAssertEqual(out[2].rgb, .zero)
+        XCTAssertEqual(out[2].mode, .dwell)
     }
 
     func testADimmerLeavesThatFractionOfTheLight() {
-        var stage = LaserMasking(square(dimmer: 0.25))
-        XCTAssertEqual(stage.process(LaserChunk(elements: [point(0)], shape: 1)).elements[0].rgb.x, 0.25, accuracy: 1e-6)
+        let stage = LaserMasking(square(dimmer: 0.25))
+        XCTAssertEqual(stage.apply([point(0)])[0].rgb.x, 0.25, accuracy: 1e-6)
     }
 
-    func testMasksThatAreOffOrAbsentPassTheChunkThrough() {
+    func testMasksThatAreOffOrAbsentPassTheSamplesThrough() {
         var disabled = square(dimmer: 0)
         disabled.masks[0].enabled = false
-        let chunk = LaserChunk(elements: [point(0)], shape: 1)
-        var off = LaserMasking(disabled), none = LaserMasking(LaserMaskSettings())
-        XCTAssertEqual(off.process(chunk).elements, chunk.elements)
-        XCTAssertEqual(none.process(chunk).elements, chunk.elements)
+        let points = [point(0)]
+        XCTAssertEqual(LaserMasking(disabled).apply(points), points)
+        XCTAssertEqual(LaserMasking(LaserMaskSettings()).apply(points), points)
     }
 }
 
@@ -164,18 +149,16 @@ final class LaserCornerDwellTests: XCTestCase {
 
     func testARightAngleGetsHalfTheMaximumAndTheHoldsStayOnTheCorner() {
         var stage = LaserCornerDwell(maximum: 8)
-        let out = stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0, 0.5)], runs: [LaserRun(id: 2, range: 0..<3)], frameEnds: [3]))
-        XCTAssertEqual(out.elements.map(\.mode), [.normal, .normal, .dwell, .dwell, .dwell, .dwell, .normal])
-        XCTAssertTrue(out.elements[2...5].allSatisfy { $0.xy == SIMD2<Float>(0, 0) && $0.rgb == SIMD3<Float>(repeating: 0.5) })
-        XCTAssertEqual(out.runs, [LaserRun(id: 2, range: 0..<7)])
-        XCTAssertEqual(out.frameEnds, [7])
+        let out = flat(stage.process(shape(2, [p(-0.5, 0), p(0, 0), p(0, 0.5)])))
+        XCTAssertEqual(out.map(\.mode), [.normal, .normal, .dwell, .dwell, .dwell, .dwell, .normal])
+        XCTAssertTrue(out[2...5].allSatisfy { $0.xy == SIMD2<Float>(0, 0) && $0.rgb == SIMD3<Float>(repeating: 0.5) })
     }
 
     func testAFullReversalGetsTheMaximumAndAGentleTurnGetsNothing() {
         var stage = LaserCornerDwell(maximum: 8)
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(-0.5, 0)], shape: 1)).count, 3 + 8)
+        XCTAssertEqual(flat(stage.process(shape(1, [p(-0.5, 0), p(0, 0), p(-0.5, 0)]))).count, 3 + 8)
         // a 10 degree turn is under the 20 degree threshold
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0.5, 0.088)], shape: 1)).count, 3)
+        XCTAssertEqual(flat(stage.process(shape(1, [p(-0.5, 0), p(0, 0), p(0.5, 0.088)]))).count, 3)
     }
 
     func testTheSharperTheTurnTheMoreDwell() {
@@ -183,7 +166,7 @@ final class LaserCornerDwellTests: XCTestCase {
         func hold(_ degrees: Double) -> Int {
             let turn = degrees * .pi / 180
             let end = p(Float(0.5 * cos(turn)), Float(0.5 * sin(turn)))
-            return stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0), end], shape: 1)).count - 3
+            return flat(stage.process(shape(1, [p(-0.5, 0), p(0, 0), end]))).count - 3
         }
         XCTAssertLessThan(hold(30), hold(60))
         XCTAssertLessThan(hold(60), hold(120))
@@ -192,20 +175,28 @@ final class LaserCornerDwellTests: XCTestCase {
     func testEndsBlankNeighboursExistingDwellAndZeroLengthEdgesAreNotCorners() {
         var stage = LaserCornerDwell(maximum: 8)
         // the ends of the shape
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(0, 0), p(0.5, 0), p(0.5, 0.5)], shape: 1)).count, 3 + 4)
+        XCTAssertEqual(flat(stage.process(shape(1, [p(0, 0), p(0.5, 0), p(0.5, 0.5)]))).count, 3 + 4)
         // a corner next to a blank sample, or that is already a dwell
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0, .blank), p(0, 0), p(0, 0.5)], shape: 1)).count, 3)
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(-0.5, 0), p(0, 0, .dwell), p(0, 0.5)], shape: 1)).count, 3)
-        // padding already holds before the first vertex: no direction there
-        XCTAssertEqual(stage.process(LaserChunk(elements: [p(0, 0, .dwell), p(0, 0), p(0, 0.5), p(0.5, 0.5)], shape: 1)).count, 4 + 4)
+        XCTAssertEqual(flat(stage.process(shape(1, [p(-0.5, 0, .blank), p(0, 0), p(0, 0.5)]))).count, 3)
+        XCTAssertEqual(flat(stage.process(shape(1, [p(-0.5, 0), p(0, 0, .dwell), p(0, 0.5)]))).count, 3)
         XCTAssertEqual(LaserCornerDwell(maximum: 0).maximum, 0)
     }
 
     func testEachShapeIsHandledOnItsOwn() {
         var stage = LaserCornerDwell(maximum: 8)
         // two shapes of 2 points each: neither has an interior vertex, so no corner across the seam
-        let chunk = LaserChunk(elements: [p(-0.5, 0), p(0, 0), p(0, 0.5), p(0.5, 0.5)],
-                               runs: [LaserRun(id: 1, range: 0..<2), LaserRun(id: 2, range: 2..<4)])
-        XCTAssertEqual(stage.process(chunk).count, 4)
+        let frame = shape(1, [p(-0.5, 0), p(0, 0)]) + shape(2, [p(0, 0.5), p(0.5, 0.5)])
+        XCTAssertEqual(flat(stage.process(frame)).count, 4)
+    }
+}
+
+final class LaserMasteringTests: XCTestCase {
+    func testThePlaceholderPassesShapesThroughUntouched() {
+        let mastering = LaserMastering()
+        let frame = [Laser3DShape(id: 3, vertices: [LaserVertex(x: 0.1, y: 0.2, z: 0.3), LaserVertex(x: -0.1, y: 0)])]
+        XCTAssertEqual(mastering.process(frame), frame)
+        XCTAssertTrue(mastering.process([]).isEmpty)
+        let effect: any LaserEffect = mastering          // a master filter is a laser effect like any other
+        XCTAssertEqual(effect.process(frame), frame)
     }
 }

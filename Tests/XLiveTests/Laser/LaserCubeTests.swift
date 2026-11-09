@@ -128,25 +128,24 @@ final class LaserCubeTests: XCTestCase, @unchecked Sendable {
         try await session.disconnect()
     }
 
-    func testMonitorReportsUnderrunAndDisablesOutput() async throws {
+    func testUnderrunIsToleratedAndStreamingResumes() async throws {
         let transport = ScriptedCube()
         let session = try await LaserCube(id: "test") { transport }.connect()
         try await session.start(pointRate: 30000)
         let point = try LaserPoint(xy: .zero, rgb: .zero)
         try await session.write(Array(repeating: point, count: 3000))
-        let failed = expectation(description: "underrun reported")
         let observer = Task {
             for await state in session.states {
-                if case .failed(let message) = state {
-                    XCTAssertEqual(message, "underrun")
-                    failed.fulfill()
-                }
+                if case .failed(let message) = state { XCTFail("an underrun must not end the session: \(message)") }
             }
         }
         transport.emptyBuffer()
-        await fulfillment(of: [failed], timeout: 2)
-        await observer.value
+        // The monitor polls every 25 ms: give it several looks at the empty buffer.
+        try await Task.sleep(for: .milliseconds(200))
+        try await session.write(Array(repeating: point, count: 3000))
+        XCTAssertTrue(transport.enabled)
         try await session.disconnect()
+        observer.cancel()
         XCTAssertFalse(transport.enabled)
         XCTAssertTrue(transport.isClosed)
     }

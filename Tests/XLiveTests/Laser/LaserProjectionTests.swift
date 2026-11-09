@@ -15,52 +15,51 @@ private func settings(dwell: Int = 0, blank: Int = 0) -> LaserProjection {
 private func vertex(_ x: Double, _ z: Double = 0) -> LaserVertex {
     LaserVertex(x: x, y: 0, z: z, rgba: SIMD4(1, 0.5, 0.25, 1))
 }
+private func shape(_ id: UInt32, _ vertices: [LaserVertex]) -> Laser3DShape { Laser3DShape(id: LaserShapeID(id), vertices: vertices) }
+private func flat(_ shapes: [Laser2DShape]) -> [LaserPoint] { shapes.flatMap(\.points) }
 
 final class LaserProjectionTests: XCTestCase {
     func testAVertexInsideTheViewProjectsWithMirroredXAndColourTimesAlpha() {
         var projector = LaserProjector(settings())
-        let out = projector.project(LaserChunk(elements: [LaserVertex(x: 0.5, y: 0.25, rgba: SIMD4(1, 0.5, 0.25, 0.5))], shape: 3))
-        XCTAssertEqual(out.count, 1)
-        let p = out.elements[0]
+        let out = projector.project([shape(3, [LaserVertex(x: 0.5, y: 0.25, rgba: SIMD4(1, 0.5, 0.25, 0.5))])])
+        XCTAssertEqual(out.map(\.id), [3])
+        XCTAssertEqual(flat(out).count, 1)
+        let p = flat(out)[0]
         XCTAssertEqual(p.xy.x, -0.25, accuracy: 1e-6)    // x * -1 / camera z 2
         XCTAssertEqual(p.xy.y, 0.125, accuracy: 1e-6)
         XCTAssertEqual(p.rgb.x, 0.5, accuracy: 1e-6)
         XCTAssertEqual(p.rgb.z, 0.125, accuracy: 1e-6)
         XCTAssertEqual(p.mode, .normal)
-        XCTAssertEqual(out.runs, [LaserRun(id: 3, range: 0..<1)])
     }
 
     func testOffScreenCoordinatesAreClampedToTheScanner() {
         var projector = LaserProjector(settings())
-        let out = projector.project(LaserChunk(elements: [vertex(40)], shape: 1))
-        XCTAssertEqual(out.elements.first?.xy.x, -1)
+        XCTAssertEqual(flat(projector.project([shape(1, [vertex(40)])])).first?.xy.x, -1)
     }
 
-    func testAPathWhollyOutsideTheViewDrawsNothing() {
+    func testAShapeWhollyOutsideTheViewIsDropped() {
         var projector = LaserProjector(settings())
-        let out = projector.project(LaserChunk(elements: [vertex(0, 100), vertex(1, 120), vertex(0, -9)], shape: 1))
-        XCTAssertTrue(out.isEmpty)
-        XCTAssertTrue(out.runs.isEmpty)
+        let out = projector.project([shape(1, [vertex(0, 100), vertex(1, 120), vertex(0, -9)]), shape(2, [vertex(0.1)])])
+        XCTAssertEqual(out.map(\.id), [2])
     }
 
     func testLeavingTheViewEndsOnThePlaneWithDwellThenBlank() {
         var projector = LaserProjector(settings(dwell: 2, blank: 3))
-        let out = projector.project(LaserChunk(elements: [vertex(0.5, 0), vertex(0.5, 100)], shape: 1))
+        let out = flat(projector.project([shape(1, [vertex(0.5, 0), vertex(0.5, 100)])]))
         // the first vertex, the cut point, 2 dwell, 3 blank
-        XCTAssertEqual(out.elements.map(\.mode), [.normal, .normal, .dwell, .dwell, .blank, .blank, .blank])
+        XCTAssertEqual(out.map(\.mode), [.normal, .normal, .dwell, .dwell, .blank, .blank, .blank])
         // cut at camera z = far (50): x = -0.5 / 50 after the mirrored divide
-        XCTAssertEqual(out.elements[1].xy.x, -0.01, accuracy: 1e-4)
-        XCTAssertEqual(out.elements[2].xy, out.elements[1].xy)
-        XCTAssertEqual(out.elements[2].rgb, out.elements[1].rgb)
-        XCTAssertEqual(out.elements[4].rgb, .zero)
-        XCTAssertEqual(out.runs, [LaserRun(id: 1, range: 0..<7)])
+        XCTAssertEqual(out[1].xy.x, -0.01, accuracy: 1e-4)
+        XCTAssertEqual(out[2].xy, out[1].xy)
+        XCTAssertEqual(out[2].rgb, out[1].rgb)
+        XCTAssertEqual(out[4].rgb, .zero)
     }
 
     func testComingBackIntoTheViewStartsWithBlankThenDwellThenTheVertex() {
         var projector = LaserProjector(settings(dwell: 2, blank: 3))
         // inside, far outside, then back inside
-        let out = projector.project(LaserChunk(elements: [vertex(0, 0), vertex(0, 100), vertex(0, 10)], shape: 1))
-        XCTAssertEqual(out.elements.map(\.mode),
+        let out = flat(projector.project([shape(1, [vertex(0, 0), vertex(0, 100), vertex(0, 10)])]))
+        XCTAssertEqual(out.map(\.mode),
                        [.normal,                                        // start
                         .normal, .dwell, .dwell, .blank, .blank, .blank, // leaving
                         .blank, .blank, .blank, .dwell, .dwell, .normal, // coming back: cut point
@@ -69,43 +68,16 @@ final class LaserProjectionTests: XCTestCase {
 
     func testAPathIsNotDrawnAcrossAShapeBoundary() {
         var projector = LaserProjector(settings(dwell: 1, blank: 1))
-        let chunk = LaserChunk(elements: [vertex(0, 0), vertex(0, 100), vertex(0, 5), vertex(0, 6)],
-                               runs: [LaserRun(id: 1, range: 0..<2), LaserRun(id: 2, range: 2..<4)],
-                               frameEnds: [4])
-        let out = projector.project(chunk)
+        let out = projector.project([shape(1, [vertex(0, 0), vertex(0, 100)]), shape(2, [vertex(0, 5), vertex(0, 6)])])
         // shape 1: vertex + cut + dwell + blank = 4; shape 2 starts fresh, so no entry at its first vertex: 2
-        XCTAssertEqual(out.count, 6)
-        XCTAssertEqual(out.runs, [LaserRun(id: 1, range: 0..<4), LaserRun(id: 2, range: 4..<6)])
-        XCTAssertEqual(out.frameEnds, [6])
+        XCTAssertEqual(out.map(\.id), [1, 2])
+        XCTAssertEqual(out.map(\.points.count), [4, 2])
     }
 
-    func testStateCarriesAcrossChunksOfOneShape() {
+    func testEveryFrameStartsFreshSoNothingCarriesFromTheLastOne() {
         var projector = LaserProjector(settings(dwell: 0, blank: 1))
-        let first = projector.project(LaserChunk(elements: [vertex(0, 0)], shape: 1))
-        XCTAssertEqual(first.count, 1)
-        let second = projector.project(LaserChunk(elements: [vertex(0, 100)], shape: 1))   // same shape continues
-        XCTAssertEqual(second.elements.map(\.mode), [.normal, .blank])                       // the cut is still found
-        let third = projector.project(LaserChunk(elements: [vertex(0, 0)], shape: 2))      // a new shape: no entry
-        XCTAssertEqual(third.elements.map(\.mode), [.normal])
-    }
-
-    func testFrameEndsLandAfterTheirLastProjectedSample() {
-        var projector = LaserProjector(settings())
-        let out = projector.project(LaserChunk(elements: [vertex(0, 0), vertex(0, 100), vertex(0, 100), vertex(0, 0)],
-                                               runs: [LaserRun(id: 1, range: 0..<4)], frameEnds: [3, 4]))
-        // vertex, cut | (dropped) | restart: vertex
-        XCTAssertEqual(out.count, 3)
-        XCTAssertEqual(out.frameEnds, [2, 3])
-    }
-
-    func testProjectedStreamReadsAFrameLooperAndIsAnOutputStream() {
-        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
-        looper.submit(LaserChunk(elements: [vertex(0.1), vertex(0.2), vertex(0.3)], shape: 9))
-        var reader = LaserReader(LaserProjectedStream(looper, projection: settings(), rate: 30000))
-        XCTAssertEqual(reader.format, LaserStreamFormat(domain: .scanner, rate: 30000))
-        let block = reader.take(7)
-        XCTAssertEqual(block.count, 7)
-        XCTAssertEqual(block.frameEnds, [3, 6])
-        XCTAssertEqual(block.runs, [LaserRun(id: 9, range: 0..<7)])
+        _ = projector.project([shape(1, [vertex(0, 0), vertex(0, 100)])])         // ended outside the view
+        let again = projector.project([shape(1, [vertex(0, 0)])])
+        XCTAssertEqual(flat(again).map(\.mode), [.normal])                          // no entry padding for a new frame
     }
 }

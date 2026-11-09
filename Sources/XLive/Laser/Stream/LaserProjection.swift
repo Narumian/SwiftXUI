@@ -65,53 +65,39 @@ public struct LaserProjection: Equatable, Sendable {
 /// samples on the plane. Between the two nothing is drawn. What then happens at the
 /// edge of the scanner's square is up to `LaserProjection.screen`.
 ///
-/// It keeps the previous vertex between calls, so a path can arrive in several
-/// chunks. The path restarts (no segment is drawn across) where the shape
-/// identity changes or a frame ends.
+/// Every shape is a path of its own: nothing is drawn across from the last vertex of
+/// one shape to the first of the next.
 ///
 /// The colour is `rgb * alpha` limited to 0...1.
-public struct LaserProjector: LaserStage {
+public struct LaserProjector: Sendable {
     public var settings: LaserProjection
     private var previous: SIMD4<Double>?
-    private var previousRun: LaserShapeID?
-    private var restartNext = false
     /// The last sample before the screen step, still beyond the square if it was.
     private var screenPrevious: Sample?
 
     public init(_ settings: LaserProjection) { self.settings = settings }
 
     /// Forgets the previous vertex; the next one starts a new path.
-    public mutating func reset() { previous = nil; screenPrevious = nil; previousRun = nil; restartNext = false }
+    public mutating func reset() { previous = nil; screenPrevious = nil }
 
-    public mutating func project(_ chunk: LaserChunk<LaserVertex>) -> LaserChunk<LaserPoint> {
-        let count = chunk.count
-        var restarts = Set<Int>()
-        if restartNext { restarts.insert(0) }
-        restartNext = false
-        for run in chunk.runs where !run.range.isEmpty {
-            if run.id != previousRun { restarts.insert(run.range.lowerBound) }
-            previousRun = run.id
-        }
-        for end in chunk.frameEnds {
-            if end < count { restarts.insert(end) } else if end == count { restartNext = true }
-        }
-
-        var points: [LaserPoint] = []
-        points.reserveCapacity(count)
-        var starts = [Int](repeating: 0, count: count + 1)
+    /// The shapes through the camera and projection. A shape wholly out of view is dropped.
+    public mutating func project(_ shapes: [Laser3DShape]) -> [Laser2DShape] {
+        var out: [Laser2DShape] = []
+        out.reserveCapacity(shapes.count)
         var samples: [Sample] = []
-        for (index, vertex) in chunk.elements.enumerated() {
-            if restarts.contains(index) { previous = nil; screenPrevious = nil }
-            starts[index] = points.count
-            samples.removeAll(keepingCapacity: true)
-            project(vertex, into: &samples)
-            for sample in samples { screen(sample, into: &points) }
+        for shape in shapes {
+            previous = nil; screenPrevious = nil
+            var points: [LaserPoint] = []
+            points.reserveCapacity(shape.vertices.count)
+            for vertex in shape.vertices {
+                samples.removeAll(keepingCapacity: true)
+                project(vertex, into: &samples)
+                for sample in samples { screen(sample, into: &points) }
+            }
+            if !points.isEmpty { out.append(Laser2DShape(id: shape.id, points: points)) }
         }
-        starts[count] = points.count
-        return LaserChunk(elements: points, carrying: chunk, starts: starts)
+        return out
     }
-
-    public mutating func process(_ chunk: LaserChunk<LaserVertex>) -> LaserChunk<LaserPoint> { project(chunk) }
 
     // MARK: Samples
 
@@ -246,22 +232,5 @@ public struct LaserProjector: LaserStage {
         case (false, false):
             if followsOutside { put(sample.darkened) }
         }
-    }
-}
-
-/// A shape-space stream seen through a projection: what an output plays.
-public struct LaserProjectedStream<Upstream: LaserStream>: LaserOutputStream where Upstream.Element == LaserVertex {
-    public private(set) var upstream: Upstream
-    public var projector: LaserProjector
-    public let format: LaserStreamFormat
-
-    public init(_ upstream: Upstream, projection: LaserProjection, rate: UInt32) {
-        self.upstream = upstream
-        projector = LaserProjector(projection)
-        format = LaserStreamFormat(domain: .scanner, rate: rate)
-    }
-
-    public mutating func read(wanting count: Int) -> LaserChunk<LaserPoint> {
-        projector.project(upstream.read(wanting: count))
     }
 }

@@ -18,9 +18,9 @@ public extension LaserCube {
     /// long-standing trick for this device over lossy Wi-Fi: the cube discards the
     /// second copy by its sequence number, so a single dropped UDP datagram no
     /// longer loses 140 samples.
-    init(host: String, id: String? = nil, name: String = "LaserCube", underrunPolicy: LaserCubeUnderrunPolicy = .fail,
+    init(host: String, id: String? = nil, name: String = "LaserCube",
          duplicatesSamplePackets: Bool = true) {
-        self.init(id: id ?? "lasercube-network:\(host)", name: name, underrunPolicy: underrunPolicy) {
+        self.init(id: id ?? "lasercube-network:\(host)", name: name) {
             try AppleLaserCubeTransport(host: host, duplicatesSamplePackets: duplicatesSamplePackets)
         }
     }

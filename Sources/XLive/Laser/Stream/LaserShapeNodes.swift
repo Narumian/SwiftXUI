@@ -6,30 +6,23 @@ import XUI
 /// with the shapes as they stand after the last update, so asking twice in one tick gives
 /// the same answer.
 ///
-/// What it returns is a list of whole shapes: a run holds one shape from end to end and a
-/// shape is not split over runs. `LaserDwellBlank` and `LaserCornerDwell` depend on this.
-/// An empty chunk means there is nothing to draw now.
-///
-/// `process(_:)` is shaped as a node with `Input == Void` and `Output == LaserChunk<LaserVertex>`
-/// so that a domain-free node protocol can later be lifted out of it without touching
-/// the conforming types.
+/// What it returns is the whole shapes of one frame, each a `Laser3DShape` from end to end.
+/// An empty array means there is nothing to draw now.
 public protocol LaserGeometry: XLive {
-    func process(_ input: Void) -> LaserChunk<LaserVertex>
+    func process(_ input: Void) -> [Laser3DShape]
 }
 
 /// Changes shapes in the front half of the pipeline (3D, `LaserVertex`).
 ///
-/// It may add or drop shapes (copies, say) and cuts the runs of what it adds. Two runs of
-/// the same ID that touch are joined by `LaserChunk.append`, so an effect that makes copies
-/// either gives each copy its own ID or builds the runs without `append`.
-///
-/// It does not pad with dwell or blank samples. Between copies it puts blank vertices and
-/// leaves the padding at the ends of each run to `LaserDwellBlank`.
+/// It may add or drop shapes (copies, say); a copy is a shape of its own and takes the ID
+/// its maker gives it. It does not pad with dwell or blank samples, and it does not put
+/// blank vertices between shapes: moving the beam from one shape to the next is the
+/// back half's job.
 ///
 /// Like `LaserGeometry`, it keeps state and time in `update(context:)` and `process` does
 /// not change the node.
 public protocol LaserEffect: XLive {
-    func process(_ input: LaserChunk<LaserVertex>) -> LaserChunk<LaserVertex>
+    func process(_ input: [Laser3DShape]) -> [Laser3DShape]
 }
 
 /// A node with no interface of its own, like Legacy's default `viewbody`.

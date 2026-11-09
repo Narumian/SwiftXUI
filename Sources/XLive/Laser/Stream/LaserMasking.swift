@@ -1,20 +1,14 @@
 import Foundation
 
-/// Applies an output's safety masks to a scanner stream: each sample's colour is
+/// Applies an output's safety masks to scanner samples: each sample's colour is
 /// scaled by the masks' multiplier at its position, so light is dimmed or cut
-/// wherever a mask says. It is meant to sit last in a chain, after the sampler has
+/// wherever a mask says. It is meant to be applied last, after the resampler has
 /// spaced the samples, so a mask edge is honoured at sample resolution. It never
-/// moves, adds or drops a sample, and leaves runs and frame ends as they were.
-public struct LaserMasking: LaserStage {
+/// moves, adds or drops a sample.
+public struct LaserMasking: Sendable {
     public var masks: LaserMaskSettings
 
     public init(_ masks: LaserMaskSettings) { self.masks = masks }
-
-    public mutating func process(_ chunk: LaserChunk<LaserPoint>) -> LaserChunk<LaserPoint> {
-        var out = chunk
-        out.elements = apply(chunk.elements)
-        return out
-    }
 
     /// The same samples with the masks applied; nothing is added, dropped or moved.
     public func apply(_ points: [LaserPoint]) -> [LaserPoint] {

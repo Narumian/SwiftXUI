@@ -17,6 +17,7 @@ public struct LaserOutputConfigView: XView, Sendable {
     private var _addressDraft: StateStore.Box<String>?
     private var _addressError: StateStore.Box<Bool>?
     private var _connectionStates: StateStore.Box<[UUID: String]>?
+    private var _statusPolling: StateStore.Box<Bool>?
     private var collection: LaserOutputCollection { _collection?.value ?? initialOutputs }
     private var selectedID: UUID? { _selectedID?.value ?? nil }
     private var editingMasks: Bool { _editingMasks?.value ?? false }
@@ -36,6 +37,25 @@ public struct LaserOutputConfigView: XView, Sendable {
         _addressDraft = store._xstateBox(id: id, name: "addressDraft", default: { "" })
         _addressError = store._xstateBox(id: id, name: "addressError", default: { false })
         _connectionStates = store._xstateBox(id: id, name: "connectionStates", default: { [:] })
+        _statusPolling = store._xstateBox(id: id, name: "statusPolling", default: { false })
+        if let polling = _statusPolling, !polling.value, let statuses = _connectionStates, let collection = _collection, let connections {
+            polling.value = true
+            polling.onRemove = { _ in polling.value = false }
+            let invalidate = invalidate
+            Task { @XUIActor in
+                while polling.value, !Task.isCancelled {
+                    var next: [UUID: String] = [:]
+                    for item in collection.value.outputs where item.device == .laserCube && LaserOutput.isValidIPv4(item.address) {
+                        let failure = await connections.streamFailure(item.id)
+                        let connected = await connections.hasSession(item.id)
+                        let paused = await connections.isManuallyDisconnected(item.id)
+                        next[item.id] = failure.map { "FAILED: \($0)" } ?? (connected ? "CONNECTED" : (paused ? "NOT CONNECTED" : "AUTO CONNECTING"))
+                    }
+                    if next != statuses.value { statuses.value = next; invalidate() }
+                    do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+                }
+            }
+        }
     }
     let initialOutputs: LaserOutputCollection
     let onChange: @Sendable (LaserOutputCollection) -> Void
@@ -124,7 +144,18 @@ public struct LaserOutputConfigView: XView, Sendable {
                     Text(item.device == .laserCube ? "LASERCUBE · \(states[item.id] ?? "NOT CONNECTED")" : "UNASSIGNED", size: 10, color: outputMuted)
                 }.padding(9).frame(maxWidth: .infinity, alignment: .leading)
                     .background { RoundedRectangle(cornerRadius: 5, fill: item.id == selectedID ? XColorValue(hex: 0x354b42) : outputPanel) }
-                    .onTapGesture(id: "output.select.\(item.id)", label: item.name) { selection?.value = item.id; detail?.value = true; addressPage?.value = false }
+                    .onTapGesture(id: "output.select.\(item.id)", label: item.name) {
+                        selection?.value = item.id; detail?.value = true; addressPage?.value = false
+                        if let connections {
+                            let statuses = _connectionStates
+                            Task { @XUIActor in
+                                let connected = await connections.hasSession(item.id)
+                                let failure = await connections.streamFailure(item.id)
+                                setStatus(statuses, item.id, failure.map { "FAILED: \($0)" } ?? (connected ? "CONNECTED" : "NOT CONNECTED"))
+                                invalidate()
+                            }
+                        }
+                    }
             }
             button("+ CREATE OUTPUT") {
                 guard let state else { return }

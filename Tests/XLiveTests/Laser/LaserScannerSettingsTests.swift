@@ -46,32 +46,28 @@ final class LaserScannerSettingsTests: XCTestCase {
         camera.columns.3 = SIMD4(0, 0, 2, 1)
         return LaserProjection(camera: camera, projection: LaserProjection.perspective(fovxDegrees: 90, near: 0.1, far: 50))
     }
-    private func square() -> LaserFrameLooper<LaserVertex> {
-        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
+    private func square() -> FixedFrame {
         let corners: [(Double, Double)] = [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5), (-0.5, -0.5)]
-        looper.submit(LaserChunk(elements: corners.map { LaserVertex(x: $0.0, y: $0.1, rgba: SIMD4(repeating: 0.1)) }, shape: 1))
-        return looper
+        return FixedFrame([Laser3DShape(id: 1, vertices: corners.map { LaserVertex(x: $0.0, y: $0.1, rgba: SIMD4(repeating: 0.1)) })])
     }
-    private func line() -> LaserFrameLooper<LaserVertex> {
-        let looper = LaserFrameLooper<LaserVertex>(format: LaserStreamFormat(domain: .shapes))
-        looper.submit(LaserChunk(elements: [LaserVertex(x: -0.5, y: 0), LaserVertex(x: 0.5, y: 0)], shape: 1))
-        return looper
+    private func line() -> FixedFrame {
+        FixedFrame([Laser3DShape(id: 1, vertices: [LaserVertex(x: -0.5, y: 0), LaserVertex(x: 0.5, y: 0)])])
     }
 
     func testTheChainRunsEndToEnd() {
         var chain = LaserReader(LaserScannerSettings.stream(from: square(), projection: template(), live: LaserLive(LaserScannerSettings())))
         let lit = chain.take(400)
         XCTAssertEqual(lit.count, 400)
-        XCTAssertGreaterThan(lit.elements.filter { $0.rgb != .zero }.count, 100)
-        XCTAssertTrue(lit.elements.contains { $0.mode == .dwell })        // padding and corners
-        XCTAssertEqual(lit.runs.first?.id, 1)
-        XCTAssertFalse(lit.frameEnds.isEmpty)
+        XCTAssertGreaterThan(lit.filter { $0.rgb != .zero }.count, 100)
+        XCTAssertTrue(lit.contains { $0.mode == .dwell })                 // padding and corners
+        var shapes = LaserScannerSettings.stream(from: square(), projection: template(), live: LaserLive(LaserScannerSettings()))
+        XCTAssertEqual(shapes.read().map(\.id), [1])                       // the shape keeps its identity to the end
     }
 
     func testChangingTheSettingsChangesTheChain() {
         func count(_ settings: LaserScannerSettings) -> Int {
             var stream = LaserScannerSettings.stream(from: line(), projection: template(), live: LaserLive(settings))
-            return stream.read(wanting: 1).count
+            return stream.read().flatMap(\.points).count
         }
         let sparse = LaserScannerSettings(paddingDwell: 0, paddingBlank: 0, cornerDwell: 0, maximumStep: 0.2)
         let dense = LaserScannerSettings(paddingDwell: 0, paddingBlank: 0, cornerDwell: 0, maximumStep: 0.01)
@@ -83,14 +79,14 @@ final class LaserScannerSettingsTests: XCTestCase {
         let sparse = LaserScannerSettings(paddingDwell: 0, paddingBlank: 0, cornerDwell: 0, maximumStep: 0.2)
         let dense = LaserScannerSettings(paddingDwell: 0, paddingBlank: 0, cornerDwell: 0, maximumStep: 0.01)
         var steady = LaserScannerSettings.stream(from: line(), projection: template(), live: LaserLive(sparse))
-        let steadyCounts = (0..<3).map { _ in steady.read(wanting: 1).count }
+        let steadyCounts = (0..<3).map { _ in steady.read().flatMap(\.points).count }
         let live = LaserLive(sparse)
         var stream = LaserScannerSettings.stream(from: line(), projection: template(), live: live)
-        let first = stream.read(wanting: 1).count
+        let first = stream.read().flatMap(\.points).count
         live.value = dense
-        let second = stream.read(wanting: 1).count
+        let second = stream.read().flatMap(\.points).count
         live.value = sparse
-        let third = stream.read(wanting: 1).count
+        let third = stream.read().flatMap(\.points).count
         XCTAssertEqual(first, steadyCounts[0])
         XCTAssertGreaterThan(second, steadyCounts[1])      // the same stream, no rebuild
         XCTAssertEqual(third, steadyCounts[2])
