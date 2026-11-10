@@ -29,6 +29,7 @@ public struct LayoutHost {
     @discardableResult
     @XUIActor
     public func render(_ view: some XView, into surface: any XCanvas, store: StateStore = StateStore()) async -> RenderResult {
+        XViewProfiler.beginFrame()
         store.beginPass(now: environment.fxTime)
         defer { store.endPass() }
 
@@ -47,6 +48,7 @@ public struct LayoutHost {
             if let sink = surface as? ShaderSink {
                 sink.submit(shaders: renderContext.shaders)
             }
+            XViewProfiler.finishFrame()
 
             return RenderResult(
                 regions: renderContext.regions,

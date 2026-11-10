@@ -15,7 +15,11 @@ enum LayoutEngine {
         if let make = node.lazyChildren {
             node.children = await make(rect, context)
         }
+        let profiling = XViewProfiler.isEnabled
+        let layoutType = profiling ? String(reflecting: type(of: node.layout)) : ""
+        let placeStart = XViewProfiler.beginPlacement(type: layoutType)
         node.layout.placeChildren(in: rect, node.children, context)
+        XViewProfiler.endPlacement(type: layoutType, startedAt: placeStart)
         for child in node.children {
             await place(child, in: child.frame, context)
         }
@@ -56,7 +60,11 @@ enum LayoutEngine {
         let transformed = transform.map { !$0.isIdentity } ?? false
         if transformed { context.canvas.pushTransform(transform!) }
         if node.clipsToBounds { context.canvas.pushClip(node.frame) }
-        node.draw?(node.frame, context)
+        if let draw = node.draw {
+            let drawStart = XViewProfiler.start()
+            draw(node.frame, context)
+            if drawStart != 0 { XViewProfiler.record("draw", type: String(reflecting: type(of: node.layout)), startedAt: drawStart) }
+        }
         for child in node.children {
             render(child, into: context)
         }

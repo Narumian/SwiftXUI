@@ -29,6 +29,9 @@ protocol _PrimitiveXView {
 /// likely match first avoids a wasted attempt on the common case.
 @XUIActor
 func lower(_ view: any XView, id: StateIdentity, store: StateStore) async -> [LayoutNode] {
+    let viewType = XViewProfiler.isEnabled ? String(reflecting: type(of: view)) : ""
+    let lowerStart = XViewProfiler.beginLowering()
+    defer { XViewProfiler.endLowering(type: viewType, startedAt: lowerStart) }
     if let primitive = view as? _PrimitiveXView {
         return await primitive._lower(id: id, store: store)
     }
@@ -37,8 +40,16 @@ func lower(_ view: any XView, id: StateIdentity, store: StateStore) async -> [La
     }
     let childID = id.child(type: type(of: view))
     if var dynamic = view as? any DynamicProperty {
+        let updateStart = XViewProfiler.start()
         dynamic.update(id: childID, store: store)
-        return await lower((dynamic as! any XView).body, id: childID, store: store)
+        if updateStart != 0 { XViewProfiler.record("property", type: viewType, startedAt: updateStart) }
+        let bodyStart = XViewProfiler.start()
+        let body = await (dynamic as! any XView).body
+        if bodyStart != 0 { XViewProfiler.record("body", type: viewType, startedAt: bodyStart) }
+        return await lower(body, id: childID, store: store)
     }
-    return await lower(view.body, id: childID, store: store)
+    let bodyStart = XViewProfiler.start()
+    let body = await view.body
+    if bodyStart != 0 { XViewProfiler.record("body", type: viewType, startedAt: bodyStart) }
+    return await lower(body, id: childID, store: store)
 }

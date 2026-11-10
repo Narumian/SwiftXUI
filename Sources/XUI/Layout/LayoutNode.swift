@@ -107,8 +107,15 @@ final class LayoutNode {
             measuredSizes.removeAll(keepingCapacity: true)
             measuredPass = context.pass
         }
-        if let known = measuredSizes[proposal] { return known }
+        let profiling = XViewProfiler.isEnabled
+        let layoutType = profiling ? String(reflecting: type(of: layout)) : ""
+        if let known = measuredSizes[proposal] {
+            if profiling { XViewProfiler.recordCount("measure_hit", type: layoutType) }
+            return known
+        }
+        let start = XViewProfiler.beginMeasure(type: layoutType)
         let size = layout.sizeThatFits(proposal, children, context)
+        XViewProfiler.endMeasure(startedAt: start)
         measuredSizes[proposal] = size
         return size
     }
