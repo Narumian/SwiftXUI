@@ -14,6 +14,7 @@ enum LayoutEngine {
         node.frame = rect
         if let make = node.lazyChildren {
             node.children = await make(rect, context)
+            if node.lazyChildrenArePlaced { return }
         }
         let profiling = XViewProfiler.isEnabled
         let layoutType = profiling ? String(reflecting: type(of: node.layout)) : ""

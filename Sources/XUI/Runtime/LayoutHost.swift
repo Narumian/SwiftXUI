@@ -11,10 +11,14 @@ import Foundation
 public struct LayoutHost {
     public var canvas: Size
     public var environment: EnvironmentValues
+    /// Change this when canvas measurement metrics change. With `nil`, retained
+    /// subtrees are laid out every pass because their metrics cannot be compared.
+    public var measurementRevision: UInt64?
 
-    public init(canvas: Size, environment: EnvironmentValues = EnvironmentValues()) {
+    public init(canvas: Size, environment: EnvironmentValues = EnvironmentValues(), measurementRevision: UInt64? = nil) {
         self.canvas = canvas
         self.environment = environment
+        self.measurementRevision = measurementRevision
     }
 
     /// Returns a host with an exact-type environment object injected.
@@ -35,7 +39,7 @@ public struct LayoutHost {
 
         var env = environment
         env.measureText = { surface.measureText($0, fontSize: $1, font: $2) }
-        var layoutContext = LayoutContext(environment: env, referenceSize: canvas)
+        var layoutContext = LayoutContext(environment: env, referenceSize: canvas, measurementRevision: measurementRevision)
         layoutContext.pass = LayoutPass.next()
 
         return await _EnvironmentObjectContext.$current.withValue(env._environmentObjectContext()) {

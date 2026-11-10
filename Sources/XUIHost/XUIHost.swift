@@ -10,7 +10,9 @@ public final class XUIHost: @unchecked Sendable {
     public var size: RenderSize
     public var background: RenderColor
     public var environment: EnvironmentValues
-    public var fonts: FontBook?
+    public var fonts: FontBook? {
+        didSet { if fonts != oldValue { measurementRevision &+= 1 } }
+    }
     public var images: [ImageSource: TextureID]
     public var imageResolver: (@Sendable (ImageSource) -> TextureID?)?
     public let focusStore: FocusStore
@@ -26,6 +28,7 @@ public final class XUIHost: @unchecked Sendable {
     public var clipboard: any XClipboard = InMemoryClipboard()
 
     private let store = StateStore()
+    private var measurementRevision: UInt64 = 0
     /// Slop is in logical canvas units. A phone shows the canvas at about 0.36pt per unit, so the
     /// 10-unit default is under 4pt of finger travel and a plain tap reads as a drag.
     private var gestureRuntime = GestureRuntime(tapSlop: 24)
@@ -83,7 +86,8 @@ public final class XUIHost: @unchecked Sendable {
         textFocus.beginFrame()
         let layout = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
-            environment: frameEnvironment
+            environment: frameEnvironment,
+            measurementRevision: measurementRevision
         ).render(view, into: surface, store: store)
         textFocus.endFrame()
         dragDrop.endFrame(layout)

@@ -11,6 +11,8 @@ struct LayoutContext {
     /// Which layout pass this is. A node remembers the sizes it measured only
     /// for the pass that measured them (see `LayoutNode.measure`).
     var pass: UInt64 = 0
+    /// Stable across passes with the same canvas measurement metrics.
+    var measurementRevision: UInt64?
     /// Shared by the measure and place walks so stacks can reuse their
     /// flexibility ordering within this pass.
     var stackOrderCache = StackOrderCache()
@@ -110,6 +112,8 @@ final class LayoutNode {
     /// Content that can only be built once the node's resolved frame is known
     /// (`GeometryReader`). The engine runs this during `place`.
     var lazyChildren: (@XUIActor (Rect, LayoutContext) async -> [LayoutNode])?
+    /// The lazy callback supplies a subtree with its absolute frames resolved.
+    var lazyChildrenArePlaced = false
 
     private var measuredSizes: [ProposedSize: Size] = [:]
     private var measuredPass: UInt64 = .max
