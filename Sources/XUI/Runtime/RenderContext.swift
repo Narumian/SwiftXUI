@@ -116,6 +116,7 @@ public final class RenderContext {
     public private(set) var dragSources: [ResolvedDragSource] = []
     public private(set) var dropTargets: [ResolvedDropTarget] = []
     public private(set) var contextMenus: [ResolvedContextMenu] = []
+    public private(set) var shortcuts: [ResolvedShortcut] = []
     public private(set) var anchors = AnchorMap()
     var inputSuspendedDepth = 0
     var focusScopeStack: [FocusScopeID] = []
@@ -187,6 +188,11 @@ public final class RenderContext {
         contextMenus.append(ResolvedContextMenu(rect: rect, spec: spec))
     }
 
+    func addShortcut(_ spec: ShortcutSpec) {
+        guard acceptsInput else { return }
+        shortcuts.append(ResolvedShortcut(shortcut: spec.shortcut, duringTextEditing: spec.duringTextEditing, focusID: spec.focusID, action: spec.action))
+    }
+
     func setAnchor(_ id: AnchorID, _ rect: Rect) {
         anchors[id] = rect
     }
@@ -225,6 +231,7 @@ public struct RenderResult {
     public var dragSources: [ResolvedDragSource]
     public var dropTargets: [ResolvedDropTarget]
     public var contextMenus: [ResolvedContextMenu]
+    public var shortcuts: [ResolvedShortcut]
     public var anchors: AnchorMap
 
     public init(
@@ -238,6 +245,7 @@ public struct RenderResult {
         dragSources: [ResolvedDragSource] = [],
         dropTargets: [ResolvedDropTarget] = [],
         contextMenus: [ResolvedContextMenu] = [],
+        shortcuts: [ResolvedShortcut] = [],
         anchors: AnchorMap
     ) {
         self.regions = regions
@@ -250,6 +258,7 @@ public struct RenderResult {
         self.dragSources = dragSources
         self.dropTargets = dropTargets
         self.contextMenus = contextMenus
+        self.shortcuts = shortcuts
         self.anchors = anchors
     }
 

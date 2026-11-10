@@ -58,6 +58,8 @@ public final class XAppSession<App: XApp> {
     public let host: XUIHost
     public private(set) var lastFrame: XUIFrame?
     private let dynamicFonts: DynamicFontBook?
+    private var fontRevision: UInt64?
+    private var fontSnapshot: FontBook?
     private var fontUploads: [XUIFontTextureUpdate] = []
 
     public init(_ app: App) {
@@ -76,15 +78,24 @@ public final class XAppSession<App: XApp> {
     @discardableResult
     public func render(time: Double? = nil, pixelScale: Float = 1, useFonts: Bool = true) async -> XUIFrame {
         if !useFonts { host.fonts = nil }
+        else if dynamicFonts != nil { host.fonts = fontSnapshot }
         var frame = await host.render(app.body, time: time)
         if let dynamicFonts, useFonts {
             // Resolve glyph metrics before the final layout, so hit targets and
             // line wrapping are measured with the same faces used to draw.
             dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
-            host.fonts = dynamicFonts.snapshot()
-            frame = await host.render(app.body, time: time)
-            dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
-            host.fonts = dynamicFonts.snapshot()
+            if fontRevision != dynamicFonts.revision {
+                fontSnapshot = dynamicFonts.snapshot()
+                fontRevision = dynamicFonts.revision
+                host.fonts = fontSnapshot
+                frame = await host.render(app.body, time: time)
+                dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
+                if fontRevision != dynamicFonts.revision {
+                    fontSnapshot = dynamicFonts.snapshot()
+                    fontRevision = dynamicFonts.revision
+                    host.fonts = fontSnapshot
+                }
+            }
             dynamicFonts.sync(register: { id, bytes, width, height in
                 fontUploads.append(.create(id: id, rgba: bytes, width: width, height: height))
             }, update: { id, bytes, y, width, height in

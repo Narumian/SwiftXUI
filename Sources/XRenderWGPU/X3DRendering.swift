@@ -301,8 +301,16 @@ extension WGPURenderer {
                 active.map(endX3DPass)
             }
         }
+        var composite = x3d.rect
+        if let clip = x3d.clip {
+            let x0 = max(composite.x, clip.x), y0 = max(composite.y, clip.y)
+            let x1 = min(UInt64(composite.x) + UInt64(composite.width), UInt64(clip.x) + UInt64(clip.width))
+            let y1 = min(UInt64(composite.y) + UInt64(composite.height), UInt64(clip.y) + UInt64(clip.height))
+            composite = PixelRect(x: x0, y: y0, width: UInt32(x1 > UInt64(x0) ? x1 - UInt64(x0) : 0), height: UInt32(y1 > UInt64(y0) ? y1 - UInt64(y0) : 0))
+        }
+        guard composite.width > 0, composite.height > 0 else { return }
         runLayerPost(into: parent, targetSize: parentSize, sourceView: target.view, time: x3dTime,
-                     layer: CompiledShaderLayer(rect: x3d.rect, shader: X3DCompositeShader().erased(),
+                     layer: CompiledShaderLayer(rect: composite, shader: X3DCompositeShader().erased(),
                                                 frame: CompiledFrame()),
                      encoder: encoder)
     }

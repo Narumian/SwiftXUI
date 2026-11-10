@@ -2,9 +2,65 @@ import CWGPU
 import XRender
 import XShader
 
+private let laserPreviewShaderSource = """
+struct LaserPoint {
+    position: vec4<f32>,
+    color: vec4<f32>,
+};
+@group(0) @binding(0) var<storage, read> points: array<LaserPoint>;
+@group(0) @binding(1) var<storage, read> modes: array<u32>;
+struct LaserOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) @interpolate(flat) viewBounds: vec4<f32>,
+};
+@vertex
+fn vs_main(
+    @builtin(vertex_index) index: u32,
+    @location(0) c0: vec4<f32>, @location(1) c1: vec4<f32>,
+    @location(2) c2: vec4<f32>, @location(3) c3: vec4<f32>,
+    @location(4) viewport: vec4<f32>, @location(5) viewBounds: vec4<f32>,
+    @location(6) shapeRange: vec2<u32>
+) -> LaserOut {
+    let aIndex = shapeRange.x + index / 2u;
+    let bIndex = aIndex + 1u;
+    let a = points[aIndex];
+    let b = points[bIndex];
+    var out: LaserOut;
+    if (modes[aIndex] == 2u || modes[bIndex] == 2u
+        || a.color.a <= 0.0 || b.color.a <= 0.0
+        || max(max(a.color.r, a.color.g), a.color.b) <= 0.0
+        || max(max(b.color.r, b.color.g), b.color.b) <= 0.0) {
+        out.position = vec4<f32>(2.0, 2.0, 0.0, 1.0);
+        out.color = vec4<f32>(0.0);
+        out.viewBounds = viewBounds;
+        return out;
+    }
+    var position = a.position;
+    var color = a.color;
+    if ((index % 2u) == 1u) { position = b.position; color = b.color; }
+    let clip = mat4x4<f32>(c0, c1, c2, c3) * position;
+    out.position = vec4<f32>(
+        clip.x * viewport.z + clip.w * (2.0 * viewport.x + viewport.z - 1.0),
+        clip.y * viewport.w + clip.w * (1.0 - 2.0 * viewport.y - viewport.w),
+        (clip.z + clip.w) * 0.5, clip.w);
+    out.color = vec4<f32>(clamp(color.rgb * color.a, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
+    out.viewBounds = viewBounds;
+    return out;
+}
+@fragment
+fn fs_main(in: LaserOut) -> @location(0) vec4<f32> {
+    if (in.position.x < in.viewBounds.x || in.position.y < in.viewBounds.y
+        || in.position.x >= in.viewBounds.x + in.viewBounds.z
+        || in.position.y >= in.viewBounds.y + in.viewBounds.w) { discard; }
+    return in.color;
+}
+"""
+
 /// Cross-platform WebGPU renderer. Platform code supplies only the surface.
 /// Everything submitted here is backend-neutral geometry compiled from a `Scene`.
 public final class WGPURenderer: XTextureRenderer {
+    private final class PipelineScopeResult { var done = false; var message = "" }
     private static let maxShaderRegions = 16
     // resolution/time/intensity/effectCount/composition, the three depth-linearising
     // constants, and padding up to a 16-byte boundary (12 floats), then 16 Effect
@@ -21,6 +77,23 @@ public final class WGPURenderer: XTextureRenderer {
     let queue: WGPUQueue
     private let shader: WGPUShaderModule
     private let pipeline: WGPURenderPipeline
+    private var linePipeline: WGPURenderPipeline?
+    private var laserPreviewShader: WGPUShaderModule?
+    private var laserPreviewPipeline: WGPURenderPipeline?
+    private var laserPreviewPipelineLayout: WGPUPipelineLayout?
+    private var laserPreviewBindGroupLayout: WGPUBindGroupLayout?
+    private struct LaserPreviewGPURecord {
+        var vertices: WGPUBuffer
+        var vertexCapacity: Int
+        var modes: WGPUBuffer
+        var modeCapacity: Int
+        var instance: WGPUBuffer
+        var instanceCapacity: Int
+        var ranges: WGPUBuffer
+        var rangeCapacity: Int
+        var bindGroup: WGPUBindGroup
+    }
+    private var laserPreviewRecords: [LaserPreviewGPURecord] = []
 
     let surfaceFormat = WGPUTextureFormat_BGRA8Unorm
     var configuredWidth: UInt32 = 0
@@ -177,6 +250,17 @@ public final class WGPURenderer: XTextureRenderer {
         }
         if let spriteVertexBuffer { wgpuBufferRelease(spriteVertexBuffer) }
         if let fontVertexBuffer { wgpuBufferRelease(fontVertexBuffer) }
+        for record in laserPreviewRecords {
+            wgpuBufferRelease(record.vertices)
+            wgpuBufferRelease(record.modes)
+            wgpuBufferRelease(record.instance)
+            wgpuBufferRelease(record.ranges)
+            wgpuBindGroupRelease(record.bindGroup)
+        }
+        if let laserPreviewPipeline { wgpuRenderPipelineRelease(laserPreviewPipeline) }
+        if let laserPreviewPipelineLayout { wgpuPipelineLayoutRelease(laserPreviewPipelineLayout) }
+        if let laserPreviewBindGroupLayout { wgpuBindGroupLayoutRelease(laserPreviewBindGroupLayout) }
+        if let laserPreviewShader { wgpuShaderModuleRelease(laserPreviewShader) }
         if let fontPipeline { wgpuRenderPipelineRelease(fontPipeline) }
         if let fontShader { wgpuShaderModuleRelease(fontShader) }
         if let spritePipeline { wgpuRenderPipelineRelease(spritePipeline) }
@@ -199,6 +283,7 @@ public final class WGPURenderer: XTextureRenderer {
         releaseX3DResources()
         if let vertexBuffer { wgpuBufferRelease(vertexBuffer) }
         wgpuRenderPipelineRelease(pipeline)
+        if let linePipeline { wgpuRenderPipelineRelease(linePipeline) }
         wgpuShaderModuleRelease(shader)
         wgpuQueueRelease(queue)
         wgpuDeviceRelease(device)
@@ -688,6 +773,17 @@ public final class WGPURenderer: XTextureRenderer {
                     UInt64(range.lowerBound * 6 * stride), UInt64(range.count * 6 * stride))
                 applyScissor(activePass, scissor, in: targetSize)
                 wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
+            case .lines(let range, let scissor):
+                guard let vertexBuffer = geometry.shapes, !range.isEmpty else { continue }
+                if linePipeline == nil {
+                    linePipeline = Self.makePipeline(device: device, shader: shader, format: surfaceFormat, topology: WGPUPrimitiveTopology_LineList)
+                }
+                guard let linePipeline else { continue }
+                wgpuRenderPassEncoderSetPipeline(activePass, linePipeline)
+                wgpuRenderPassEncoderSetVertexBuffer(activePass, 0, vertexBuffer,
+                    UInt64(range.lowerBound * 6 * stride), UInt64(range.count * 6 * stride))
+                applyScissor(activePass, scissor, in: targetSize)
+                wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
             case .sprite(let textureID, let range, let scissor):
                 guard let spritePipeline, let spriteVertexBuffer = geometry.sprites, !range.isEmpty,
                       let record = textures[textureID.rawValue] else { continue }
@@ -697,6 +793,29 @@ public final class WGPURenderer: XTextureRenderer {
                     UInt64(range.lowerBound * 8 * stride), UInt64(range.count * 8 * stride))
                 applyScissor(activePass, scissor, in: targetSize)
                 wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
+            case .laserPreview(let index):
+                guard frame.laserPreviews.indices.contains(index),
+                      let activePass = pass,
+                      let gpu = ensureLaserPreviewBuffers(index, frame.laserPreviews[index],
+                          targetSize: targetSize, transient: depth > 0),
+                      ensureLaserPreviewPipeline() else { continue }
+                wgpuRenderPassEncoderSetPipeline(activePass, laserPreviewPipeline)
+                wgpuRenderPassEncoderSetBindGroup(activePass, 0, gpu.bindGroup, 0, nil)
+                wgpuRenderPassEncoderSetVertexBuffer(activePass, 0, gpu.instance, 0, UInt64(gpu.instanceCapacity))
+                wgpuRenderPassEncoderSetVertexBuffer(activePass, 1, gpu.ranges, 0, UInt64(gpu.rangeCapacity))
+                applyScissor(activePass, frame.laserPreviews[index].clip, in: targetSize)
+                let shapes = frame.laserPreviews[index].shapes
+                var batchStart = 0
+                while batchStart < shapes.count {
+                    let count = shapes[batchStart].range.count
+                    var batchEnd = batchStart + 1
+                    while batchEnd < shapes.count && shapes[batchEnd].range.count == count { batchEnd += 1 }
+                    if count >= 2 {
+                        wgpuRenderPassEncoderDraw(activePass, UInt32((count - 1) * 2),
+                            UInt32(batchEnd - batchStart), 0, UInt32(batchStart))
+                    }
+                    batchStart = batchEnd
+                }
             case .font(let textureID, let range, let scissor):
                 guard let fontPipeline, let fontVertexBuffer = geometry.fonts, !range.isEmpty,
                       let record = textures[textureID.rawValue] else { continue }
@@ -953,6 +1072,209 @@ public final class WGPURenderer: XTextureRenderer {
         transientGeometryBuffers.removeAll(keepingCapacity: true)
     }
 
+    private func ensureLaserPreviewBuffers(_ index: Int, _ preview: CompiledLaserPreview,
+                                           targetSize: PassSize, transient: Bool) -> LaserPreviewGPURecord? {
+        guard !preview.vertices.isEmpty, preview.modes.count == preview.vertices.count / 8,
+              !preview.shapes.isEmpty, let groupLayout = ensureLaserPreviewBindGroupLayout() else { return nil }
+        var instances: [Float] = []
+        var ranges: [UInt32] = []
+        instances.reserveCapacity(preview.shapes.count * 24)
+        ranges.reserveCapacity(preview.shapes.count * 2)
+        for shape in preview.shapes {
+            let rect = shape.rect
+            instances.append(contentsOf: shape.matrix)
+            instances.append(Float(rect.x) / Float(max(1, targetSize.width)))
+            instances.append(Float(rect.y) / Float(max(1, targetSize.height)))
+            instances.append(Float(rect.width) / Float(max(1, targetSize.width)))
+            instances.append(Float(rect.height) / Float(max(1, targetSize.height)))
+            instances.append(Float(rect.x)); instances.append(Float(rect.y))
+            instances.append(Float(rect.width)); instances.append(Float(rect.height))
+            ranges.append(UInt32(clamping: shape.range.lowerBound))
+            ranges.append(UInt32(clamping: shape.range.count))
+        }
+        let modeWords = preview.modes.map { UInt32($0) }
+        func makeBuffer(capacity: Int, usage: WGPUBufferUsage) -> WGPUBuffer? {
+            var descriptor = WGPUBufferDescriptor()
+            descriptor.usage = usage | WGPUBufferUsage_CopyDst
+            descriptor.size = UInt64(max(16, capacity))
+            return wgpuDeviceCreateBuffer(device, &descriptor)
+        }
+        func write<T>(_ values: [T], to buffer: WGPUBuffer) {
+            values.withUnsafeBytes { wgpuQueueWriteBuffer(queue, buffer, 0, $0.baseAddress, $0.count) }
+        }
+        func makeBindGroup(vertices: WGPUBuffer, modes: WGPUBuffer,
+                           vertexSize: Int, modeSize: Int) -> WGPUBindGroup? {
+            var entries = [WGPUBindGroupEntry(), WGPUBindGroupEntry()]
+            entries[0].binding = 0; entries[0].buffer = vertices
+            entries[0].size = UInt64(max(16, vertexSize))
+            entries[1].binding = 1; entries[1].buffer = modes
+            entries[1].size = UInt64(max(16, modeSize))
+            return entries.withUnsafeBufferPointer { pointer in
+                var descriptor = WGPUBindGroupDescriptor()
+                descriptor.layout = groupLayout
+                descriptor.entryCount = pointer.count
+                descriptor.entries = pointer.baseAddress
+                return wgpuDeviceCreateBindGroup(device, &descriptor)
+            }
+        }
+        if transient {
+            let vertexBytes = preview.vertices.count * MemoryLayout<Float>.stride
+            let modeBytes = modeWords.count * MemoryLayout<UInt32>.stride
+            guard let vertices = makeBuffer(capacity: vertexBytes, usage: WGPUBufferUsage_Storage),
+                  let modes = makeBuffer(capacity: modeBytes, usage: WGPUBufferUsage_Storage),
+                  let instance = makeBuffer(capacity: instances.count * MemoryLayout<Float>.stride, usage: WGPUBufferUsage_Vertex),
+                  let range = makeBuffer(capacity: ranges.count * MemoryLayout<UInt32>.stride, usage: WGPUBufferUsage_Vertex) else { return nil }
+            write(preview.vertices, to: vertices); write(modeWords, to: modes)
+            write(instances, to: instance); write(ranges, to: range)
+            guard let bindGroup = makeBindGroup(vertices: vertices, modes: modes,
+                                                vertexSize: vertexBytes, modeSize: modeBytes) else { return nil }
+            transientGeometryBuffers.append(contentsOf: [vertices, modes, instance, range])
+            transientPostBindGroups.append(bindGroup)
+            return LaserPreviewGPURecord(vertices: vertices, vertexCapacity: vertexBytes,
+                modes: modes, modeCapacity: modeBytes, instance: instance,
+                instanceCapacity: instances.count * MemoryLayout<Float>.stride,
+                ranges: range, rangeCapacity: ranges.count * MemoryLayout<UInt32>.stride,
+                bindGroup: bindGroup)
+        }
+        while laserPreviewRecords.count <= index {
+            let vertexCapacity = max(256, preview.vertices.count * MemoryLayout<Float>.stride)
+            let modeCapacity = max(256, modeWords.count * MemoryLayout<UInt32>.stride)
+            let instanceCapacity = max(256, instances.count * MemoryLayout<Float>.stride)
+            let rangeCapacity = max(256, ranges.count * MemoryLayout<UInt32>.stride)
+            guard let vertices = makeBuffer(capacity: vertexCapacity, usage: WGPUBufferUsage_Storage),
+                  let modes = makeBuffer(capacity: modeCapacity, usage: WGPUBufferUsage_Storage),
+                  let instance = makeBuffer(capacity: instanceCapacity, usage: WGPUBufferUsage_Vertex),
+                  let range = makeBuffer(capacity: rangeCapacity, usage: WGPUBufferUsage_Vertex),
+                  let bindGroup = makeBindGroup(vertices: vertices, modes: modes,
+                                                vertexSize: vertexCapacity, modeSize: modeCapacity) else { return nil }
+            laserPreviewRecords.append(LaserPreviewGPURecord(vertices: vertices, vertexCapacity: vertexCapacity,
+                modes: modes, modeCapacity: modeCapacity, instance: instance, instanceCapacity: instanceCapacity,
+                ranges: range, rangeCapacity: rangeCapacity, bindGroup: bindGroup))
+        }
+        var record = laserPreviewRecords[index]
+        let vertexBytes = preview.vertices.count * MemoryLayout<Float>.stride
+        let modeBytes = modeWords.count * MemoryLayout<UInt32>.stride
+        let instanceBytes = instances.count * MemoryLayout<Float>.stride
+        let rangeBytes = ranges.count * MemoryLayout<UInt32>.stride
+        var replacements: [WGPUBuffer] = []
+        var newVertices: WGPUBuffer?
+        var newModes: WGPUBuffer?
+        var newInstances: WGPUBuffer?
+        var newRanges: WGPUBuffer?
+        if vertexBytes > record.vertexCapacity {
+            let next = max(vertexBytes, record.vertexCapacity * 2)
+            guard let buffer = makeBuffer(capacity: next, usage: WGPUBufferUsage_Storage) else { return nil }
+            replacements.append(buffer); newVertices = buffer; record.vertexCapacity = next
+        }
+        if modeBytes > record.modeCapacity {
+            let next = max(modeBytes, record.modeCapacity * 2)
+            guard let buffer = makeBuffer(capacity: next, usage: WGPUBufferUsage_Storage) else {
+                replacements.forEach { wgpuBufferRelease($0) }; return nil
+            }
+            replacements.append(buffer); newModes = buffer; record.modeCapacity = next
+        }
+        if instanceBytes > record.instanceCapacity {
+            let next = max(instanceBytes, record.instanceCapacity * 2)
+            guard let buffer = makeBuffer(capacity: next, usage: WGPUBufferUsage_Vertex) else {
+                replacements.forEach { wgpuBufferRelease($0) }; return nil
+            }
+            replacements.append(buffer); newInstances = buffer; record.instanceCapacity = next
+        }
+        if rangeBytes > record.rangeCapacity {
+            let next = max(rangeBytes, record.rangeCapacity * 2)
+            guard let buffer = makeBuffer(capacity: next, usage: WGPUBufferUsage_Vertex) else {
+                replacements.forEach { wgpuBufferRelease($0) }; return nil
+            }
+            replacements.append(buffer); newRanges = buffer; record.rangeCapacity = next
+        }
+        let storageChanged = newVertices != nil || newModes != nil
+        let candidateVertices = newVertices ?? record.vertices
+        let candidateModes = newModes ?? record.modes
+        let replacementGroup: WGPUBindGroup?
+        if storageChanged {
+            guard let bindGroup = makeBindGroup(vertices: candidateVertices, modes: candidateModes,
+                                                vertexSize: record.vertexCapacity, modeSize: record.modeCapacity) else {
+                replacements.forEach { wgpuBufferRelease($0) }; return nil
+            }
+            replacementGroup = bindGroup
+        } else {
+            replacementGroup = nil
+        }
+        if let newVertices { wgpuBufferRelease(record.vertices); record.vertices = newVertices }
+        if let newModes { wgpuBufferRelease(record.modes); record.modes = newModes }
+        if let newInstances { wgpuBufferRelease(record.instance); record.instance = newInstances }
+        if let newRanges { wgpuBufferRelease(record.ranges); record.ranges = newRanges }
+        if let replacementGroup {
+            wgpuBindGroupRelease(record.bindGroup); record.bindGroup = replacementGroup
+        }
+        write(preview.vertices, to: record.vertices)
+        write(modeWords, to: record.modes)
+        write(instances, to: record.instance)
+        write(ranges, to: record.ranges)
+        laserPreviewRecords[index] = record
+        return record
+    }
+
+    private func ensureLaserPreviewBindGroupLayout() -> WGPUBindGroupLayout? {
+        if let laserPreviewBindGroupLayout { return laserPreviewBindGroupLayout }
+        var entries = [WGPUBindGroupLayoutEntry(), WGPUBindGroupLayoutEntry()]
+        for index in 0..<2 {
+            entries[index].binding = UInt32(index)
+            entries[index].visibility = WGPUShaderStage_Vertex
+            entries[index].buffer.type = WGPUBufferBindingType_ReadOnlyStorage
+        }
+        let layout = entries.withUnsafeBufferPointer { pointer -> WGPUBindGroupLayout? in
+            var descriptor = WGPUBindGroupLayoutDescriptor()
+            descriptor.entryCount = pointer.count
+            descriptor.entries = pointer.baseAddress
+            return wgpuDeviceCreateBindGroupLayout(device, &descriptor)
+        }
+        laserPreviewBindGroupLayout = layout
+        return layout
+    }
+
+    private func ensureLaserPreviewPipeline() -> Bool {
+        if laserPreviewPipeline != nil { return true }
+        guard let bindGroupLayout = ensureLaserPreviewBindGroupLayout(),
+              let shader = Self.makeShaderModule(device: device, wgsl: laserPreviewShaderSource) else { return false }
+        let bindGroupLayouts: [WGPUBindGroupLayout?] = [bindGroupLayout]
+        let pipelineLayout = bindGroupLayouts.withUnsafeBufferPointer { pointer -> WGPUPipelineLayout? in
+            var descriptor = WGPUPipelineLayoutDescriptor()
+            descriptor.bindGroupLayoutCount = pointer.count
+            descriptor.bindGroupLayouts = pointer.baseAddress
+            return wgpuDeviceCreatePipelineLayout(device, &descriptor)
+        }
+        guard let pipelineLayout else { wgpuShaderModuleRelease(shader); return false }
+        laserPreviewShader = shader
+        laserPreviewPipelineLayout = pipelineLayout
+        wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation)
+        let pipeline = Self.makeLaserPreviewPipeline(device: device, shader: shader,
+            layout: pipelineLayout, format: surfaceFormat)
+        let scope = PipelineScopeResult()
+        var callback = WGPUPopErrorScopeCallbackInfo()
+        callback.mode = WGPUCallbackMode_AllowProcessEvents
+        callback.callback = { _, type, message, userdata1, _ in
+            let result = Unmanaged<PipelineScopeResult>.fromOpaque(userdata1!).takeUnretainedValue()
+            if type != WGPUErrorType_NoError, let data = message.data, message.length > 0 {
+                result.message = String(decoding: UnsafeRawBufferPointer(start: data, count: message.length), as: UTF8.self)
+            }
+            result.done = true
+        }
+        callback.userdata1 = Unmanaged.passUnretained(scope).toOpaque()
+        _ = wgpuDevicePopErrorScope(device, callback)
+        while !scope.done { _ = wgpuDevicePoll(device, 1, nil) }
+        if !scope.message.isEmpty { rendererLog("[LaserPreview] pipeline validation: \(scope.message)") }
+        guard let pipeline else {
+            wgpuShaderModuleRelease(shader)
+            wgpuPipelineLayoutRelease(pipelineLayout)
+            laserPreviewShader = nil
+            laserPreviewPipelineLayout = nil
+            return false
+        }
+        laserPreviewPipeline = pipeline
+        return true
+    }
+
     private static func shaderKind(for key: ShaderKey) -> Float {
         switch key {
         case ShaderLibrary.cellGlowKey: return 1
@@ -1170,7 +1492,8 @@ public final class WGPURenderer: XTextureRenderer {
     private static func makePipeline(
         device: WGPUDevice,
         shader: WGPUShaderModule,
-        format: WGPUTextureFormat
+        format: WGPUTextureFormat,
+        topology: WGPUPrimitiveTopology = WGPUPrimitiveTopology_TriangleList
     ) -> WGPURenderPipeline? {
         withWGPUString("vs_main") { vertexEntry in
             withWGPUString("fs_main") { fragmentEntry in
@@ -1217,13 +1540,88 @@ public final class WGPURenderer: XTextureRenderer {
                                     descriptor.vertex.entryPoint = vertexEntry
                                     descriptor.vertex.bufferCount = 1
                                     descriptor.vertex.buffers = bufferPointer
-                                    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList
+                                    descriptor.primitive.topology = topology
                                     descriptor.primitive.frontFace = WGPUFrontFace_CCW
                                     descriptor.primitive.cullMode = WGPUCullMode_None
                                     descriptor.multisample.count = 1
                                     descriptor.multisample.mask = UInt32.max
                                     descriptor.fragment = fragmentPointer
                                     return wgpuDeviceCreateRenderPipeline(device, &descriptor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func makeLaserPreviewPipeline(device: WGPUDevice, shader: WGPUShaderModule,
+                                                 layout: WGPUPipelineLayout,
+                                                 format: WGPUTextureFormat) -> WGPURenderPipeline? {
+        withWGPUString("vs_main") { vertexEntry in
+            withWGPUString("fs_main") { fragmentEntry in
+                var instanceAttributes = (0..<6).map { _ in WGPUVertexAttribute() }
+                for i in 0..<4 {
+                    instanceAttributes[i].format = WGPUVertexFormat_Float32x4
+                    instanceAttributes[i].offset = UInt64(i * 16)
+                    instanceAttributes[i].shaderLocation = UInt32(i)
+                }
+                instanceAttributes[4].format = WGPUVertexFormat_Float32x4
+                instanceAttributes[4].offset = 64
+                instanceAttributes[4].shaderLocation = 4
+                instanceAttributes[5].format = WGPUVertexFormat_Float32x4
+                instanceAttributes[5].offset = 80
+                instanceAttributes[5].shaderLocation = 5
+                var rangeAttribute = WGPUVertexAttribute()
+                rangeAttribute.format = WGPUVertexFormat_Uint32x2
+                rangeAttribute.offset = 0
+                rangeAttribute.shaderLocation = 6
+                return instanceAttributes.withUnsafeBufferPointer { instanceAttrs in
+                    withUnsafePointer(to: &rangeAttribute) { rangeAttr in
+                        var layouts = [WGPUVertexBufferLayout(), WGPUVertexBufferLayout()]
+                        layouts[0].stepMode = WGPUVertexStepMode_Instance
+                        layouts[0].arrayStride = 96
+                        layouts[0].attributeCount = instanceAttrs.count
+                        layouts[0].attributes = instanceAttrs.baseAddress
+                        layouts[1].stepMode = WGPUVertexStepMode_Instance
+                        layouts[1].arrayStride = 8
+                        layouts[1].attributeCount = 1
+                        layouts[1].attributes = rangeAttr
+                        return layouts.withUnsafeBufferPointer { layoutPointer in
+                            var blend = WGPUBlendState()
+                            blend.color.operation = WGPUBlendOperation_Add
+                            blend.color.srcFactor = WGPUBlendFactor_One
+                            blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha
+                            blend.alpha.operation = WGPUBlendOperation_Add
+                            blend.alpha.srcFactor = WGPUBlendFactor_One
+                            blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha
+                            return withUnsafePointer(to: &blend) { blendPointer in
+                                var target = WGPUColorTargetState()
+                                target.format = format
+                                target.blend = blendPointer
+                                target.writeMask = WGPUColorWriteMask_All
+                                return withUnsafePointer(to: &target) { targetPointer in
+                                    var fragment = WGPUFragmentState()
+                                    fragment.module = shader
+                                    fragment.entryPoint = fragmentEntry
+                                    fragment.targetCount = 1
+                                    fragment.targets = targetPointer
+                                    return withUnsafePointer(to: &fragment) { fragmentPointer in
+                                        var descriptor = WGPURenderPipelineDescriptor()
+                                        descriptor.layout = layout
+                                        descriptor.vertex.module = shader
+                                        descriptor.vertex.entryPoint = vertexEntry
+                                        descriptor.vertex.bufferCount = layoutPointer.count
+                                        descriptor.vertex.buffers = layoutPointer.baseAddress
+                                        descriptor.primitive.topology = WGPUPrimitiveTopology_LineList
+                                        descriptor.primitive.frontFace = WGPUFrontFace_CCW
+                                        descriptor.primitive.cullMode = WGPUCullMode_None
+                                        descriptor.multisample.count = 1
+                                        descriptor.multisample.mask = UInt32.max
+                                        descriptor.fragment = fragmentPointer
+                                        return wgpuDeviceCreateRenderPipeline(device, &descriptor)
+                                    }
                                 }
                             }
                         }

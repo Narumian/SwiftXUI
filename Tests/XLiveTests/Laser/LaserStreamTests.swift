@@ -24,15 +24,15 @@ private struct ScriptedStream: Laser2DStream {
 
 final class LaserStreamTests: XCTestCase {
     func testVertexIsHomogeneousAndKeepsItsModeThroughHelpers() {
-        let v = LaserVertex(x: 1, y: 2, z: 3, rgba: SIMD4<Double>(1, 0.5, 0.25, 0.5))
-        XCTAssertEqual(v.position, SIMD4<Double>(1, 2, 3, 1))
+        let v = LaserVertex(x: 1, y: 2, z: 3, rgba: SIMD4<Float>(1, 0.5, 0.25, 0.5))
+        XCTAssertEqual(v.position, SIMD4<Float>(1, 2, 3, 1))
         XCTAssertEqual(v.mode, .normal)
         XCTAssertEqual(v.blanked().rgba, .zero)
         XCTAssertTrue(v.blanked().isBlanked)
         XCTAssertEqual(v.dwelling().mode, .dwell)
         XCTAssertEqual(v.dwelling().rgba, v.rgba)
-        let moved = v.transformed(by: simd_double4x4(diagonal: SIMD4<Double>(2, 2, 2, 1)))
-        XCTAssertEqual(moved.position, SIMD4<Double>(2, 4, 6, 1))
+        let moved = v.transformed(by: simd_float4x4(diagonal: SIMD4<Float>(2, 2, 2, 1)))
+        XCTAssertEqual(moved.position, SIMD4<Float>(2, 4, 6, 1))
         XCTAssertEqual(v.scaledAlpha(0.5).rgba.w, 0.25)
     }
 

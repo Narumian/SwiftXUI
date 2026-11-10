@@ -13,6 +13,7 @@ public protocol XCanvas: AnyObject {
     func fillEllipse(in rect: Rect, color: XColorValue)
     func fillPath(_ path: Path, in rect: Rect, color: XColorValue)
     func strokePath(_ path: Path, in rect: Rect, color: XColorValue, lineWidth: Double)
+    func hairlinePath(_ path: Path, in rect: Rect, color: XColorValue)
     func drawImage(_ source: ImageSource, in rect: Rect, opacity: Double)
     func drawText(
         _ string: String,
@@ -32,6 +33,14 @@ public protocol XCanvas: AnyObject {
     func popTransform()
 }
 
+/// Optional canvas capability for 3D laser geometry. Vertices remain in the
+/// source `position4 + rgba4` Float32 layout; the renderer applies `matrix` in
+/// its vertex shader and draws only the supplied contiguous ranges.
+public protocol LaserPreviewSink: AnyObject {
+    func drawLaserPreview(vertices: [Float], modes: [UInt16], shapes: [Range<Int>],
+                          matrix: [Float], in rect: Rect)
+}
+
 public extension XCanvas {
     func fillRoundedRect(_ rect: Rect, cornerRadius: Double, color: XColorValue) {
         fillRect(rect, color: color)
@@ -42,6 +51,9 @@ public extension XCanvas {
     }
     func fillPath(_ path: Path, in rect: Rect, color: XColorValue) {}
     func strokePath(_ path: Path, in rect: Rect, color: XColorValue, lineWidth: Double) {}
+    func hairlinePath(_ path: Path, in rect: Rect, color: XColorValue) {
+        strokePath(path, in: rect, color: color, lineWidth: 1)
+    }
     func drawImage(_ source: ImageSource, in rect: Rect, opacity: Double) {}
     func measureText(_ string: String, fontSize: Double, font: TextFont) -> Size {
         Size(width: Double(string.count) * fontSize * 0.6, height: fontSize * 1.3)

@@ -87,6 +87,10 @@ public struct SceneBuilder {
         shape(.stroke(points: points, width: width, closed: closed), color: color, layer: layer)
     }
 
+    public mutating func hairline(_ points: [RenderPoint], closed: Bool = false, color: RenderColor, layer: RenderLayer? = nil) {
+        shape(.hairline(points: points, closed: closed), color: color, layer: layer)
+    }
+
     public mutating func polygon(_ points: [RenderPoint], color: RenderColor, layer: RenderLayer? = nil) {
         shape(.polygon(points: points), color: color, layer: layer)
     }
@@ -120,6 +124,14 @@ public struct SceneBuilder {
             transform: transform.concatenating(self.transform), tint: tint,
             layer: layer ?? self.layer, clip: clip, opacity: opacity
         )))
+    }
+
+    public mutating func laserPreview(vertices: [Float], modes: [UInt16], shapes: [Range<Int>], matrix: [Float],
+                                     in rect: RenderRect, layer: RenderLayer? = nil) {
+        guard vertices.count >= 16, vertices.count.isMultiple(of: 8), modes.count == vertices.count / 8,
+              matrix.count == 16, !shapes.isEmpty else { return }
+        scene.append(.laserPreview(LaserPreviewCommand(vertices: vertices, modes: modes, shapes: shapes,
+            matrix: matrix, rect: rect, layer: layer ?? self.layer, clip: clip)))
     }
 
     /// Records a static shader material without coupling scene authoring to a
@@ -186,7 +198,7 @@ public struct SceneBuilder {
     private var x3dStack: [X3DGraphAssembly] = []
 
     public mutating func beginX3D(in rect: RenderRect) {
-        x3dStack.append(X3DGraphAssembly(rect: rect))
+        x3dStack.append(X3DGraphAssembly(rect: rect, clip: clip))
     }
 
     public mutating func emitX3D(_ op: X3DOp) {
@@ -230,7 +242,7 @@ public struct SceneBuilder {
 
     public mutating func endX3D() {
         guard let assembly = x3dStack.popLast() else { return }
-        scene.append(.x3d(X3DCommand(rect: assembly.rect, graph: assembly.graph)))
+        scene.append(.x3d(X3DCommand(rect: assembly.rect, graph: assembly.graph, clip: assembly.clip)))
     }
 
     /// Advance width. Uses the atlas metrics when `fonts` is supplied (so

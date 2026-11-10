@@ -9,7 +9,7 @@ private struct TestSquare: LaserGeometry {
     mutating func update(context: LiveUpdateContext) async { size.update(context: context) }
 
     func process(_: Void) -> Laser3DBuffer {
-        let s = size.value
+        let s = Float(size.value)
         let corners: [LaserVertex] = [
             .init(x: -s, y: -s), .init(x: s, y: -s), .init(x: s, y: s), .init(x: -s, y: s), .init(x: -s, y: -s),
         ]

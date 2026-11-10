@@ -60,6 +60,57 @@ import XShader
 
 // MARK: - SceneCompiler
 
+@Test func x3dRecordsTheEnclosingClip() throws {
+    let size = RenderSize(width: 100, height: 100)
+    let clip = RenderRect(x: 10, y: 20, width: 30, height: 40)
+    var builder = SceneBuilder(size: size)
+    builder.clipped(to: clip) { canvas in
+        canvas.beginX3D(in: RenderRect(x: 0, y: 0, width: 100, height: 100))
+        canvas.endX3D()
+    }
+    guard case .x3d(let view) = try #require(builder.scene.commands.first) else { Issue.record("Expected X3D"); return }
+    #expect(view.clip == clip)
+    let frame = SceneCompiler.compile(builder.scene, canvas: size, framebuffer: size)
+    #expect(frame.x3d.first?.clip == PixelRect(x: 10, y: 20, width: 30, height: 40))
+}
+
+@Test func hairlinesPreserveOrderAndProduceSegments() {
+    let size = RenderSize(width: 100, height: 100)
+    var scene = Scene()
+    scene.append(square(.ui))
+    scene.append(.shape(ShapeCommand(geometry: .hairline(points: [.init(x: 0, y: 0), .init(x: 50, y: 0), .init(x: 50, y: 50)], closed: true), color: .cyan)))
+    scene.append(square(.ui))
+    let frame = SceneCompiler.compile(scene, canvas: size, framebuffer: size)
+    #expect(frame.draws.count == 3)
+    guard case .lines(let range, _) = frame.draws[1] else { Issue.record("Expected lines"); return }
+    #expect(range.count == 6)
+    #expect(Array(frame.shapeVertices[(range.lowerBound * 6)..<(range.lowerBound * 6 + 2)]) == [-1, 1])
+}
+
+@Test func cachedStrokesMatchUncachedAfterSceneAndSizeChanges() {
+    let cache = SceneShapeCache()
+    let canvas = RenderSize(width: 100, height: 100)
+    var framebuffer = canvas
+    func stroke(_ x: Float, _ color: RenderColor = .white) -> DrawCommand {
+        .shape(ShapeCommand(geometry: .stroke(points: [.init(x: x, y: 5), .init(x: 50, y: 80)], width: 2, closed: false), color: color))
+    }
+    func check(_ commands: [DrawCommand]) {
+        var scene = Scene()
+        for command in commands { scene.append(command) }
+        let expected = SceneCompiler.compile(scene, canvas: canvas, framebuffer: framebuffer)
+        let actual = SceneCompiler.compile(scene, canvas: canvas, framebuffer: framebuffer, shapeCache: cache)
+        #expect(actual == expected)
+    }
+    check([stroke(1), stroke(10)])
+    check([stroke(1), stroke(10)])
+    check([stroke(10), stroke(1, .cyan)])
+    check([stroke(1, .cyan)])
+    framebuffer = RenderSize(width: 300, height: 200)
+    check([stroke(1, .cyan)])
+    check([])
+    check([stroke(1)])
+}
+
 private func square(_ layer: RenderLayer, color: RenderColor = .white) -> DrawCommand {
     .shape(ShapeCommand(geometry: .rect(RenderRect(x: 0, y: 0, width: 10, height: 10), corner: 0),
                         color: color, layer: layer))

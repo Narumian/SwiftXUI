@@ -22,6 +22,7 @@ public struct CompiledFrame: Sendable, Equatable {
     /// Backends can consume this list when material pipelines are available.
     public var materials: [CompiledMaterialCommand]
     public var x3d: [CompiledX3D] = []
+    public var laserPreviews: [CompiledLaserPreview] = []
     /// The framebuffer size in pixels this frame was laid out for (0 when unknown). Every
     /// scissor and vertex in the frame is in that space, so it is only valid on a target
     /// of exactly this size; a renderer that can see its target's real size checks it.
@@ -100,8 +101,10 @@ public struct CompiledMaterialCommand: Sendable, Equatable {
 public enum CompiledDraw: Sendable, Equatable {
     /// Vertex index range into `shapeVertices` (vertices, not floats).
     case shapes(range: Range<Int>, scissor: PixelRect?)
+    case lines(range: Range<Int>, scissor: PixelRect?)
     /// Vertex index range into `spriteVertices`.
     case sprite(texture: TextureID, range: Range<Int>, scissor: PixelRect?)
+    case laserPreview(index: Int)
     /// Vertex index range into `fontVertices`, sampled as a signed-distance atlas.
     case font(texture: TextureID, range: Range<Int>, scissor: PixelRect?)
     /// Index into `CompiledFrame.materials`; currently metadata-only for
@@ -113,6 +116,50 @@ public enum CompiledDraw: Sendable, Equatable {
     case x3d(index: Int)
 }
 
+/// A direct 3D laser draw, resolved to framebuffer pixels for viewport and
+/// scissor setup while retaining its source Float32 vertex payload.
+public struct CompiledLaserPreview: Sendable, Equatable {
+    public var vertices: [Float]
+    public var modes: [UInt16]
+    public var payloads: [CompiledLaserPreviewPayload]
+    public var shapes: [CompiledLaserPreviewShape]
+    public var clip: PixelRect?
+
+    public init(vertices: [Float] = [], modes: [UInt16] = [],
+                payloads: [CompiledLaserPreviewPayload] = [], shapes: [CompiledLaserPreviewShape] = [],
+                clip: PixelRect?) {
+        self.vertices = vertices
+        self.modes = modes
+        self.payloads = payloads
+        self.shapes = shapes
+        self.clip = clip
+    }
+}
+
+public struct CompiledLaserPreviewPayload: Sendable, Equatable {
+    public var vertices: [Float]
+    public var modes: [UInt16]
+    public var vertexOffset: Int
+
+    public init(vertices: [Float], modes: [UInt16], vertexOffset: Int) {
+        self.vertices = vertices
+        self.modes = modes
+        self.vertexOffset = vertexOffset
+    }
+}
+
+public struct CompiledLaserPreviewShape: Sendable, Equatable {
+    public var range: Range<Int>
+    public var matrix: [Float]
+    public var rect: PixelRect
+
+    public init(range: Range<Int>, matrix: [Float], rect: PixelRect) {
+        self.range = range
+        self.matrix = matrix
+        self.rect = rect
+    }
+}
+
 /// An `X3DCommand` mapped to framebuffer pixels. `views` holds each embedded
 /// view's frame in the order its `.view` items appear in the graph.
 public struct CompiledX3D: Sendable, Equatable {
@@ -121,13 +168,15 @@ public struct CompiledX3D: Sendable, Equatable {
     /// The rect as laid out (x, y, width, height in framebuffer pixels), which may reach past the framebuffer.
     /// Shaders get this as their origin and resolution, so a drawing that overflows is cut off instead of squeezed to fit.
     public var exactRect: SIMD4<Float>?
+    public var clip: PixelRect?
     public var graph: X3DGraph
     public var views: [CompiledFrame]
     public var planes: [CompiledX3DPlane]
 
-    public init(rect: PixelRect, exactRect: SIMD4<Float>? = nil, graph: X3DGraph, views: [CompiledFrame], planes: [CompiledX3DPlane] = []) {
+    public init(rect: PixelRect, exactRect: SIMD4<Float>? = nil, clip: PixelRect? = nil, graph: X3DGraph, views: [CompiledFrame], planes: [CompiledX3DPlane] = []) {
         self.rect = rect
         self.exactRect = exactRect
+        self.clip = clip
         self.graph = graph
         self.views = views
         self.planes = planes
@@ -231,6 +280,19 @@ struct Letterbox {
     }
 }
 
+/// Reuses stroke vertices from the preceding frame. Keep one cache per render session.
+public final class SceneShapeCache {
+    fileprivate struct Entry {
+        var shape: ShapeCommand
+        var vertices: [Float]
+    }
+    fileprivate var previous: [Entry?] = []
+    fileprivate var current: [Entry?] = []
+    fileprivate var dimensions: (RenderSize, RenderSize, Bool)?
+    fileprivate var floats = 0
+    public init() {}
+}
+
 public enum SceneCompiler {
     /// Framebuffer pixels per logical unit `compile` will use — what text
     /// preparation needs to bake atlases at the size they will be drawn.
@@ -248,7 +310,8 @@ public enum SceneCompiler {
         canvas: RenderSize,
         framebuffer: RenderSize,
         fit: Bool = true,
-        fonts: FontBook? = nil
+        fonts: FontBook? = nil,
+        shapeCache: SceneShapeCache? = nil
     ) -> CompiledFrame {
         var frame = CompiledFrame(background: scene.background, postIntensity: scene.postIntensity)
         if framebuffer.width.isFinite, framebuffer.height.isFinite, framebuffer.width >= 1, framebuffer.height >= 1 {
@@ -256,6 +319,15 @@ public enum SceneCompiler {
             frame.framebufferHeight = UInt32(min(framebuffer.height.rounded(), Float(UInt32.max / 2)))
         }
         let box = Letterbox(canvas: scene.authoringCanvas ?? canvas, framebuffer: framebuffer, fit: fit)
+        if let shapeCache {
+            let effectiveCanvas = scene.authoringCanvas ?? canvas
+            if let size = shapeCache.dimensions, size.0 != effectiveCanvas || size.1 != framebuffer || size.2 != fit {
+                shapeCache.previous.removeAll()
+            }
+            shapeCache.dimensions = (effectiveCanvas, framebuffer, fit)
+            shapeCache.current.removeAll(keepingCapacity: true)
+            shapeCache.floats = 0
+        }
         frame.shaderRegions = scene.shaderRegions.map {
             CompiledShaderRegion(rect: box.pixels($0.rect), shader: $0.shader)
         }
@@ -267,27 +339,61 @@ public enum SceneCompiler {
         // migration, but no longer reorders draws here.
         let ordered = scene.commands
 
-        var shapeRun: (start: Int, scissor: PixelRect?)?
+        var shapeRun: (start: Int, scissor: PixelRect?, lines: Bool)?
 
         func flushShapes() {
             guard let run = shapeRun else { return }
             let end = frame.shapeVertices.count / 6
             if end > run.start {
-                frame.draws.append(.shapes(range: run.start..<end, scissor: run.scissor))
+                if run.lines { frame.draws.append(.lines(range: run.start..<end, scissor: run.scissor)) }
+                else { frame.draws.append(.shapes(range: run.start..<end, scissor: run.scissor)) }
             }
             shapeRun = nil
         }
         func clip(_ r: RenderRect?) -> PixelRect? { r.map(box.pixels) }
-        func openShapeRun(_ scissor: PixelRect?) {
-            if shapeRun == nil { shapeRun = (frame.shapeVertices.count / 6, scissor) }
-            else if shapeRun!.scissor != scissor { flushShapes(); shapeRun = (frame.shapeVertices.count / 6, scissor) }
+        func openShapeRun(_ scissor: PixelRect?, lines: Bool = false) {
+            if shapeRun == nil { shapeRun = (frame.shapeVertices.count / 6, scissor, lines) }
+            else if shapeRun!.scissor != scissor || shapeRun!.lines != lines { flushShapes(); shapeRun = (frame.shapeVertices.count / 6, scissor, lines) }
         }
 
         for command in ordered {
             switch command {
             case .shape(let shape):
+                if case .hairline(let points, let closed) = shape.geometry {
+                    guard points.count >= 2 else { continue }
+                    openShapeRun(clip(shape.clip), lines: true)
+                    let color = shape.color.withAlpha(shape.color.alpha * shape.opacity)
+                    func appendPoint(_ point: RenderPoint) {
+                        let transformed = shape.transform.apply(point)
+                        let (x, y) = box.ndc(transformed.x, transformed.y)
+                        frame.shapeVertices.append(contentsOf: [x, y, color.red, color.green, color.blue, color.alpha])
+                    }
+                    for i in 1..<points.count { appendPoint(points[i - 1]); appendPoint(points[i]) }
+                    if closed { appendPoint(points[points.count - 1]); appendPoint(points[0]) }
+                    continue
+                }
                 openShapeRun(clip(shape.clip))
-                appendNDC(&frame.shapeVertices, ShapeMesher.mesh(shape), box)
+                if let shapeCache, case .stroke = shape.geometry {
+                    let index = shapeCache.current.count
+                    let cached = index < shapeCache.previous.count ? shapeCache.previous[index] : nil
+                    let vertices: [Float]
+                    if let cached, cached.shape == shape {
+                        vertices = cached.vertices
+                    } else {
+                        var made: [Float] = []
+                        appendNDC(&made, ShapeMesher.mesh(shape), box)
+                        vertices = made
+                    }
+                    frame.shapeVertices.append(contentsOf: vertices)
+                    if shapeCache.floats + vertices.count <= 4_000_000 {
+                        shapeCache.current.append(.init(shape: shape, vertices: vertices))
+                        shapeCache.floats += vertices.count
+                    } else {
+                        shapeCache.current.append(nil)
+                    }
+                } else {
+                    appendNDC(&frame.shapeVertices, ShapeMesher.mesh(shape), box)
+                }
             case .text(let text):
                 if let atlas = fonts?.atlas(for: text.font, capPixels: 7 * text.scale * box.scale),
                    text.string.contains(where: { ch in
@@ -311,6 +417,41 @@ public enum SceneCompiler {
                 appendSprite(&frame.spriteVertices, sprite, box)
                 let end = frame.spriteVertices.count / 8
                 frame.draws.append(.sprite(texture: sprite.texture, range: start..<end, scissor: clip(sprite.clip)))
+            case .laserPreview(let laser):
+                flushShapes()
+                let commandClip = clip(laser.clip)
+                let batchIndex: Int
+                if case .laserPreview(let previousIndex)? = frame.draws.last,
+                   frame.laserPreviews.indices.contains(previousIndex),
+                   frame.laserPreviews[previousIndex].clip == commandClip {
+                    batchIndex = previousIndex
+                } else {
+                    batchIndex = frame.laserPreviews.count
+                    frame.laserPreviews.append(CompiledLaserPreview(clip: commandClip))
+                    frame.draws.append(.laserPreview(index: batchIndex))
+                }
+                var batch = frame.laserPreviews[batchIndex]
+                let payloadIndex: Int
+                if let found = batch.payloads.firstIndex(where: { $0.vertices == laser.vertices && $0.modes == laser.modes }) {
+                    payloadIndex = found
+                } else {
+                    let offset = batch.vertices.count / 8
+                    batch.vertices.append(contentsOf: laser.vertices)
+                    batch.modes.append(contentsOf: laser.modes)
+                    batch.payloads.append(CompiledLaserPreviewPayload(
+                        vertices: laser.vertices, modes: laser.modes, vertexOffset: offset
+                    ))
+                    payloadIndex = batch.payloads.count - 1
+                }
+                let vertexOffset = batch.payloads[payloadIndex].vertexOffset
+                let sourceVertexCount = laser.vertices.count / 8
+                for range in laser.shapes where range.lowerBound >= 0 && range.upperBound <= sourceVertexCount && range.count >= 2 {
+                    batch.shapes.append(CompiledLaserPreviewShape(
+                        range: (range.lowerBound + vertexOffset)..<(range.upperBound + vertexOffset),
+                        matrix: laser.matrix, rect: box.pixels(laser.rect)
+                    ))
+                }
+                frame.laserPreviews[batchIndex] = batch
             case .material(let material):
                 // Preserve material position in the ordered stream while
                 // retaining metadata separately for future backend support.
@@ -369,11 +510,12 @@ public enum SceneCompiler {
                     }
                 }
                 let index = frame.x3d.count
-                frame.x3d.append(CompiledX3D(rect: box.visiblePixels(x3d.rect), exactRect: box.exactPixels(x3d.rect), graph: x3d.graph, views: views, planes: planes))
+                frame.x3d.append(CompiledX3D(rect: box.visiblePixels(x3d.rect), exactRect: box.exactPixels(x3d.rect), clip: x3d.clip.map(box.visiblePixels), graph: x3d.graph, views: views, planes: planes))
                 frame.draws.append(.x3d(index: index))
             }
         }
         flushShapes()
+        if let shapeCache { swap(&shapeCache.previous, &shapeCache.current) }
         return frame
     }
 

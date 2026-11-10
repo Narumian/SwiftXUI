@@ -26,6 +26,7 @@ public final class DynamicFontBook: @unchecked Sendable {
     private var missing: [SizeKey: Set<Character>] = [:]
     private var registered: Set<TextureID> = []
     private var nextTexture: UInt32
+    public private(set) var revision: UInt64 = 0
 
     public var maxPagesPerSize = 48
 
@@ -52,7 +53,7 @@ public final class DynamicFontBook: @unchecked Sendable {
                     prepare(layer.commands)
                 case .x3d(let x3d):
                     prepare(x3d.graph.viewCommands)
-                case .shape, .sprite, .material:
+                case .shape, .sprite, .laserPreview, .material:
                     break
                 }
             }
@@ -145,6 +146,7 @@ public final class DynamicFontBook: @unchecked Sendable {
         )
         nextTexture += 1
         pages[key, default: []].append(page)
+        revision &+= 1
         return page
     }
 
@@ -165,6 +167,7 @@ public final class DynamicFontBook: @unchecked Sendable {
             for page in pages[key] ?? [] where !page.isFull {
                 page.ensure(String(character))
                 if page.contains(character) {
+                    revision &+= 1
                     settled = true
                     break
                 }
@@ -182,7 +185,8 @@ public final class DynamicFontBook: @unchecked Sendable {
             }
             let page = makePage(for: key, font: font)
             page.ensure(String(character))
-            if !page.contains(character) { missing[key, default: []].insert(character) }
+            if page.contains(character) { revision &+= 1 }
+            else { missing[key, default: []].insert(character) }
         }
     }
 

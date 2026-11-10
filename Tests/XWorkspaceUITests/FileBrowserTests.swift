@@ -71,6 +71,28 @@ func activatingAFilePicksIt() async throws {
 }
 
 @Test
+func choosingTheSameFileTwiceQuicklyLoadsItInsteadOfPickingAgain() async throws {
+    let fixture = try await Fixture(files: ["a.png", "b.png"])
+    defer { fixture.cleanup() }
+    let picked = Recorder(), loaded = Recorder()
+    let model = FileBrowserModel(workspace: fixture.workspace)
+    model.onPick = { picked.add($0.path) }
+    model.onLoad = { loaded.add($0.path) }
+    model.open(.folder(id: fixture.folderID, path: ""))
+    await model.reload()
+    model.activate(visibleIndex: 0, now: 10)
+    #expect(picked.all == ["a.png"] && loaded.all.isEmpty)
+    model.activate(visibleIndex: 0, now: 10.2)          // a double: loads, does not pick again
+    #expect(picked.all == ["a.png"] && loaded.all == ["a.png"])
+    model.activate(visibleIndex: 0, now: 10.3)          // the double was used up: this is a first choice again
+    #expect(picked.all == ["a.png", "a.png"] && loaded.all == ["a.png"])
+    model.activate(visibleIndex: 1, now: 10.4)          // another file is not a double
+    #expect(picked.all == ["a.png", "a.png", "b.png"])
+    model.activate(visibleIndex: 1, now: 11)            // too slow
+    #expect(picked.all.count == 4 && loaded.all.count == 1)
+}
+
+@Test
 func queryAndFilterNarrowTheVisibleItems() async throws {
     let fixture = try await Fixture(files: ["cat.png", "dog.png", "cat.mov"], folders: ["pets"])
     defer { fixture.cleanup() }

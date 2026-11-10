@@ -14,7 +14,7 @@ private final class RecordingScript: LaserScriptable {
         contexts.append(context)
         received.append(inputs)
         try output.beginShape(id: 1)
-        try output.appendVertex(LaserVertex(x: Double(reads), y: 0))
+        try output.appendVertex(LaserVertex(x: Float(reads), y: 0))
         if fails { throw Failure.failed }
     }
 

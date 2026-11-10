@@ -130,8 +130,11 @@ public struct LaserProjector: Sendable {
 
     private mutating func project(_ vertex: LaserVertex, into samples: inout [Sample]) {
         let s = settings
-        let cam = s.camera * vertex.position
-        let color = SIMD3(vertex.rgba.x, vertex.rgba.y, vertex.rgba.z) * vertex.rgba.w
+        let position = SIMD4<Double>(Double(vertex.position.x), Double(vertex.position.y),
+                                     Double(vertex.position.z), Double(vertex.position.w))
+        let cam = s.camera * position
+        let color = SIMD3<Double>(Double(vertex.rgba.x), Double(vertex.rgba.y), Double(vertex.rgba.z))
+            * Double(vertex.rgba.w)
         defer { previous = cam }
 
         /// The sample for a camera-space position, or nil if it does not project.

@@ -5,10 +5,12 @@ import XShader
 public struct X3DCommand: Sendable, Equatable {
     public var rect: RenderRect
     public var graph: X3DGraph
+    public var clip: RenderRect?
 
-    public init(rect: RenderRect, graph: X3DGraph) {
+    public init(rect: RenderRect, graph: X3DGraph, clip: RenderRect? = nil) {
         self.rect = rect
         self.graph = graph
+        self.clip = clip
     }
 }
 
@@ -67,12 +69,13 @@ public enum X3DRenderItem: Sendable, Equatable {
 /// Assembles an `X3DGraph` from the `X3DOp` stream a sink receives.
 struct X3DGraphAssembly {
     let rect: RenderRect
+    let clip: RenderRect?
     var graph = X3DGraph()
     var pass: X3DRenderPass?
     var viewRect: RenderRect?
     var outerScene: Scene?
 
-    init(rect: RenderRect) { self.rect = rect }
+    init(rect: RenderRect, clip: RenderRect?) { self.rect = rect; self.clip = clip }
 
     mutating func apply(_ op: X3DOp) {
         switch op {

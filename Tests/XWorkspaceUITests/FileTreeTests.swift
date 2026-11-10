@@ -179,3 +179,113 @@ func aFailedMoveIsReportedAndLeavesTheTreeAlone() async throws {
     #expect(errors.all == ["Something with that name is already there"])
     #expect(FileManager.default.fileExists(atPath: fixture.base.appendingPathComponent("readme.txt").path))
 }
+
+@Test
+func choosingAFileTwiceLoadsItInsteadOfPickingAgain() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let picks = Picks()
+    let loads = Picks()
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    model.onPick = { picks.add($0.path) }
+    model.onLoad = { loads.add($0.path) }
+    await model.reload()
+    model.activate(row: 3, now: 100)      // readme.txt
+    model.activate(row: 3, now: 100.2)
+    #expect(picks.all == ["readme.txt"] && loads.all == ["readme.txt"])
+    // Too late for a double, and a third choice starts over.
+    model.activate(row: 3, now: 101)
+    #expect(picks.all.count == 2 && loads.all.count == 1)
+
+    // Without a load handler a second choice just picks again.
+    let plain = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    let again = Picks()
+    plain.onPick = { again.add($0.path) }
+    await plain.reload()
+    plain.activate(row: 3, now: 5); plain.activate(row: 3, now: 5.1)
+    #expect(again.all.count == 2)
+}
+
+@Test
+func theQueryKeepsMatchesAndTheFoldersAboveThemAndFindsUnopenedFolders() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    await model.reload()
+    #expect(names(model) == ["Media", "  Footage", "  Shaders", "  readme.txt"])     // nothing below Shaders is listed yet
+
+    model.setQuery("TUNNEL")
+    await settle(model, rows: 4)
+    #expect(names(model) == ["Media", "  Shaders", "    Old", "      tunnel.fs"])
+
+    model.setQuery("zzz")
+    #expect(names(model).isEmpty)
+    model.setQuery("")
+    #expect(names(model) == ["Media", "  Footage", "  Shaders", "  readme.txt"])      // the tree's own open state is untouched
+}
+
+@Test
+func watchingListsTheTreeAgainWhenAFolderChanges() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    await model.reload()
+    model.activate(row: 2)                 // Shaders
+    await settle(model, rows: 6)
+    await model.refreshIfChanged()
+    #expect(names(model).count == 6)       // nothing moved, nothing changes
+
+    try Data([1]).write(to: fixture.base.appendingPathComponent("Shaders/added.fs"))
+    // The stamp of a folder can share a tick with the first write; give it a distinct one.
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: fixture.base.appendingPathComponent("Shaders").path)
+    await model.refreshIfChanged()
+    #expect(names(model).contains("    added.fs"))
+}
+
+private func selectedName(_ model: FileTreeModel) -> String? {
+    let snapshot = model.snapshot()
+    return snapshot.rows.first { $0.key == snapshot.selected }?.item.name
+}
+
+@Test
+func theArrowKeysMoveTheSelectionWithoutPickingAndOpenAndCloseFolders() async throws {
+    let fixture = try await TreeFixture()
+    defer { fixture.cleanup() }
+    let picks = Picks(), loads = Picks()
+    let model = FileTreeModel(workspace: fixture.workspace, folderID: fixture.folderID)
+    model.onPick = { picks.add($0.path) }
+    model.onLoad = { loads.add($0.path) }
+    await model.reload()                                    // Media, Footage, Shaders, readme.txt
+    #expect(selectedName(model) == nil)
+
+    model.moveSelection(by: 1)                              // nothing selected: down starts at the top
+    #expect(selectedName(model) == "Media")
+    model.moveSelection(by: 1); model.moveSelection(by: 1)
+    #expect(selectedName(model) == "Shaders")
+    model.moveSelection(by: 10)                             // stops at the end
+    #expect(selectedName(model) == "readme.txt")
+    #expect(picks.all.isEmpty)                              // moving over a file does not pick it
+    #expect(model.snapshot().reveal?.item == 3)
+
+    model.moveSelection(toLast: false)
+    #expect(selectedName(model) == "Media")
+    model.moveSelection(by: 2)                              // Shaders
+    model.expandOrSelectFirstChild()                        // right: opens it
+    await settle(model, rows: 6)
+    #expect(names(model).contains("    plasma.fs"))
+    #expect(selectedName(model) == "Shaders")
+    model.expandOrSelectFirstChild()                        // right again: its first row
+    #expect(selectedName(model) == "Old")
+    model.collapseOrSelectParent()                          // left on a shut folder: the folder above
+    #expect(selectedName(model) == "Shaders")
+    model.collapseOrSelectParent()                          // left on an open folder: closes it
+    #expect(names(model) == ["Media", "  Footage", "  Shaders", "  readme.txt"])
+
+    model.moveSelection(by: 1)                              // readme.txt
+    model.activateSelected()                                // return on a file loads it
+    #expect(loads.all == ["readme.txt"] && picks.all == ["readme.txt"])     // as a click and a double click
+    model.moveSelection(by: -1)                             // Shaders
+    model.activateSelected()                                // return on a folder opens it
+    await settle(model, rows: 6)
+    #expect(model.snapshot().rows[2].isExpanded)
+}

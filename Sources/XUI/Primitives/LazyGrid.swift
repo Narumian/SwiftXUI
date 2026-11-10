@@ -83,6 +83,14 @@ struct LazyGridGeometry: Equatable {
     }
 }
 
+/// Asks a grid to scroll just far enough to show an item. A new `token` is a new request (the same item again after
+/// the user scrolled away); the same token is not repeated.
+public struct GridReveal: Hashable, Sendable {
+    public var item: Int
+    public var token: Int
+    public init(item: Int, token: Int) { self.item = item; self.token = token }
+}
+
 /// A virtualized, scrolling grid: only the rows inside the viewport are built,
 /// so a folder of 100 000 files costs what a screenful costs. Scrolls along
 /// `axis` (use `.horizontal` for a filmstrip) and keeps its place by item
@@ -97,6 +105,7 @@ public struct LazyGrid<Content: XView>: XView {
     let length: GridItemLength
     let spacing: Double
     let resetKey: String
+    let reveal: GridReveal?
     let content: @Sendable (Int, Size) -> Content
 
     public init(
@@ -106,6 +115,7 @@ public struct LazyGrid<Content: XView>: XView {
         length: GridItemLength,
         spacing: Double = 4,
         resetKey: String = "",
+        reveal: GridReveal? = nil,
         @XViewBuilder content: @escaping @Sendable (_ index: Int, _ size: Size) -> Content
     ) {
         self.axis = axis
@@ -114,12 +124,13 @@ public struct LazyGrid<Content: XView>: XView {
         self.length = length
         self.spacing = spacing
         self.resetKey = resetKey
+        self.reveal = reveal
         self.content = content
     }
 
     public var body: some XView {
         _LazyGridState(axis: axis, tracks: tracks, count: count, length: length,
-                       spacing: spacing, resetKey: resetKey, content: content)
+                       spacing: spacing, resetKey: resetKey, reveal: reveal, content: content)
     }
 }
 
@@ -131,24 +142,27 @@ private struct _LazyGridState<Content: XView>: XView {
     let length: GridItemLength
     let spacing: Double
     let resetKey: String
+    let reveal: GridReveal?
     let content: @Sendable (Int, Size) -> Content
     @XState private var anchorItem: Int = 0
     @XState private var intra: Double = 0
     @XState private var lastKey: String = ""
     @XState private var lastTranslation: Double = 0
+    @XState private var handledReveal: Int = 0
 
     init(axis: Axis, tracks: Int, count: Int, length: GridItemLength, spacing: Double,
-         resetKey: String, content: @escaping @Sendable (Int, Size) -> Content) {
+         resetKey: String, reveal: GridReveal?, content: @escaping @Sendable (Int, Size) -> Content) {
         self.axis = axis; self.tracks = tracks; self.count = count; self.length = length
-        self.spacing = spacing; self.resetKey = resetKey; self.content = content
+        self.spacing = spacing; self.resetKey = resetKey; self.reveal = reveal; self.content = content
     }
 
     var body: some XView {
-        let anchorBox = _anchorItem, intraBox = _intra, keyBox = _lastKey, translationBox = _lastTranslation
+        let anchorBox = _anchorItem, intraBox = _intra, keyBox = _lastKey, translationBox = _lastTranslation, revealBox = _handledReveal
         let keyChanged = keyBox?.value != resetKey
         let axis = axis
         _LazyGridPrimitive(
             axis: axis, tracks: tracks, count: count, length: length, spacing: spacing, content: content,
+            reveal: reveal, handledReveal: handledReveal, revealDone: { revealBox?.value = $0 },
             anchorItem: keyChanged ? 0 : anchorItem, intra: keyChanged ? 0 : intra,
             dragChanged: { translation in
                 guard let intraBox, let translationBox else { return }
@@ -174,6 +188,9 @@ private struct _LazyGridPrimitive<Content: XView>: XView, _PrimitiveXView {
     let length: GridItemLength
     let spacing: Double
     let content: @Sendable (Int, Size) -> Content
+    let reveal: GridReveal?
+    let handledReveal: Int
+    let revealDone: @Sendable (Int) -> Void
     let anchorItem: Int
     let intra: Double
     let dragChanged: @Sendable (Double) -> Void
@@ -190,6 +207,7 @@ private struct _LazyGridPrimitive<Content: XView>: XView, _PrimitiveXView {
             .onEnded { _ in dragEnded() }
         let (tracks, count, length, spacing, content) = (tracks, count, length, spacing, content)
         let (anchorItem, intra, normalize) = (anchorItem, intra, normalize)
+        let (reveal, handledReveal, revealDone) = (reveal, handledReveal, revealDone)
         let contentType: Any.Type = Content.self
         let dragDrop = _EnvironmentObjectContext.currentOrEmpty.object(DragDropStore.self)
         node.lazyChildren = { rect, _ in
@@ -199,6 +217,14 @@ private struct _LazyGridPrimitive<Content: XView>: XView, _PrimitiveXView {
             // A lifted view held near an edge scrolls the list under it.
             if let distance = dragDrop?.autoScrollDistance(in: rect, axis: axis), distance != 0 {
                 offset = geometry.clamped(offset + distance)
+            }
+            // Scroll just far enough to show the item a reveal asks for.
+            if let reveal, reveal.token != handledReveal, reveal.item >= 0, reveal.item < count {
+                let top = Double(reveal.item / geometry.tracks) * geometry.pitch
+                let bottom = top + geometry.mainExtent
+                if top < offset { offset = top } else if bottom > offset + geometry.mainViewport { offset = bottom - geometry.mainViewport }
+                offset = geometry.clamped(offset)
+                revealDone(reveal.token)
             }
             let anchor = geometry.anchor(for: offset)
             if anchor.item != anchorItem || anchor.intra != intra { normalize(anchor.item, anchor.intra) }

@@ -81,6 +81,7 @@ enum LayoutEngine {
         if let spec = node.dragSource { context.addDragSource(node.frame, spec) }
         if let spec = node.dropTarget { context.addDropTarget(node.frame, spec) }
         if let spec = node.contextMenu { context.addContextMenu(node.frame, spec) }
+        if let spec = node.shortcut { context.addShortcut(spec) }
         if let action = node.tapGesture, node.tapGestureAfterChildren {
             context.addTapGesture(node.frame, id: node.tapGestureID, label: node.tapGestureLabel, action: action)
         }

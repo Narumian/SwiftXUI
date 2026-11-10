@@ -8,7 +8,7 @@ import XUI
 ///
 /// `SceneBuilder` is a value type built up imperatively; this reference wrapper
 /// lets the layout walk share one accumulator across every leaf's draw call.
-public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink {
+public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink, XUI.LaserPreviewSink {
     public internal(set) var builder: SceneBuilder
     private var layerStack: [(shader: AnyShader, rect: XUI.Rect, builder: SceneBuilder)] = []
     /// Supplies atlas metrics so `Text` sizing matches what the compiler draws.
@@ -121,9 +121,21 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
         }
     }
 
+    public func hairlinePath(_ path: XUI.Path, in rect: XUI.Rect, color: XColorValue) {
+        for subpath in path.subpaths(fittedIn: rect) where subpath.points.count >= 2 {
+            builder.hairline(subpath.points.map(\.render), closed: subpath.closed, color: color.render, layer: layer)
+        }
+    }
+
     public func drawImage(_ source: ImageSource, in rect: XUI.Rect, opacity: Double) {
         guard let texture = imageResolver?(source) ?? images[source] ?? source.textureID else { return }
         builder.sprite(texture, in: rect.render, opacity: Float(opacity), layer: layer)
+    }
+
+    public func drawLaserPreview(vertices: [Float], modes: [UInt16], shapes: [Range<Int>],
+                                 matrix: [Float], in rect: XUI.Rect) {
+        builder.laserPreview(vertices: vertices, modes: modes, shapes: shapes,
+                             matrix: matrix, in: rect.render, layer: layer)
     }
 
     public func drawText(

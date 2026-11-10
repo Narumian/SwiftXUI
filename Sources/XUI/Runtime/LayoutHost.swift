@@ -61,6 +61,7 @@ public struct LayoutHost {
                 dragSources: renderContext.dragSources,
                 dropTargets: renderContext.dropTargets,
                 contextMenus: renderContext.contextMenus,
+                shortcuts: renderContext.shortcuts,
                 anchors: renderContext.anchors
             )
         }

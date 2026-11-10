@@ -11,6 +11,26 @@ struct LayoutContext {
     /// Which layout pass this is. A node remembers the sizes it measured only
     /// for the pass that measured them (see `LayoutNode.measure`).
     var pass: UInt64 = 0
+    /// Shared by the measure and place walks so stacks can reuse their
+    /// flexibility ordering within this pass.
+    var stackOrderCache = StackOrderCache()
+}
+
+final class StackOrderCache {
+    private struct Key: Hashable {
+        var axis: Axis
+        var children: [ObjectIdentifier]
+    }
+
+    private var orders: [Key: [Int]] = [:]
+
+    func order(axis: Axis, children: [LayoutNode], compute: () -> [Int]) -> [Int] {
+        let key = Key(axis: axis, children: children.map(ObjectIdentifier.init))
+        if let order = orders[key] { return order }
+        let order = compute()
+        orders[key] = order
+        return order
+    }
 }
 
 /// Hands out a fresh pass number per `LayoutHost` walk. Layout is single
@@ -61,6 +81,8 @@ final class LayoutNode {
     var dragSource: DragSourceSpec?
     var dropTarget: DropTargetSpec?
     var contextMenu: ContextMenuSpec?
+    /// Registered by `.keyboardShortcut`.
+    var shortcut: ShortcutSpec?
     /// Register `tapGesture` after the children so anything inside wins the
     /// first-match hit test (a scrim behind a sheet's content).
     var tapGestureAfterChildren = false

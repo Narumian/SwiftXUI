@@ -3,7 +3,7 @@ import simd
 import XCTest
 @testable import XLive
 
-private func vertex(_ x: Double, _ z: Double = 0) -> LaserVertex { LaserVertex(x: x, y: 0, z: z) }
+private func vertex(_ x: Double, _ z: Double = 0) -> LaserVertex { LaserVertex(x: Float(x), y: 0, z: Float(z)) }
 
 final class LaserReviewTests: XCTestCase {
     func testAChainReportsNothingWhenTheFrameIsOutOfView() {

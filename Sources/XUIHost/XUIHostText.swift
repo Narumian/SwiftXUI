@@ -88,13 +88,22 @@ public extension XUIHost {
         TextKeyMap.command(for: event) != nil
     }
 
-    /// Routes a hardware key press to the focused text field. Returns whether it
+    /// Whether the key is taken by the app right now: by the focused text field, or else by a `.keyboardShortcut`.
+    /// A shell asks this before dispatching a key asynchronously, so it can leave every other key (⌘Q) to the system.
+    func consumes(_ event: KeyEvent) -> Bool {
+        if textFocus.focusedID != nil, Self.isTextKey(event) { return true }
+        return shortcuts.matches(event, textEditing: textFocus.focusedID != nil)
+    }
+
+    /// Routes a hardware key press to the focused text field, or else to a shortcut. Returns whether it
     /// was consumed; when no field has focus nothing is consumed, so the app's own
     /// shortcuts and the gamepad/keyboard focus navigation keep working.
     @discardableResult
     @XUIActor
     func key(_ event: KeyEvent) -> Bool {
-        guard textFocus.focusedID != nil, let command = TextKeyMap.command(for: event) else { return false }
+        guard textFocus.focusedID != nil, let command = TextKeyMap.command(for: event) else {
+            return shortcuts.perform(event, textEditing: textFocus.focusedID != nil)
+        }
         switch command {
         case .input(let input):
             return textFocus.send(input)
@@ -121,5 +130,48 @@ public extension XUIHost {
     @XUIActor
     func textInput(_ event: TextInputEvent) -> Bool {
         textFocus.send(event)
+    }
+}
+
+public extension KeyShortcutTable {
+    func matches(_ event: KeyEvent, textEditing: Bool = false) -> Bool {
+        guard let shortcut = KeyboardShortcut(event) else { return false }
+        return contains(shortcut, textEditing: textEditing)
+    }
+
+    @discardableResult
+    func perform(_ event: KeyEvent, textEditing: Bool = false) -> Bool {
+        guard let shortcut = KeyboardShortcut(event) else { return false }
+        return perform(shortcut, textEditing: textEditing)
+    }
+}
+
+extension KeyboardShortcut {
+    /// The shortcut a key press stands for: a typed key by its text, a key without text (arrows, return) by its name.
+    /// Nil for keys no shortcut can name (tab, escape and the like are named too; see `Named`).
+    init?(_ event: KeyEvent) {
+        let key: String
+        switch event.key {
+        case .character(let text):
+            guard !text.isEmpty else { return nil }
+            key = text == " " ? Named.space.rawValue : text
+        case .up: key = Named.upArrow.rawValue
+        case .down: key = Named.downArrow.rawValue
+        case .left: key = Named.leftArrow.rawValue
+        case .right: key = Named.rightArrow.rawValue
+        case .home: key = Named.home.rawValue
+        case .end: key = Named.end.rawValue
+        case .returnKey: key = Named.returnKey.rawValue
+        case .escape: key = Named.escape.rawValue
+        case .tab: key = Named.tab.rawValue
+        case .backspace: key = Named.backspace.rawValue
+        case .deleteForward: key = Named.deleteForward.rawValue
+        }
+        var modifiers: ShortcutModifiers = []
+        if event.modifiers.contains(.shift) { modifiers.insert(.shift) }
+        if event.modifiers.contains(.control) { modifiers.insert(.control) }
+        if event.modifiers.contains(.option) { modifiers.insert(.option) }
+        if event.modifiers.contains(.command) { modifiers.insert(.command) }
+        self.init(key, modifiers: modifiers)
     }
 }

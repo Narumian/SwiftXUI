@@ -28,7 +28,7 @@ let package = Package(
         .executable(name: "xbrowser-preview", targets: ["xbrowser-preview"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Narumian/XLaser.git", revision: "c4d6cd70dbe4ede467eed2bdca3bbb10cb7b1810"),
+        .package(url: "https://github.com/Narumian/XLaser.git", revision: "2f1df50d5ebedfefe19d2a40e6c0cd1a19a049ed"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
@@ -129,7 +129,7 @@ let package = Package(
         .testTarget(name: "XCombineTests", dependencies: ["XCombine"]),
         .testTarget(name: "XShaderTests", dependencies: ["XShader"]),
         .testTarget(name: "XRenderTests", dependencies: ["XRender", "XShader"]),
-        .testTarget(name: "XRenderWGPUTests", dependencies: ["XRenderWGPU", "XRender"]),
+        .testTarget(name: "XRenderWGPUTests", dependencies: ["XRenderWGPU", "XRender", "XLive", "XUIHost"]),
         .testTarget(name: "XUITests", dependencies: ["XUI"]),
         .testTarget(
             name: "XUIMacrosTests",

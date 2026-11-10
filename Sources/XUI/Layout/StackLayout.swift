@@ -68,7 +68,7 @@ struct StackLayout: NodeLayout {
         var result = [Double](repeating: 0, count: count)
         var served = 0
 
-        for index in orderByFlexibility(children, context) {
+        for index in context.stackOrderCache.order(axis: axis, children: children, compute: { orderByFlexibility(children, context) }) {
             let share = served < count ? max(0, remaining / Double(count - served)) : 0
             let taken: Double
             if children[index].isSpacer {

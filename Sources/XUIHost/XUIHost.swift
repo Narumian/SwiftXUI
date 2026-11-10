@@ -18,6 +18,10 @@ public final class XUIHost: @unchecked Sendable {
     public let textFocus: TextFocusStore
     /// Which drag is under way, and the context menu. Shared with every draggable view in the tree.
     public let dragDrop: DragDropStore
+    /// The `.keyboardShortcut`s of the frame on screen.
+    public let shortcuts = KeyShortcutTable()
+    /// Which `.keyFocusArea` the keyboard is aimed at; a press inside an area aims it there.
+    public var keyFocus: KeyFocusStore { shortcuts.keyFocus }
     /// Where copy / cut / paste go. The platform shell replaces this with the system pasteboard.
     public var clipboard: any XClipboard = InMemoryClipboard()
 
@@ -66,6 +70,7 @@ public final class XUIHost: @unchecked Sendable {
         frameEnvironment.environmentObject(focusStore)
         frameEnvironment.environmentObject(textFocus)
         frameEnvironment.environmentObject(dragDrop)
+        frameEnvironment.environmentObject(keyFocus)
         dragDrop.beginFrame(clock: frameEnvironment.fxTime)
 
         let surface = SceneCanvas(
@@ -82,6 +87,7 @@ public final class XUIHost: @unchecked Sendable {
         ).render(view, into: surface, store: store)
         textFocus.endFrame()
         dragDrop.endFrame(layout)
+        shortcuts.replace(with: layout.shortcuts)
 
         focusStore.selectedID = FocusNavigator.selectInitial(
             in: layout.controls,
@@ -105,6 +111,8 @@ public final class XUIHost: @unchecked Sendable {
             id: event.id, phase: Self.pointerPhase(event.phase), position: position, timestamp: event.timestamp
         )
         if textFocus.handleKeyboardPointer(input) { return true }
+        // A press aims the keyboard at the key focus area under it, or at none.
+        if event.phase == .began { keyFocus.focus(frame.layout.hit(position, as: KeyFocusArea.self)?.id) }
         // A lifted drag owns its pointer; a press that might lift is only watched until it does.
         if dragDrop.handle(input, in: frame.layout) { return true }
         return gestureRuntime.handle(

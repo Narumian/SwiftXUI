@@ -30,6 +30,8 @@ public enum ShapeGeometry: Sendable, Equatable {
     case ellipse(center: RenderPoint, radiusX: Float, radiusY: Float)
     /// Open or closed stroked polyline.
     case stroke(points: [RenderPoint], width: Float, closed: Bool)
+    /// One-device-pixel line segments, without joins or caps.
+    case hairline(points: [RenderPoint], closed: Bool)
     /// Filled simple polygon (may be concave; triangulated by ear clipping).
     case polygon(points: [RenderPoint])
     /// Already-tessellated interleaved x/y pairs (e.g. a `PartedMesh` part).
@@ -93,6 +95,30 @@ public struct SpriteCommand: Sendable, Equatable {
         self.layer = layer
         self.clip = clip
         self.opacity = opacity
+    }
+}
+
+/// Direct Float32 3D laser geometry. `vertices` is interleaved position4 and
+/// rgba4; `modes` and `shapes` preserve the source buffer's parallel metadata.
+/// The GPU shader filters blank and unlit line segments.
+public struct LaserPreviewCommand: Sendable, Equatable {
+    public var vertices: [Float]
+    public var modes: [UInt16]
+    public var shapes: [Range<Int>]
+    public var matrix: [Float]
+    public var rect: RenderRect
+    public var layer: RenderLayer
+    public var clip: RenderRect?
+
+    public init(vertices: [Float], modes: [UInt16], shapes: [Range<Int>], matrix: [Float], rect: RenderRect,
+                layer: RenderLayer = .ui, clip: RenderRect? = nil) {
+        self.vertices = vertices
+        self.modes = modes
+        self.shapes = shapes
+        self.matrix = matrix
+        self.rect = rect
+        self.layer = layer
+        self.clip = clip
     }
 }
 
@@ -199,6 +225,7 @@ public struct ShaderLayerCommand: Sendable, Equatable {
 public indirect enum DrawCommand: Sendable, Equatable {
     case shape(ShapeCommand)
     case sprite(SpriteCommand)
+    case laserPreview(LaserPreviewCommand)
     case material(StaticShaderMaterialCommand)
     case text(TextCommand)
     case shaderLayer(ShaderLayerCommand)
@@ -208,6 +235,7 @@ public indirect enum DrawCommand: Sendable, Equatable {
         switch self {
         case .shape(let c): return c.layer
         case .sprite(let c): return c.layer
+        case .laserPreview(let c): return c.layer
         case .material(let c): return c.layer
         case .text(let c): return c.layer
         // A layer has no intrinsic render layer: its placement in this ordered

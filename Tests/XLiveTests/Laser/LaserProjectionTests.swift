@@ -13,7 +13,7 @@ private func settings(dwell: Int = 0, blank: Int = 0) -> LaserProjection {
 }
 
 private func vertex(_ x: Double, _ z: Double = 0) -> LaserVertex {
-    LaserVertex(x: x, y: 0, z: z, rgba: SIMD4(1, 0.5, 0.25, 1))
+    LaserVertex(x: Float(x), y: 0, z: Float(z), rgba: SIMD4(1, 0.5, 0.25, 1))
 }
 private func shape(_ id: UInt32, _ vertices: [LaserVertex]) -> TestShape { TestShape(id: LaserShapeID(id), vertices: vertices) }
 private func flat(_ shapes: [Laser2DShape]) -> [LaserPoint] { shapes.flatMap(\.points) }

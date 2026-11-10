@@ -38,22 +38,27 @@ public struct FileBrowserView: XView {
     let policy: BrowserLayoutPolicy
     let thumbnail: BrowserThumbnailProvider?
     let onAddFolder: (@Sendable () -> Void)?
+    let isDraggable: Bool
 
+    /// `draggable` lets the files be lifted and dropped on a `.dropDestination(for: WorkspaceEntry.self)`;
+    /// folders still only open. Off by default, so a browser that only picks keeps its press for scrolling.
     public init(model: FileBrowserModel, policy: BrowserLayoutPolicy = BrowserLayoutPolicy(),
-                thumbnail: BrowserThumbnailProvider? = nil, onAddFolder: (@Sendable () -> Void)? = nil) {
+                thumbnail: BrowserThumbnailProvider? = nil, onAddFolder: (@Sendable () -> Void)? = nil,
+                draggable: Bool = false) {
         self.model = model
         self.policy = policy
         self.thumbnail = thumbnail
         self.onAddFolder = onAddFolder
+        self.isDraggable = draggable
     }
 
     public var body: some XView {
-        let model = model, policy = policy, thumbnail = thumbnail, onAddFolder = onAddFolder
+        let model = model, policy = policy, thumbnail = thumbnail, onAddFolder = onAddFolder, isDraggable = isDraggable
         GeometryReader { geometry in
             let snapshot = model.snapshot()
             let layout = model.resolveLayout(policy, size: geometry.size)
             BrowserScene(model: model, snapshot: snapshot, layout: layout, size: geometry.size,
-                         thumbnail: thumbnail, onAddFolder: onAddFolder)
+                         thumbnail: thumbnail, onAddFolder: onAddFolder, isDraggable: isDraggable)
         }
     }
 }
@@ -65,6 +70,7 @@ struct BrowserScene: XView {
     let size: Size
     let thumbnail: BrowserThumbnailProvider?
     let onAddFolder: (@Sendable () -> Void)?
+    let isDraggable: Bool
 
     var body: some XView {
         let gridSize = Size(width: max(0, size.width - layout.chromeWidth), height: max(0, size.height - layout.headerHeight))
@@ -90,14 +96,14 @@ struct BrowserScene: XView {
     }
 
     private func grid(_ area: Size) -> some XView {
-        let model = model, snapshot = snapshot, layout = layout, thumbnail = thumbnail
+        let model = model, snapshot = snapshot, layout = layout, thumbnail = thumbnail, isDraggable = isDraggable
         let message = Self.message(snapshot)
         return ZStack {
             Color(Palette.background)
             LazyGrid(axis: layout.axis, tracks: layout.tracks, count: snapshot.visible.count, length: layout.itemLength,
                      spacing: layout.spacing, resetKey: snapshot.resetKey) { index, itemSize in
                 BrowserCell(model: model, item: snapshot.item(atVisible: index), index: index, size: itemSize,
-                            rows: layout.usesRows, selected: snapshot.selectedPath, thumbnail: thumbnail)
+                            rows: layout.usesRows, selected: snapshot.selectedPath, thumbnail: thumbnail, isDraggable: isDraggable)
             }.padding(layout.spacing)
             if let message {
                 Text(message, size: 13, color: Palette.muted)
@@ -236,6 +242,7 @@ struct BrowserCell: XView {
     let rows: Bool
     let selected: String?
     let thumbnail: BrowserThumbnailProvider?
+    let isDraggable: Bool
 
     var body: some XView {
         if let item {
@@ -243,9 +250,14 @@ struct BrowserCell: XView {
             let types = model.fileTypes
             let isSelected = selected == item.path && !item.isDirectory
             let image = thumbnail?(item)
-            DrawLayer(size: { _ in size }) { rect, context in
+            let cell = DrawLayer(size: { _ in size }) { rect, context in
                 BrowserCell.paint(item, image: image, selected: isSelected, rows: rows, types: types, in: rect, context: context)
             }.onTapGesture(id: "browser.item", label: item.name) { model.activate(visibleIndex: index) }
+            if isDraggable, !item.isDirectory {
+                cell.draggable(item.entry, cornerRadius: 8, id: item.path)
+            } else {
+                cell
+            }
         }
     }
 

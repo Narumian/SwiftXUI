@@ -62,6 +62,17 @@ public final class FileBrowserModel: @unchecked Sendable {
         set { lock.withLock { pick = newValue } }
     }
     private var pick: (@Sendable (WorkspaceEntry) -> Void)?
+    /// Called when the same file is chosen twice in quick succession (a double click or double tap), in place of
+    /// `onPick` the second time. A browser that loads on double activation selects with `onPick`'s absence and
+    /// loads here.
+    public var onLoad: (@Sendable (WorkspaceEntry) -> Void)? {
+        get { lock.withLock { load } }
+        set { lock.withLock { load = newValue } }
+    }
+    private var load: (@Sendable (WorkspaceEntry) -> Void)?
+    /// How long after one choice a second one counts as a double.
+    public var doubleActivationInterval: TimeInterval = 0.4
+    private var lastActivation: (path: String, time: TimeInterval)?
     /// When set, the browser offers a button that chooses the folder being viewed.
     public var onChooseFolder: (@Sendable (_ folderID: UUID, _ path: String) -> Void)? {
         get { lock.withLock { choose } }
@@ -124,15 +135,20 @@ public final class FileBrowserModel: @unchecked Sendable {
     }
 
     /// Opens a folder, or picks a file.
-    public func activate(visibleIndex: Int) {
-        let (item, pick) = lock.withLock { (state.item(atVisible: visibleIndex), self.pick) }
+    public func activate(visibleIndex: Int, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        let (item, pick, load) = lock.withLock { (state.item(atVisible: visibleIndex), self.pick, self.load) }
         guard let item else { return }
         if item.isDirectory {
             open(.folder(id: item.entry.folderID, path: item.entry.path))
         } else {
-            lock.withLock { state.selectedPath = item.entry.path }
+            let isDouble = lock.withLock { () -> Bool in
+                let double = lastActivation.map { $0.path == item.entry.path && now - $0.time <= doubleActivationInterval } ?? false
+                state.selectedPath = item.entry.path
+                lastActivation = double ? nil : (item.entry.path, now)
+                return double
+            }
             invalidate()
-            pick?(item.entry)
+            if isDouble { load?(item.entry) } else { pick?(item.entry) }
         }
     }
 

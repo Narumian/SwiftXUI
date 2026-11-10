@@ -2,6 +2,17 @@ import Testing
 import XRender
 @testable import XRenderWGPU
 
+@Test func hairlineRendersOnGPU() throws {
+    let renderer = try #require(WGPURenderer(headless: ()))
+    let size = RenderSize(width: 64, height: 64)
+    var builder = SceneBuilder(size: size, background: RenderColor(0, 0, 0, 1))
+    builder.hairline([.init(x: 8, y: 32), .init(x: 56, y: 32)], color: .white)
+    let frame = SceneCompiler.compile(builder.scene, canvas: size, framebuffer: size)
+    let pixels = try #require(renderer.renderToImage(frame, width: 64, height: 64))
+    let lit = stride(from: 0, to: pixels.count, by: 4).filter { pixels[$0] > 200 && pixels[$0 + 1] > 200 && pixels[$0 + 2] > 200 }
+    #expect(lit.count >= 40 && lit.count <= 55)
+}
+
 @Suite struct PassSizeTests {
     /// A frame laid out for a taller window than the attachment it lands on (a resize in
     /// flight) must still give a scissor inside the attachment: 1170 against 1158 is the

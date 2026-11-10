@@ -48,7 +48,7 @@ final class LaserScannerSettingsTests: XCTestCase {
     }
     private func square() -> LaserLive<Laser3DBuffer> {
         let corners: [(Double, Double)] = [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5), (-0.5, -0.5)]
-        return FixedFrame([TestShape(id: 1, vertices: corners.map { LaserVertex(x: $0.0, y: $0.1, rgba: SIMD4(repeating: 0.1)) })])
+        return FixedFrame([TestShape(id: 1, vertices: corners.map { LaserVertex(x: Float($0.0), y: Float($0.1), rgba: SIMD4(repeating: 0.1)) })])
     }
     private func line() -> LaserLive<Laser3DBuffer> {
         FixedFrame([TestShape(id: 1, vertices: [LaserVertex(x: -0.5, y: 0), LaserVertex(x: 0.5, y: 0)])])

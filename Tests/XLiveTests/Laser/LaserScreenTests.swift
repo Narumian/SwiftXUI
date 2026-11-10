@@ -9,7 +9,7 @@ private func settings(_ screen: LaserScreenMode, dwell: Int = 0, blank: Int = 0)
     LaserProjection(projection: matrix_identity_double4x4, near: -10, far: 10, dwell: dwell, blank: blank, screen: screen)
 }
 private func path(_ xs: [Double], y: Double = 0, id: UInt32 = 1) -> [TestShape] {
-    [TestShape(id: LaserShapeID(id), vertices: xs.map { LaserVertex(x: $0, y: y) })]
+    [TestShape(id: LaserShapeID(id), vertices: xs.map { LaserVertex(x: Float($0), y: Float(y)) })]
 }
 private func points(_ shapes: [Laser2DShape]) -> [LaserPoint] { shapes.flatMap(\.points) }
 private func path2(_ vertices: [LaserVertex]) -> [TestShape] { [TestShape(id: 1, vertices: vertices)] }

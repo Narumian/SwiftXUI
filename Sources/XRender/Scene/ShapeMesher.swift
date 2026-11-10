@@ -21,6 +21,8 @@ enum ShapeMesher {
 
         case .stroke(let points, let width, let closed):
             appendStroke(&out, points, width: width, closed: closed, color: color, t: t)
+        case .hairline(let points, let closed):
+            appendStroke(&out, points, width: 1, closed: closed, color: color, t: t)
 
         case .polygon(let points):
             let tris = EarClipper.triangulate(points)
