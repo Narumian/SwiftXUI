@@ -28,6 +28,7 @@ let package = Package(
         .executable(name: "xbrowser-preview", targets: ["xbrowser-preview"]),
     ],
     dependencies: [
+        .package(path: "../Trident/XLaser"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
@@ -114,9 +115,9 @@ let package = Package(
         .target(name: "XWorkspaceUI", dependencies: ["XUI", "XWorkspace"]),
         .testTarget(name: "XWorkspaceUITests", dependencies: ["XWorkspaceUI", "XWorkspace", "XUI"]),
         .executableTarget(name: "xworkspace-bench", dependencies: ["XWorkspaceUI", "XWorkspace", "XWorkspaceApple", "XUI"]),
-        .target(name: "XLive", dependencies: ["XUI", "XCombine"]),
-        .target(name: "XLiveApple", dependencies: ["XLive"]),
-        .testTarget(name: "XLiveTests", dependencies: ["XLive", "XLiveApple", "XUI"]),
+        .target(name: "XLive", dependencies: ["XUI", "XCombine", .product(name: "XLaser", package: "XLaser")]),
+        .target(name: "XLiveApple", dependencies: ["XLive", .product(name: "LaserCubeImplementation", package: "XLaser")]),
+        .testTarget(name: "XLiveTests", dependencies: ["XLive", "XLiveApple", "XUI", .product(name: "LaserCubeImplementation", package: "XLaser")]),
         .testTarget(name: "XWorkspaceTests", dependencies: ["XWorkspace"]),
         .testTarget(name: "XWorkspaceAppleTests", dependencies: ["XWorkspaceApple", "XWorkspace"]),
         .target(name: "XPreview", dependencies: ["XUI", "XUIHost", "XRender", "XRenderWGPU"], swiftSettings: [.swiftLanguageMode(.v5)]),

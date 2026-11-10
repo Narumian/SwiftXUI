@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import XLaser
 
 /// A shape's identity: a stable integer chosen by whoever produces the shape.
 /// It is not the shape's index. An index is a position in one frame and changes
