@@ -186,7 +186,10 @@ extension WGPURenderer {
 
     // MARK: graph
 
-    func encodeX3D(_ x3d: CompiledX3D, parent: WGPUTextureView, encoder: WGPUCommandEncoder, depth: Int) {
+    /// `parentSize` is the size of `parent`'s attachment; the drawing itself goes through
+    /// layer, plane and texture targets that carry their own sizes.
+    func encodeX3D(_ x3d: CompiledX3D, parent: WGPUTextureView, parentSize: PassSize,
+                   encoder: WGPUCommandEncoder, depth: Int) {
         guard let target = ensureShaderLayerTarget(at: depth) else { return }
         let x = min(x3d.rect.x, configuredWidth), y = min(x3d.rect.y, configuredHeight)
         let output = X3DViewport(view: target.view, format: surfaceFormat, x: x, y: y,
@@ -256,7 +259,7 @@ extension WGPURenderer {
                         active = nil
                         let frame = x3d.views[viewIndex]
                         drawScene(frame, geometry: makeTransientGeometryBuffers(for: frame), into: target.view,
-                                  encoder: encoder, clear: nil, time: x3dTime, depth: depth + 1)
+                                  targetSize: configuredSize, encoder: encoder, clear: nil, time: x3dTime, depth: depth + 1)
                         active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
                                               clearDepth: false, encoder: encoder)
                     case .plane(let size, _, let camera, let model):
@@ -269,7 +272,9 @@ extension WGPURenderer {
                             active.map(endX3DPass)
                             active = nil
                             drawScene(plane.frame, geometry: makeTransientGeometryBuffers(for: plane.frame),
-                                      into: planeTarget.view, encoder: encoder, clear: RenderColor(0, 0, 0, 0),
+                                      into: planeTarget.view,
+                                      targetSize: PassSize(width: planeTarget.width, height: planeTarget.height),
+                                      encoder: encoder, clear: RenderColor(0, 0, 0, 0),
                                       time: x3dTime, depth: depth + 1)
                             active = beginX3DPass(viewport.view, load: .load, depth: viewport.depth,
                                                   clearDepth: false, encoder: encoder)
@@ -296,7 +301,7 @@ extension WGPURenderer {
                 active.map(endX3DPass)
             }
         }
-        runLayerPost(into: parent, sourceView: target.view, time: x3dTime,
+        runLayerPost(into: parent, targetSize: parentSize, sourceView: target.view, time: x3dTime,
                      layer: CompiledShaderLayer(rect: x3d.rect, shader: X3DCompositeShader().erased(),
                                                 frame: CompiledFrame()),
                      encoder: encoder)
@@ -511,7 +516,10 @@ extension WGPURenderer {
         }
         wgpuRenderPassEncoderSetViewport(pass, Float(viewport.x), Float(viewport.y),
                                          Float(viewport.width), Float(viewport.height), 0, 1)
-        wgpuRenderPassEncoderSetScissorRect(pass, viewport.x, viewport.y, viewport.width, viewport.height)
+        // The viewport was laid out for the size the window had; cut it to what the pass can hold.
+        let scissor = PassSize(width: viewport.attachmentWidth, height: viewport.attachmentHeight)
+            .clamp(x: viewport.x, y: viewport.y, width: viewport.width, height: viewport.height)
+        wgpuRenderPassEncoderSetScissorRect(pass, scissor.x, scissor.y, scissor.width, scissor.height)
         wgpuRenderPassEncoderDraw(pass, UInt32(draw.vertexCount), UInt32(draw.instanceCount), 0, 0)
     }
 

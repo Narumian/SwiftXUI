@@ -22,6 +22,11 @@ public struct CompiledFrame: Sendable, Equatable {
     /// Backends can consume this list when material pipelines are available.
     public var materials: [CompiledMaterialCommand]
     public var x3d: [CompiledX3D] = []
+    /// The framebuffer size in pixels this frame was laid out for (0 when unknown). Every
+    /// scissor and vertex in the frame is in that space, so it is only valid on a target
+    /// of exactly this size; a renderer that can see its target's real size checks it.
+    public var framebufferWidth: UInt32 = 0
+    public var framebufferHeight: UInt32 = 0
     public var background: RenderColor
     public var postIntensity: Float
 
@@ -246,6 +251,10 @@ public enum SceneCompiler {
         fonts: FontBook? = nil
     ) -> CompiledFrame {
         var frame = CompiledFrame(background: scene.background, postIntensity: scene.postIntensity)
+        if framebuffer.width.isFinite, framebuffer.height.isFinite, framebuffer.width >= 1, framebuffer.height >= 1 {
+            frame.framebufferWidth = UInt32(min(framebuffer.width.rounded(), Float(UInt32.max / 2)))
+            frame.framebufferHeight = UInt32(min(framebuffer.height.rounded(), Float(UInt32.max / 2)))
+        }
         let box = Letterbox(canvas: scene.authoringCanvas ?? canvas, framebuffer: framebuffer, fit: fit)
         frame.shaderRegions = scene.shaderRegions.map {
             CompiledShaderRegion(rect: box.pixels($0.rect), shader: $0.shader)

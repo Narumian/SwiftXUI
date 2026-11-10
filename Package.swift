@@ -129,6 +129,7 @@ let package = Package(
         .testTarget(name: "XCombineTests", dependencies: ["XCombine"]),
         .testTarget(name: "XShaderTests", dependencies: ["XShader"]),
         .testTarget(name: "XRenderTests", dependencies: ["XRender", "XShader"]),
+        .testTarget(name: "XRenderWGPUTests", dependencies: ["XRenderWGPU", "XRender"]),
         .testTarget(name: "XUITests", dependencies: ["XUI"]),
         .testTarget(
             name: "XUIMacrosTests",

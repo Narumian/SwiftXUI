@@ -25,11 +25,8 @@ public final class WGPURenderer: XTextureRenderer {
     let surfaceFormat = WGPUTextureFormat_BGRA8Unorm
     var configuredWidth: UInt32 = 0
     var configuredHeight: UInt32 = 0
-    /// Size of the color attachment currently being encoded. During a resize the
-    /// swapchain drawable can be smaller than `configuredWidth` for a frame; scissors
-    /// must be clamped to this, not to the configured surface size alone.
-    var renderPassWidth: UInt32 = 0
-    var renderPassHeight: UInt32 = 0
+    /// Size every offscreen target (scene, shader layers, X3D planes) is created at.
+    var configuredSize: PassSize { PassSize(width: configuredWidth, height: configuredHeight) }
     private var vertexBuffer: WGPUBuffer?
     private var vertexBufferCapacity = 0
 
@@ -240,7 +237,7 @@ public final class WGPURenderer: XTextureRenderer {
     /// next `wgpuSurfaceGetCurrentTexture` in a wait that survives SIGKILL on
     /// macOS. So even a failed encode (`wgpuCommandEncoderFinish` → nil from a
     /// validation error) still presents, showing one bad frame instead of hanging.
-    private func withDrawable(_ encode: (WGPUTextureView, WGPUCommandEncoder) -> Void) {
+    private func withDrawable(_ encode: (WGPUTextureView, WGPUCommandEncoder, PassSize) -> Void) {
         guard let surface, configuredWidth > 0, configuredHeight > 0 else { return }
 
         var surfaceTexture = WGPUSurfaceTexture()
@@ -270,21 +267,20 @@ public final class WGPURenderer: XTextureRenderer {
             _ = wgpuDevicePoll(device, 0, nil)
         }
         defer {
-            renderPassWidth = 0
-            renderPassHeight = 0
             present()
             wgpuTextureRelease(texture)
         }
 
-        renderPassWidth = max(1, wgpuTextureGetWidth(texture))
-        renderPassHeight = max(1, wgpuTextureGetHeight(texture))
+        // The drawable can differ from the configured size for a frame while a resize
+        // settles, so its own size is what passes drawing straight into it clamp to.
+        let drawableSize = PassSize(width: wgpuTextureGetWidth(texture), height: wgpuTextureGetHeight(texture))
 
         guard let view = wgpuTextureCreateView(texture, nil) else { return }
         defer { wgpuTextureViewRelease(view) }
         guard let encoder = wgpuDeviceCreateCommandEncoder(device, nil) else { return }
         defer { wgpuCommandEncoderRelease(encoder) }
 
-        encode(view, encoder)
+        encode(view, encoder, drawableSize)
 
         if let commandBuffer = wgpuCommandEncoderFinish(encoder, nil) {
             // The imported C signature is `UnsafePointer<WGPUCommandBuffer?>?`:
@@ -474,18 +470,33 @@ public final class WGPURenderer: XTextureRenderer {
 
     public func render(_ frame: CompiledFrame) { render(frame, time: 0) }
 
+    /// Reports the pixel size of the surface's real drawable. It must read the
+    /// platform layer itself: the size the renderer was configured with can be stale,
+    /// because whatever owns the view may resize the drawable on its own at any time.
+    public var drawableSizeProvider: (() -> (width: UInt32, height: UInt32)?)?
+
+    /// Whether `frame` was laid out for a different size than the surface's drawable has
+    /// right now. Such a frame must not be drawn: its scissors would reach past the
+    /// drawable and Metal validation aborts the process. Hosts rebuild the frame.
+    /// Always false when the frame or the surface does not know its size.
+    public func isStale(_ frame: CompiledFrame) -> Bool {
+        guard frame.framebufferWidth > 0, frame.framebufferHeight > 0,
+              let actual = drawableSizeProvider?() else { return false }
+        return actual.width != frame.framebufferWidth || actual.height != frame.framebufferHeight
+    }
+
+    /// Draws `frame`, unless it is stale (see `isStale`); a stale frame is dropped before a
+    /// drawable is acquired, so nothing is left unpresented.
     public func render(_ frame: CompiledFrame, time: Float) {
-        withDrawable { surfaceView, encoder in
-            encodeFrame(frame, time: time, into: surfaceView, encoder: encoder)
+        guard !isStale(frame) else { return }
+        withDrawable { surfaceView, encoder, surfaceSize in
+            encodeFrame(frame, time: time, into: surfaceView, surfaceSize: surfaceSize, encoder: encoder)
         }
     }
 
     private func encodeFrame(_ frame: CompiledFrame, time: Float,
-                             into surfaceView: WGPUTextureView, encoder: WGPUCommandEncoder) {
-        if renderPassWidth == 0 || renderPassHeight == 0 {
-            renderPassWidth = max(1, configuredWidth)
-            renderPassHeight = max(1, configuredHeight)
-        }
+                             into surfaceView: WGPUTextureView, surfaceSize: PassSize,
+                             encoder: WGPUCommandEncoder) {
         releaseTransientPostResources()
         releaseTransientGeometryBuffers()
         x3dDepthInfo = nil
@@ -497,10 +508,12 @@ public final class WGPURenderer: XTextureRenderer {
         let effectiveIntensity = postIntensity * frame.postIntensity
         let usePost = (effectiveIntensity > 0 || !frame.shaderRegions.isEmpty || !frame.shaderLayers.isEmpty || !frame.x3d.isEmpty)
             && ensurePostResources()
-        let sceneTarget = usePost ? (sceneView ?? surfaceView) : surfaceView
+        let drawsToScene = usePost && sceneView != nil
+        let sceneTarget = drawsToScene ? sceneView! : surfaceView
+        let sceneTargetSize = drawsToScene ? configuredSize : surfaceSize
 
         let rootGeometry = GeometryBuffers(shapes: vertexBuffer, sprites: spriteVertexBuffer, fonts: fontVertexBuffer)
-        drawScene(frame, geometry: rootGeometry, into: sceneTarget, encoder: encoder,
+        drawScene(frame, geometry: rootGeometry, into: sceneTarget, targetSize: sceneTargetSize, encoder: encoder,
                   clear: frame.background, time: time, depth: 0)
         if usePost, let sceneView {
             runPost(into: surfaceView, sceneView: sceneView, time: time,
@@ -541,7 +554,8 @@ public final class WGPURenderer: XTextureRenderer {
 
         guard let encoder = wgpuDeviceCreateCommandEncoder(device, nil) else { return nil }
         defer { wgpuCommandEncoderRelease(encoder) }
-        encodeFrame(frame, time: time, into: view, encoder: encoder)
+        encodeFrame(frame, time: time, into: view,
+                    surfaceSize: PassSize(width: UInt32(width), height: UInt32(height)), encoder: encoder)
 
         var source = WGPUTexelCopyTextureInfo()
         source.texture = target
@@ -600,7 +614,8 @@ public final class WGPURenderer: XTextureRenderer {
         defer { wgpuTextureViewRelease(view) }
         guard let encoder = wgpuDeviceCreateCommandEncoder(device, nil) else { return }
         defer { wgpuCommandEncoderRelease(encoder) }
-        encodeFrame(frame, time: time, into: view, encoder: encoder)
+        encodeFrame(frame, time: time, into: view,
+                    surfaceSize: PassSize(width: UInt32(width), height: UInt32(height)), encoder: encoder)
         guard let commandBuffer = wgpuCommandEncoderFinish(encoder, nil) else { return }
         var submitted: WGPUCommandBuffer? = commandBuffer
         withUnsafePointer(to: &submitted) { wgpuQueueSubmit(queue, 1, $0) }
@@ -636,6 +651,7 @@ public final class WGPURenderer: XTextureRenderer {
         _ frame: CompiledFrame,
         geometry: GeometryBuffers,
         into targetView: WGPUTextureView,
+        targetSize: PassSize,
         encoder: WGPUCommandEncoder,
         clear: RenderColor?,
         time: Float,
@@ -670,7 +686,7 @@ public final class WGPURenderer: XTextureRenderer {
                 wgpuRenderPassEncoderSetPipeline(activePass, pipeline)
                 wgpuRenderPassEncoderSetVertexBuffer(activePass, 0, vertexBuffer,
                     UInt64(range.lowerBound * 6 * stride), UInt64(range.count * 6 * stride))
-                applyScissor(activePass, scissor)
+                applyScissor(activePass, scissor, in: targetSize)
                 wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
             case .sprite(let textureID, let range, let scissor):
                 guard let spritePipeline, let spriteVertexBuffer = geometry.sprites, !range.isEmpty,
@@ -679,7 +695,7 @@ public final class WGPURenderer: XTextureRenderer {
                 wgpuRenderPassEncoderSetBindGroup(activePass, 0, record.bindGroup, 0, nil)
                 wgpuRenderPassEncoderSetVertexBuffer(activePass, 0, spriteVertexBuffer,
                     UInt64(range.lowerBound * 8 * stride), UInt64(range.count * 8 * stride))
-                applyScissor(activePass, scissor)
+                applyScissor(activePass, scissor, in: targetSize)
                 wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
             case .font(let textureID, let range, let scissor):
                 guard let fontPipeline, let fontVertexBuffer = geometry.fonts, !range.isEmpty,
@@ -688,7 +704,7 @@ public final class WGPURenderer: XTextureRenderer {
                 wgpuRenderPassEncoderSetBindGroup(activePass, 0, record.bindGroup, 0, nil)
                 wgpuRenderPassEncoderSetVertexBuffer(activePass, 0, fontVertexBuffer,
                     UInt64(range.lowerBound * 14 * stride), UInt64(range.count * 14 * stride))
-                applyScissor(activePass, scissor)
+                applyScissor(activePass, scissor, in: targetSize)
                 wgpuRenderPassEncoderDraw(activePass, UInt32(range.count), 1, 0, 0)
             case .material:
                 // The command path preserves material order now. Execution
@@ -698,7 +714,7 @@ public final class WGPURenderer: XTextureRenderer {
                 guard frame.x3d.indices.contains(index), frame.x3d[index].drawsAnything, let activePass = pass else { continue }
                 wgpuRenderPassEncoderEnd(activePass)
                 pass = nil
-                encodeX3D(frame.x3d[index], parent: targetView, encoder: encoder, depth: depth)
+                encodeX3D(frame.x3d[index], parent: targetView, parentSize: targetSize, encoder: encoder, depth: depth)
                 pass = beginPass(load: true)
                 guard pass != nil else { return }
             case .shaderLayer(let index):
@@ -710,9 +726,9 @@ public final class WGPURenderer: XTextureRenderer {
                 let layerGeometry = makeTransientGeometryBuffers(for: layer.frame)
                 let outerDepth = x3dDepthInfo
                 x3dDepthInfo = nil
-                drawScene(layer.frame, geometry: layerGeometry, into: target.view, encoder: encoder,
-                          clear: RenderColor(0, 0, 0, 0), time: time, depth: depth + 1)
-                runLayerPost(into: targetView, sourceView: target.view, time: time,
+                drawScene(layer.frame, geometry: layerGeometry, into: target.view, targetSize: configuredSize,
+                          encoder: encoder, clear: RenderColor(0, 0, 0, 0), time: time, depth: depth + 1)
+                runLayerPost(into: targetView, targetSize: targetSize, sourceView: target.view, time: time,
                              layer: layer, encoder: encoder)
                 x3dDepthInfo = x3dDepthInfo ?? outerDepth
                 pass = beginPass(load: true)
@@ -825,6 +841,7 @@ public final class WGPURenderer: XTextureRenderer {
     /// composite it over the already-painted parent target.
     func runLayerPost(
         into targetView: WGPUTextureView,
+        targetSize: PassSize,
         sourceView: WGPUTextureView,
         time: Float,
         layer: CompiledShaderLayer,
@@ -871,7 +888,7 @@ public final class WGPURenderer: XTextureRenderer {
             guard let pass = wgpuCommandEncoderBeginRenderPass(encoder, &descriptor) else { return }
             wgpuRenderPassEncoderSetPipeline(pass, postPipeline)
             wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nil)
-            applyScissor(pass, layer.rect)
+            applyScissor(pass, layer.rect, in: targetSize)
             wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)
             wgpuRenderPassEncoderEnd(pass)
             wgpuRenderPassEncoderRelease(pass)
@@ -952,31 +969,13 @@ public final class WGPURenderer: XTextureRenderer {
         }
     }
 
-    func applyScissor(_ pass: WGPURenderPassEncoder, _ rect: PixelRect?) {
-        let limitW = max(1, renderPassWidth > 0 ? renderPassWidth : configuredWidth)
-        let limitH = max(1, renderPassHeight > 0 ? renderPassHeight : configuredHeight)
-        guard let rect else {
-            wgpuRenderPassEncoderSetScissorRect(pass, 0, 0, limitW, limitH)
-            return
-        }
-        let x = min(rect.x, limitW)
-        let y = min(rect.y, limitH)
-        wgpuRenderPassEncoderSetScissorRect(
-            pass, x, y, min(rect.width, limitW - x), min(rect.height, limitH - y)
-        )
-    }
-
-    func clampToRenderPass(x: UInt32, y: UInt32, width: UInt32, height: UInt32) -> (UInt32, UInt32, UInt32, UInt32) {
-        let limitW = max(1, renderPassWidth > 0 ? renderPassWidth : configuredWidth)
-        let limitH = max(1, renderPassHeight > 0 ? renderPassHeight : configuredHeight)
-        let clampedX = min(x, limitW)
-        let clampedY = min(y, limitH)
-        return (
-            clampedX,
-            clampedY,
-            min(width, limitW - clampedX),
-            min(height, limitH - clampedY)
-        )
+    /// Sets the scissor for a pass drawing into an attachment of `size`. Metal asserts
+    /// that the scissor lies inside the attachment, so the rect is always cut to the
+    /// attachment's own size: the compiled frame was laid out for the size the window
+    /// had then, which can be larger than the attachment while a resize settles.
+    func applyScissor(_ pass: WGPURenderPassEncoder, _ rect: PixelRect?, in size: PassSize) {
+        let (x, y, width, height) = size.clamp(rect)
+        wgpuRenderPassEncoderSetScissorRect(pass, x, y, width, height)
     }
 
     private func upload(_ floats: [Float], into buffer: inout WGPUBuffer?, capacity: inout Int) -> Int {
