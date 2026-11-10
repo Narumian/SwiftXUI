@@ -28,7 +28,7 @@ let package = Package(
         .executable(name: "xbrowser-preview", targets: ["xbrowser-preview"]),
     ],
     dependencies: [
-        .package(path: "../Trident/XLaser"),
+        .package(url: "https://github.com/Narumian/XLaser.git", revision: "c4d6cd70dbe4ede467eed2bdca3bbb10cb7b1810"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
