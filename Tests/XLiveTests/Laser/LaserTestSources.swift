@@ -1,10 +1,24 @@
 import Foundation
 @testable import XLive
 
-/// A source that answers with the same frame every time it is read, for tests of the stages
-/// that follow it.
-struct FixedFrame: Laser3DStream {
-    var shapes: [Laser3DShape]
-    init(_ shapes: [Laser3DShape]) { self.shapes = shapes }
-    mutating func read() -> [Laser3DShape] { shapes }
+struct TestShape {
+    let id: LaserShapeID
+    let vertices: [LaserVertex]
+}
+
+func testBuffer(_ shapes: [TestShape]) -> Laser3DBuffer {
+    var buffer = Laser3DBuffer()
+    for shape in shapes {
+        try! buffer.beginShape(id: shape.id)
+        for vertex in shape.vertices { try! buffer.appendVertex(vertex) }
+    }
+    return buffer
+}
+
+func FixedFrame(_ shapes: [TestShape]) -> LaserLive<Laser3DBuffer> {
+    LaserLive(testBuffer(shapes))
+}
+
+extension LaserProjector {
+    mutating func project(_ shapes: [TestShape]) -> [Laser2DShape] { project(testBuffer(shapes)) }
 }

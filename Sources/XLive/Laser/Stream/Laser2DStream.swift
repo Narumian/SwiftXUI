@@ -13,7 +13,7 @@ public struct Laser2DShape: Equatable, Sendable {
 }
 
 /// A source of scanner samples in the back half of the pipeline (2D, `LaserPoint`),
-/// what an output plays. It is the same form as `Laser3DStream`: each `read` answers
+/// what an output plays. Each `read` answers
 /// with the shapes of one frame, every one of them whole, and an empty array means
 /// there is nothing to play now. `read` never waits.
 public protocol Laser2DStream: Sendable {

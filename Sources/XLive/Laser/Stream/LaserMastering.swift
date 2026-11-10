@@ -15,5 +15,5 @@ public struct LaserMastering: LaserEffect, Equatable {
 
     public mutating func update(context: LiveUpdateContext) async {}
 
-    public func process(_ input: [Laser3DShape]) -> [Laser3DShape] { input }
+    public func process(_ input: Laser3DBuffer) -> Laser3DBuffer { input }
 }

@@ -5,11 +5,9 @@ import Foundation
 /// (dwell and blank at the ends of each shape), corner dwell, and the resampler. Each stage is read from the
 /// `LaserScannerSettings` in `live` before every frame, so a setting that changes
 /// while the chain plays takes effect on the next frame, without a rebuild.
-public struct LaserScannerChain<Source: Laser3DStream>: Laser2DStream {
-    public private(set) var source: Source
+public struct LaserScannerChain: Laser2DStream {
+    private let source: LaserLive<Laser3DBuffer>
     public let rate: UInt32?
-    /// Stops a source whose frames all project to nothing from being asked forever.
-    public var maximumReads = 8
     private let live: LaserLive<LaserScannerSettings>
     private let template: LaserProjection
     private let mastering: LaserLive<LaserMastering>
@@ -18,7 +16,7 @@ public struct LaserScannerChain<Source: Laser3DStream>: Laser2DStream {
     private var corners: LaserCornerDwell
     private var resampler: LaserResampler
 
-    public init(_ source: Source, projection template: LaserProjection, live: LaserLive<LaserScannerSettings>,
+    public init(_ source: LaserLive<Laser3DBuffer>, projection template: LaserProjection, live: LaserLive<LaserScannerSettings>,
                 mastering: LaserLive<LaserMastering> = LaserLive(LaserMastering()), rate: UInt32 = 30000) {
         self.source = source; self.template = template; self.live = live; self.mastering = mastering; self.rate = rate
         let s = live.value
@@ -28,21 +26,12 @@ public struct LaserScannerChain<Source: Laser3DStream>: Laser2DStream {
         resampler = LaserResampler(minimumStep: s.minimumStep, maximumStep: s.maximumStep)
     }
 
-    /// One frame of the source through the stages. Reads again when a whole frame came out
-    /// as nothing (every shape out of view, say), so an empty answer means the source has
-    /// nothing now and not that this frame happened to be hidden.
     public mutating func read() -> [Laser2DShape] {
-        for _ in 0..<max(1, maximumReads) {
-            let shapes = source.read()
-            if shapes.isEmpty { return [] }
-            let out = process(shapes)
-            if !out.isEmpty { return out }
-        }
-        return []
+        process(source.value)
     }
 
     /// The shapes through the stages with the settings as they are now.
-    public mutating func process(_ shapes: [Laser3DShape]) -> [Laser2DShape] {
+    public mutating func process(_ shapes: Laser3DBuffer) -> [Laser2DShape] {
         tune(live.value)
         return resampler.process(corners.process(padding.process(projector.project(mastering.value.process(shapes)))))
     }

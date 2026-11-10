@@ -48,9 +48,9 @@ public struct LaserScannerSettings: Codable, Equatable, Sendable {
     /// `LaserScannerChain`. The settings are read again for every frame, so changing
     /// `live` changes what is made from the next frame on, while the chain plays. The
     /// output's own safety masks are not here: they apply after the buffer, per output.
-    public static func stream<Shapes: Laser3DStream>(from shapes: Shapes, projection template: LaserProjection,
+    public static func stream(from shapes: LaserLive<Laser3DBuffer>, projection template: LaserProjection,
                                                    live: LaserLive<LaserScannerSettings>,
-                                                   mastering: LaserLive<LaserMastering> = LaserLive(LaserMastering()), rate: UInt32 = 30000) -> LaserScannerChain<Shapes> {
+                                                   mastering: LaserLive<LaserMastering> = LaserLive(LaserMastering()), rate: UInt32 = 30000) -> LaserScannerChain {
         LaserScannerChain(shapes, projection: template, live: live, mastering: mastering, rate: rate)
     }
 }
@@ -64,13 +64,6 @@ public final class LaserLive<Value: Sendable>: @unchecked Sendable {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
-}
-
-/// A box of shapes is a front-stage source: each read answers with what the box holds now. The
-/// producer writes the next frame into it from its own clock, so the pump that reads it never
-/// waits for the producer, and a frame that is not replaced is read again.
-extension LaserLive: Laser3DStream where Value == [Laser3DShape] {
-    public func read() -> [Laser3DShape] { value }
 }
 
 /// One adjustable number of a `LaserScannerSettings`, with what a control needs to

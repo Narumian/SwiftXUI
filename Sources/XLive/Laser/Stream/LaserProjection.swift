@@ -81,15 +81,16 @@ public struct LaserProjector: Sendable {
     public mutating func reset() { previous = nil; screenPrevious = nil }
 
     /// The shapes through the camera and projection. A shape wholly out of view is dropped.
-    public mutating func project(_ shapes: [Laser3DShape]) -> [Laser2DShape] {
+    public mutating func project(_ shapes: Laser3DBuffer) -> [Laser2DShape] {
         var out: [Laser2DShape] = []
-        out.reserveCapacity(shapes.count)
+        out.reserveCapacity(shapes.shapeCount)
         var samples: [Sample] = []
-        for shape in shapes {
+        for shape in shapes.shapes {
             previous = nil; screenPrevious = nil
             var points: [LaserPoint] = []
-            points.reserveCapacity(shape.vertices.count)
-            for vertex in shape.vertices {
+            points.reserveCapacity(Int(shape.count))
+            for index in Int(shape.start)..<(Int(shape.start) + Int(shape.count)) {
+                let vertex = shapes.vertex(at: index)
                 samples.removeAll(keepingCapacity: true)
                 project(vertex, into: &samples)
                 for sample in samples { screen(sample, into: &points) }

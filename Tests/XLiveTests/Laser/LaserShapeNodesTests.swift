@@ -8,12 +8,12 @@ private struct TestSquare: LaserGeometry {
 
     mutating func update(context: LiveUpdateContext) async { size.update(context: context) }
 
-    func process(_: Void) -> [Laser3DShape] {
+    func process(_: Void) -> Laser3DBuffer {
         let s = size.value
         let corners: [LaserVertex] = [
             .init(x: -s, y: -s), .init(x: s, y: -s), .init(x: s, y: s), .init(x: -s, y: s), .init(x: -s, y: -s),
         ]
-        return [Laser3DShape(id: 1, vertices: corners)]
+        return testBuffer([TestShape(id: 1, vertices: corners)])
     }
 }
 
@@ -21,8 +21,10 @@ private struct TestSquare: LaserGeometry {
 private struct TestTwice: LaserEffect {
     mutating func update(context: LiveUpdateContext) async {}
 
-    func process(_ frame: [Laser3DShape]) -> [Laser3DShape] {
-        frame + frame.map { Laser3DShape(id: LaserShapeID($0.id.rawValue + 1000), vertices: $0.vertices) }
+    func process(_ frame: Laser3DBuffer) -> Laser3DBuffer {
+        var output = frame
+        try! output.append(contentsOf: frame.mapShapeIDs { LaserShapeID($0.rawValue + 1000) })
+        return output
     }
 }
 
@@ -51,22 +53,25 @@ final class LaserShapeNodesTests: XCTestCase {
 
     func testGeometryReturnsOneWholeShape() {
         let frame = TestSquare().process(())
-        XCTAssertEqual(frame.map(\.id), [1])
-        XCTAssertEqual(frame[0].vertices.count, 5)
+        XCTAssertEqual(frame.shapes.map(\.id), [1])
+        XCTAssertEqual(frame.shapes[0].count, 5)
     }
 
     func testEffectMakesCopiesAsShapesOfTheirOwnAndPadsNothing() {
         let frame = TestSquare().process(())
         let out = TestTwice().process(frame)
-        XCTAssertEqual(out.map(\.id), [1, 1001])
-        XCTAssertEqual(out.map { $0.vertices.count }, [5, 5])
+        XCTAssertEqual(out.shapes.map(\.id), [1, 1001])
+        XCTAssertEqual(out.shapes.map(\.count), [5, 5])
     }
 
     func testEffectedFramesGetPaddedPerShapeByDwellBlank() {
         var pad = LaserDwellBlank(dwell: 2, blank: 2)
         let frame = TestTwice().process(TestSquare().process(()))
-        let points = frame.map { shape in
-            Laser2DShape(id: shape.id, points: shape.vertices.map { try! LaserPoint(xy: SIMD2(Float($0.position.x), Float($0.position.y)), rgb: SIMD3(repeating: 1)) })
+        let points = frame.shapes.map { shape in
+            Laser2DShape(id: shape.id, points: (Int(shape.start)..<(Int(shape.start) + Int(shape.count))).map {
+                let vertex = frame.vertex(at: $0)
+                return try! LaserPoint(xy: SIMD2(Float(vertex.position.x), Float(vertex.position.y)), rgb: SIMD3(repeating: 1))
+            })
         }
         let out = pad.process(points)
         // Each of the two shapes gains 2 blank + 2 dwell in front and 2 dwell + 1 blank behind.

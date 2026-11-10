@@ -33,7 +33,7 @@ final class LaserZoneComponentTests: XCTestCase {
         var camera = matrix_identity_double4x4
         camera.columns.3 = SIMD4(0, 0, 2, 1)
         let projection = LaserProjection(camera: camera, projection: LaserProjection.perspective(fovxDegrees: 90, near: 0.1, far: 50))
-        let looper = FixedFrame([Laser3DShape(id: 1, vertices: [LaserVertex(x: -0.5, y: 0), LaserVertex(x: 0.5, y: 0)])])
+        let looper = FixedFrame([TestShape(id: 1, vertices: [LaserVertex(x: -0.5, y: 0), LaserVertex(x: 0.5, y: 0)])])
         var zone = LaserZone(scanner: LaserScannerSettings(paddingDwell: 0, paddingBlank: 0, cornerDwell: 0, maximumStep: 0.2))
         let scanner = LaserLive(zone.scanner), mastering = LaserLive(zone.mastering)
         var chain = LaserScannerChain(looper, projection: projection, live: scanner, mastering: mastering, rate: zone.maximumPointRate)

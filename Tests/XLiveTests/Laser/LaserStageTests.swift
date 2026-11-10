@@ -193,9 +193,9 @@ final class LaserCornerDwellTests: XCTestCase {
 final class LaserMasteringTests: XCTestCase {
     func testThePlaceholderPassesShapesThroughUntouched() {
         let mastering = LaserMastering()
-        let frame = [Laser3DShape(id: 3, vertices: [LaserVertex(x: 0.1, y: 0.2, z: 0.3), LaserVertex(x: -0.1, y: 0)])]
+        let frame = testBuffer([TestShape(id: 3, vertices: [LaserVertex(x: 0.1, y: 0.2, z: 0.3), LaserVertex(x: -0.1, y: 0)])])
         XCTAssertEqual(mastering.process(frame), frame)
-        XCTAssertTrue(mastering.process([]).isEmpty)
+        XCTAssertTrue(mastering.process(Laser3DBuffer()).isEmpty)
         let effect: any LaserEffect = mastering          // a master filter is a laser effect like any other
         XCTAssertEqual(effect.process(frame), frame)
     }

@@ -306,12 +306,11 @@ final class LaserZoneTests: XCTestCase, @unchecked Sendable {
     }
 
     func testABoxOfShapesIsASourceThatAnswersWithWhatItHoldsNow() {
-        let box = LaserLive<[Laser3DShape]>([])
-        var stream = box
-        XCTAssertTrue(stream.read().isEmpty)
-        box.value = [.blackCenter]
-        XCTAssertEqual(stream.read().count, 1)
-        XCTAssertEqual(stream.read().count, 1, "an unchanged box is read again")
+        let box = LaserLive(Laser3DBuffer())
+        XCTAssertTrue(box.value.isEmpty)
+        box.value = testBuffer([TestShape(id: 0, vertices: [LaserVertex(x: 0, y: 0, mode: .blank)])])
+        XCTAssertEqual(box.value.shapeCount, 1)
+        XCTAssertEqual(box.value.shapeCount, 1)
     }
 
     func testAnOutputAssignedToAPlayingZoneJoinsItAndLeavesItsOldOne() async throws {
@@ -384,7 +383,7 @@ final class LaserOutputStreamsStreamTests: XCTestCase, @unchecked Sendable {
         let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
         let id = UUID()
         try await streams.connect(id) { StubSession(recorder) }
-        let looper = FixedFrame([Laser3DShape(id: 1, vertices: [LaserVertex(x: 0.4, y: 0), LaserVertex(x: -0.4, y: 0)])])
+        let looper = FixedFrame([TestShape(id: 1, vertices: [LaserVertex(x: 0.4, y: 0), LaserVertex(x: -0.4, y: 0)])])
         let chain = LaserScannerChain(looper, projection: projection(), live: LaserLive(LaserScannerSettings(maximumStep: 0.05)), rate: 30000)
         try await streams.play(stream: chain)
         for _ in 0..<200 {
