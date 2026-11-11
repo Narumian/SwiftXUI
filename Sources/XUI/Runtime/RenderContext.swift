@@ -158,7 +158,7 @@ public final class RenderContext {
         tapGestures.append(ResolvedTapGesture(rect: rect, id: id, label: label, action: action))
     }
 
-    func addDragGesture(_ rect: Rect, gesture: DragGesture) {
+    package func addDragGesture(_ rect: Rect, gesture: DragGesture) {
         guard acceptsInput else { return }
         dragGestures.append(ResolvedDragGesture(rect: rect, gesture: gesture))
     }

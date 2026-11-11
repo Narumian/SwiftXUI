@@ -45,8 +45,8 @@ public struct LiveSliderGeometry: Equatable, Sendable {
 ///   drag, so grabbing it never makes it jump. While automation is on the thumb is hidden, the
 ///   fill is dimmed, and the bar cannot be dragged.
 ///
-/// It reads the parameter every time it is declared and changes it through the parameter's own
-/// methods, so it keeps no state of its own. Long press needs a host that sends pointer
+/// It reads the parameter every time it paints and changes it through the parameter's own
+/// methods, so its fixed layout can be reused. Long press needs a host that sends pointer
 /// timestamps (see `LongPressGesture`).
 public struct LiveSlider: XView, Sendable {
     private let parameter: LiveParameter
@@ -81,18 +81,35 @@ public struct LiveSlider: XView, Sendable {
     // MARK: Label
 
     private var label: some XView {
-        let state = parameter.state
         let parameter = self.parameter
         let onShow = onShowConfiguration
-        return ZStack {
-            RoundedRectangle(cornerRadius: 8, fill: labelColor(state.midiState))
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title ?? state.label, size: 10, color: tint.opacity(0.9))
-                    .lineLimit(1)
-                    .frame(width: max(0, labelWidth - 8), alignment: .leading)
-                Text(state.valueText, size: 10, color: XColorValue.white.opacity(0.9))
-                    .font(.numeric)
-                    .frame(width: max(0, labelWidth - 8), alignment: .leading)
+        return DrawLayer { rect, context in
+            let state = parameter.state
+            context.canvas.fillRoundedRect(rect, cornerRadius: 8, color: labelColor(state.midiState))
+            let width = max(0, rect.width - 8)
+            let measure = context.environment.measureText
+            let title = title ?? state.label
+            let value = state.valueText
+            let titleSize = measure(title, 10, .ui)
+            let valueSize = measure(value, 10, .numeric)
+            let titleLines = Text.needsWrapping(title, natural: titleSize, maxWidth: width)
+                ? Text.visibleLines(title, maxWidth: width, lineLimit: 1) { measure($0, 10, .ui).width }
+                : [title]
+            let valueLines = Text.needsWrapping(value, natural: valueSize, maxWidth: width)
+                ? Text.visibleLines(value, maxWidth: width, lineLimit: nil) { measure($0, 10, .numeric).width }
+                : [value]
+            var y = rect.midY - (Double(titleLines.count) * titleSize.height + Double(valueLines.count) * valueSize.height) / 2
+            let x = rect.midX - width / 2
+            for line in titleLines {
+                context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: titleSize.height),
+                                        fontSize: 10, font: .ui, color: tint.opacity(0.9), alignment: .leading, outline: nil)
+                y += titleSize.height
+            }
+            for line in valueLines {
+                context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: valueSize.height),
+                                        fontSize: 10, font: .numeric, color: XColorValue.white.opacity(0.9),
+                                        alignment: .leading, outline: nil)
+                y += valueSize.height
             }
         }
         .frame(width: labelWidth, height: height)
@@ -111,45 +128,33 @@ public struct LiveSlider: XView, Sendable {
     // MARK: Bar
 
     private var bar: some XView {
-        let state = parameter.state
         let parameter = self.parameter
-        let automated = state.isAutomated
-        let normal = state.normalizedValue
-        let fillColor = tint.opacity(automated ? 0.4 : 1)
-        return GeometryReader { geo in
-            let g = LiveSliderGeometry(width: geo.width, height: geo.height)
-            let centerY = geo.height / 2
-            ZStack(alignment: .topLeading) {
-                // Fills the whole bar, so a tap anywhere on it counts: the pieces below are
-                // positioned and would otherwise shrink the tappable area to their extent.
-                Rectangle(fill: .clear)
-                RoundedRectangle(cornerRadius: 2, fill: XColorValue(1, 1, 1, 0.25))
-                    .frame(width: g.trackWidth, height: LiveSliderGeometry.barThickness)
-                    .position(x: geo.width / 2, y: centerY)
-                RoundedRectangle(cornerRadius: 2, fill: fillColor)
-                    .frame(width: g.fillWidth(normal), height: LiveSliderGeometry.barThickness)
-                    .position(x: g.fillStartX + g.fillWidth(normal) / 2, y: centerY)
-                if !automated {
-                    thumb(g)
-                        .gesture(DragGesture(minimumDistance: 0.1).onChanged { drag in
-                            // `normal` is the value when this was declared, which is the value at
-                            // the start of the drag: the runtime keeps the drag's first declaration.
-                            guard let next = g.draggedNormal(start: normal, translation: drag.translation.x) else { return }
-                            parameter.setNormalizedManualValue(next)
-                        })
-                        .position(x: g.thumbCenterX(normal), y: centerY)
-                }
+        return DrawLayer { rect, context in
+            let state = parameter.state
+            let normal = state.normalizedValue
+            let g = LiveSliderGeometry(width: rect.width, height: rect.height)
+            let thickness = LiveSliderGeometry.barThickness
+            let trackY = rect.midY - thickness / 2
+            let canvas = context.canvas
+            canvas.fillRect(rect, color: .clear)
+            canvas.fillRoundedRect(Rect(x: rect.midX - g.trackWidth / 2, y: trackY, width: g.trackWidth, height: thickness),
+                                   cornerRadius: 2, color: XColorValue(1, 1, 1, 0.25))
+            canvas.fillRoundedRect(Rect(x: rect.x + g.fillStartX, y: trackY, width: g.fillWidth(normal), height: thickness),
+                                   cornerRadius: 2, color: tint.opacity(state.isAutomated ? 0.4 : 1))
+            if !state.isAutomated {
+                let thumb = Rect(x: rect.x + g.thumbCenterX(normal) - g.thumbWidth / 2,
+                                 y: rect.y, width: g.thumbWidth, height: g.height)
+                canvas.fillRoundedRect(thumb, cornerRadius: g.height / 2, color: XColorValue(1, 1, 1, 0.168))
+                let lineHeight = max(0, g.height - 16)
+                canvas.fillRect(Rect(x: thumb.midX - 0.5, y: thumb.midY - lineHeight / 2, width: 1, height: lineHeight), color: .white)
+                // The gesture runtime keeps this first sample throughout a drag.
+                context.addDragGesture(thumb, gesture: DragGesture(minimumDistance: 0.1).onChanged { drag in
+                    guard let next = g.draggedNormal(start: normal, translation: drag.translation.x) else { return }
+                    parameter.setNormalizedManualValue(next)
+                })
             }
-            .onTapGesture { parameter.toggleAutomation() }
         }
-    }
-
-    private func thumb(_ g: LiveSliderGeometry) -> some XView {
-        ZStack {
-            RoundedRectangle(cornerRadius: g.height / 2, fill: XColorValue(1, 1, 1, 0.168))
-            Rectangle(fill: .white).frame(width: 1, height: max(0, g.height - 16))
-        }
-        .frame(width: g.thumbWidth, height: g.height)
+        .onTapGesture { parameter.toggleAutomation() }
     }
 
     // MARK: Colour

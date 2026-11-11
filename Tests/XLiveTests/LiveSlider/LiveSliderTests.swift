@@ -66,6 +66,39 @@ final class LiveSliderTests: XCTestCase {
     // MARK: Drawing
 
     @XUIActor
+    func testRetainedSliderReadsValueAndAutomationAndRebuildsItsHitRegionsAtPaintTime() async throws {
+        let p = try parameter(value: 0.25)
+        p.edit { $0.setSource(.lfo) }
+        let host = LayoutHost(canvas: Size(width: 300, height: 36))
+        let store = StateStore()
+        let first = Recorder()
+        let (_, root) = await host.render(into: first, store: store, reusing: nil) {
+            LiveSlider(parameter: p, tint: tint)
+        }
+        let oldThumbX = first.fills[4].rect.x
+
+        p.setManualValue(0.75)
+        let changed = Recorder()
+        let (manual, _) = await host.render(into: changed, store: store, reusing: root) {
+            XCTFail("Reused layout must not redeclare the slider")
+            return LiveSlider(parameter: p, tint: tint)
+        }
+        XCTAssertEqual(changed.texts, ["Gain", "0.75000"])
+        XCTAssertGreaterThan(changed.fills[4].rect.x, oldThumbX)
+        XCTAssertEqual(manual.dragGestures.first?.rect, changed.fills[4].rect)
+
+        p.toggleAutomation()
+        let automated = Recorder()
+        let (input, _) = await host.render(into: automated, store: store, reusing: root) {
+            XCTFail("Automation must paint without a new layout")
+            return LiveSlider(parameter: p, tint: tint)
+        }
+        XCTAssertEqual(automated.fills.count, 4)
+        XCTAssertTrue(input.dragGestures.isEmpty)
+        XCTAssertEqual(automated.fills[3].color.opacity, 0.4)
+    }
+
+    @XUIActor
     func testLabelIsOnTheLeftAndTheBarOnTheRight() async throws {
         let p = try parameter(value: 0.5)
         let (render, canvas) = await draw(p)

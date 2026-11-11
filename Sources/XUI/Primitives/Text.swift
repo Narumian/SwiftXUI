@@ -201,13 +201,13 @@ public struct Text: XView, _PrimitiveXView {
     /// short-single-line case down to the one `measureText` call it always
     /// took (Text is measured repeatedly while a stack tree settles, so this
     /// bound directly matters, not just as a nicety).
-    static func needsWrapping(_ string: String, natural: Size, maxWidth: Double) -> Bool {
+    package static func needsWrapping(_ string: String, natural: Size, maxWidth: Double) -> Bool {
         string.contains("\n") || natural.width > maxWidth
     }
 
     /// `wrappedLines`, capped to `lineLimit` (`nil` = unlimited) with the last
     /// visible line ellipsised if that cut anything off.
-    static func visibleLines(_ string: String, maxWidth: Double?, lineLimit: Int?,
+    package static func visibleLines(_ string: String, maxWidth: Double?, lineLimit: Int?,
                              widthOf measure: (String) -> Double) -> [String] {
         var lines = wrappedLines(string, maxWidth: maxWidth, widthOf: measure)
         guard let lineLimit, lineLimit > 0, lines.count > lineLimit else { return lines }
