@@ -14,7 +14,7 @@ public struct _AnimationModifier<Content: XView, Value: Equatable & Sendable>: X
         let previous: StateStore.Box<Value?> = store.box(for: id.child(type: Self.self, index: 0)) { nil }
         // The first frame is not a change: nothing animates in.
         let triggered = previous.value.map { $0 != value } ?? false
-        previous.value = value
+        if previous.value != value { previous.value = value }
 
         let saved = store.transaction
         store.transaction = Transaction(animation: animation, triggered: triggered)

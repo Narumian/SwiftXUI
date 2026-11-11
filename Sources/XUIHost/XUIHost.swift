@@ -9,7 +9,9 @@ import XUI
 public final class XUIHost: @unchecked Sendable {
     public var size: RenderSize
     public var background: RenderColor
-    public var environment: EnvironmentValues
+    public var environment: EnvironmentValues {
+        didSet { environmentRevision &+= 1 }
+    }
     public var fonts: FontBook? {
         didSet { if fonts != oldValue { measurementRevision &+= 1 } }
     }
@@ -27,8 +29,24 @@ public final class XUIHost: @unchecked Sendable {
     /// Where copy / cut / paste go. The platform shell replaces this with the system pasteboard.
     public var clipboard: any XClipboard = InMemoryClipboard()
 
-    private let store = StateStore()
+    private let store = StateStore(tracksLayoutChanges: true)
     private var measurementRevision: UInt64 = 0
+    private var environmentRevision: UInt64 = 0
+    private var inputRevision: UInt64 = 0
+    private struct LayoutKey: Equatable {
+        let rootType: ObjectIdentifier
+        let size: RenderSize
+        let measurement: UInt64
+        let environment: UInt64
+        let state: UInt64
+        let input: UInt64
+        let application: UInt64
+        let textFocus: Int
+        let keyboardPolicy: KeyboardPolicy
+        let focus: ControlID?
+        let keyFocus: String?
+    }
+    private var placedLayout: (key: LayoutKey, root: LayoutHost.PlacedRoot)?
     /// Slop is in logical canvas units. A phone shows the canvas at about 0.36pt per unit, so the
     /// 10-unit default is under 4pt of finger travel and a plain tap reads as a drag.
     private var gestureRuntime = GestureRuntime(tapSlop: 24)
@@ -68,6 +86,11 @@ public final class XUIHost: @unchecked Sendable {
     @discardableResult
     @XUIActor
     public func render<V: XView>(_ view: V, time: Double? = nil) async -> XUIFrame {
+        await render(time: time, layoutRevision: nil) { view }
+    }
+
+    @XUIActor
+    func render<V: XView>(time: Double?, layoutRevision: UInt64?, view: @XUIActor () async -> V) async -> XUIFrame {
         var frameEnvironment = environment
         if let time { frameEnvironment.fxTime = time }
         frameEnvironment.environmentObject(focusStore)
@@ -84,11 +107,28 @@ public final class XUIHost: @unchecked Sendable {
             imageResolver: imageResolver
         )
         textFocus.beginFrame()
-        let layout = await LayoutHost(
+        // Drag geometry and menu transitions depend on the presentation clock.
+        // Discard those roots so a settled drag cannot leave a cached preview.
+        let revision = dragDrop.isDragging || dragDrop.isMenuOpen ? nil : layoutRevision
+        let key = revision.map {
+            LayoutKey(rootType: ObjectIdentifier(V.self), size: size, measurement: measurementRevision,
+                      environment: environmentRevision, state: store.layoutRevision, input: inputRevision,
+                      application: $0, textFocus: textFocus.revision, keyboardPolicy: textFocus.keyboardPolicy,
+                      focus: focusStore.selectedID, keyFocus: keyFocus.focusedID)
+        }
+        let previous = if let key, let placedLayout, placedLayout.key == key, !store.needsLayoutNextFrame {
+            placedLayout.root
+        } else {
+            nil as LayoutHost.PlacedRoot?
+        }
+        let (layout, root) = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
             environment: frameEnvironment,
             measurementRevision: measurementRevision
-        ).render(view, into: surface, store: store)
+        ).render(into: surface, store: store, reusing: previous, view: view)
+        // Save the key from before declaration so writes during an awaited
+        // layout pass cause another pass instead of being marked consumed.
+        placedLayout = key.map { ($0, root) }
         textFocus.endFrame()
         dragDrop.endFrame(layout)
         shortcuts.replace(with: layout.shortcuts)
@@ -97,16 +137,21 @@ public final class XUIHost: @unchecked Sendable {
             in: layout.controls,
             current: focusStore.selectedID
         )
-        let frame = XUIFrame(scene: surface.scene, layout: layout, stats: XUIFrameStats(measureCalls: surface.measureCalls))
+        let frame = XUIFrame(scene: surface.scene, layout: layout,
+                             stats: XUIFrameStats(measureCalls: surface.measureCalls, layoutPasses: previous == nil ? 1 : 0))
         lastFrame = frame
         return frame
     }
+
+    @XUIActor
+    func invalidateLayoutAfterInput() { inputRevision &+= 1 }
 
     /// Routes a renderer-neutral pointer sample through the current frame's
     /// XUI gesture regions.
     @discardableResult
     @XUIActor
     public func pointer(_ event: PointerEvent, in frame: XUIFrame) -> Bool {
+        defer { invalidateLayoutAfterInput() }
         let position = Point(x: Double(event.position.x), y: Double(event.position.y))
         // A press outside every field and outside the keyboard dismisses the keyboard.
         if event.phase == .began { textFocus.blurIfOutside(position) }
@@ -127,13 +172,17 @@ public final class XUIHost: @unchecked Sendable {
 
     /// Cancels the pointer sequence in progress (the app lost focus): a held `PressGesture` is told.
     @XUIActor
-    public func cancelPointers() { gestureRuntime.cancelAll() }
+    public func cancelPointers() {
+        gestureRuntime.cancelAll()
+        invalidateLayoutAfterInput()
+    }
 
     /// A secondary click (or the platform's long-press gesture for a menu) at `position`.
     @discardableResult
     @XUIActor
     public func contextClick(at position: RenderPoint) -> Bool {
-        dragDrop.contextClick(at: Point(x: Double(position.x), y: Double(position.y)))
+        defer { invalidateLayoutAfterInput() }
+        return dragDrop.contextClick(at: Point(x: Double(position.x), y: Double(position.y)))
     }
 
     /// Routes a gamepad direction or button into the current focus tree.
@@ -142,6 +191,7 @@ public final class XUIHost: @unchecked Sendable {
     @discardableResult
     @XUIActor
     public func gamepad(_ input: GamepadInput, in frame: XUIFrame) -> Bool {
+        defer { invalidateLayoutAfterInput() }
         switch input {
         case .direction(let direction):
             let next = FocusNavigator.next(
@@ -217,5 +267,9 @@ public struct XUIFrame {
 public struct XUIFrameStats: Sendable, Equatable {
     /// Text-width requests made by layout and drawing.
     public var measureCalls = 0
-    public init(measureCalls: Int = 0) { self.measureCalls = measureCalls }
+    public var layoutPasses: Int
+    public init(measureCalls: Int = 0, layoutPasses: Int = 0) {
+        self.measureCalls = measureCalls
+        self.layoutPasses = layoutPasses
+    }
 }

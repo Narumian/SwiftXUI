@@ -14,7 +14,10 @@ public final class StateStore: @unchecked Sendable {
     /// See `box(for:default:)`'s own comment for why an app can build its own
     /// `.onReceive`-shaped modifiers on top of this same type.
     public final class Box<Value>: @unchecked Sendable {
-        public var value: Value
+        public var value: Value {
+            didSet { layoutChanges?.mark() }
+        }
+        private let layoutChanges: LayoutChanges?
         /// Fires once, with the box's last `value`, the first time this
         /// identity goes an entire pass without being revisited — the
         /// identity-keyed equivalent of SwiftUI's `.onDisappear`, just set
@@ -23,7 +26,10 @@ public final class StateStore: @unchecked Sendable {
         /// other than firing — reassign it if the meaning of "removed"
         /// changes across a box's lifetime.
         public var onRemove: ((Value) -> Void)?
-        init(_ value: Value) { self.value = value }
+        fileprivate init(_ value: Value, layoutChanges: LayoutChanges?) {
+            self.value = value
+            self.layoutChanges = layoutChanges
+        }
     }
 
     private var boxes: [StateIdentity: AnyObject] = [:]
@@ -32,11 +38,31 @@ public final class StateStore: @unchecked Sendable {
     /// The host's presentation clock for the pass being declared (seconds).
     /// Lowering has no environment, so animatable modifiers read it here.
     public internal(set) var clock: Double = 0
+    var previousFrameClock: Double?
+    private var hasFrameClock = false
     /// The animation context of the subtree being declared right now. Set by
     /// `.animation(_:value:)` for its content and restored after it.
     public internal(set) var transaction = Transaction()
 
-    public init() {}
+    private let layoutChanges: LayoutChanges?
+    package var layoutRevision: UInt64 { layoutChanges?.revision ?? 0 }
+    package private(set) var needsLayoutNextFrame = false
+
+    public init() { layoutChanges = nil }
+
+    package init(tracksLayoutChanges: Bool) {
+        layoutChanges = tracksLayoutChanges ? LayoutChanges() : nil
+    }
+
+    /// A view whose declaration or placement depends on time requests another
+    /// layout pass until that dependency has settled.
+    public func requireLayoutNextFrame() { needsLayoutNextFrame = true }
+
+    func advanceClock(to now: Double) {
+        previousFrameClock = hasFrameClock ? clock : nil
+        hasFrameClock = true
+        clock = now
+    }
 
     /// The identity-keyed box for `id`, creating it from `make` the first
     /// time it's asked for. Public so an app can author its own `.onReceive`/
@@ -46,7 +72,7 @@ public final class StateStore: @unchecked Sendable {
     public func box<Value>(for id: StateIdentity, default make: () -> Value) -> Box<Value> {
         reachedThisPass.insert(id)
         if let existing = boxes[id] as? Box<Value> { return existing }
-        let created = Box(make())
+        let created = Box(make(), layoutChanges: layoutChanges)
         boxes[id] = created
         return created
     }
@@ -63,7 +89,8 @@ public final class StateStore: @unchecked Sendable {
     /// `now` is the host's presentation clock (`fxTime`), for animation.
     public func beginPass(now: Double = 0) {
         reachedThisPass.removeAll(keepingCapacity: true)
-        clock = now
+        advanceClock(to: now)
+        needsLayoutNextFrame = false
         transaction = Transaction()
     }
 
@@ -76,6 +103,14 @@ public final class StateStore: @unchecked Sendable {
         boxes = boxes.filter { reachedThisPass.contains($0.key) }
         for (_, box) in dropped { (box as? _AnyRemovableBox)?.fireOnRemove() }
     }
+}
+
+fileprivate final class LayoutChanges: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+
+    var revision: UInt64 { lock.withLock { value } }
+    func mark() { lock.withLock { value &+= 1 } }
 }
 
 /// Type-erased hook so `endPass` can fire `onRemove` on a `Box<Value>` for

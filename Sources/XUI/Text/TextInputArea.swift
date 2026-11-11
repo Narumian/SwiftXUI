@@ -25,7 +25,8 @@ public struct TextInputArea<Content: XView>: XView, _PrimitiveXView {
         let keyboard = store.box(for: id.child(type: KeyboardRuntime.self)) { KeyboardRuntime() }.value
 
         let field = focusStore.flatMap { $0.wantsKeyboard ? $0.focusedField : nil }
-        let progress = presence.advance(toward: field != nil, clock: store.clock)
+        let progress = presence.advance(toward: field != nil, clock: store.clock, previousFrame: store.previousFrameClock)
+        if field != nil ? progress < 1 : progress > 0 { store.requireLayoutNextFrame() }
         if let field { presence.lastField = field }
 
         let contentNode = LayoutNode(
@@ -67,9 +68,9 @@ final class KeyboardPresence: @unchecked Sendable {
     }
 
     /// Moves toward shown/hidden with the presentation clock and returns the eased progress.
-    func advance(toward shown: Bool, clock: Double) -> Double {
+    func advance(toward shown: Bool, clock: Double, previousFrame: Double?) -> Double {
         lock.withLock {
-            let dt = lastClock.map { min(max(0, clock - $0), 0.1) } ?? 0
+            let dt = lastClock.map { min(max(0, clock - max($0, previousFrame ?? $0)), 0.1) } ?? 0
             lastClock = clock
             let step = dt / Self.duration
             value = shown ? min(1, value + step) : max(0, value - step)

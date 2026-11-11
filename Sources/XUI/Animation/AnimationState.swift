@@ -60,6 +60,7 @@ public extension StateStore {
     func animated<Value: Animatable>(_ target: Value, id: StateIdentity) -> Value {
         guard transaction.isActive else { return target }
         let box = box(for: id) { AnimationState(target) }
+        if box.value.to == target, !box.value.isMoving { return target }
         return box.value.update(target: target, now: clock, transaction: transaction)
     }
 }

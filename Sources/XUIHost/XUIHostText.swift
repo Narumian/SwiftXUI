@@ -101,6 +101,7 @@ public extension XUIHost {
     @discardableResult
     @XUIActor
     func key(_ event: KeyEvent) -> Bool {
+        defer { invalidateLayoutAfterInput() }
         guard textFocus.focusedID != nil, let command = TextKeyMap.command(for: event) else {
             return shortcuts.perform(event, textEditing: textFocus.focusedID != nil)
         }
@@ -129,7 +130,8 @@ public extension XUIHost {
     @discardableResult
     @XUIActor
     func textInput(_ event: TextInputEvent) -> Bool {
-        textFocus.send(event)
+        defer { invalidateLayoutAfterInput() }
+        return textFocus.send(event)
     }
 }
 

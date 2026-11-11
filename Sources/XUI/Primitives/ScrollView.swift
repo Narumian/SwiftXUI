@@ -50,7 +50,7 @@ private struct _ScrollViewState<Content: XView>: XView {
                 translationBox?.value = 0
             },
             normalizeOffset: { value in
-                offsetBox?.value = value
+                if let offsetBox, offsetBox.value != value { offsetBox.value = value }
             }
         )
     }

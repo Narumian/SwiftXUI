@@ -75,11 +75,16 @@ public final class XAppSession<App: XApp> {
         self.dynamicFonts = faces.isEmpty ? nil : DynamicFontBook(fonts: faces, fallbackFonts: fallbacks)
     }
 
+    /// Pass a layout revision to retain the placed root while that revision
+    /// stays stable. Advance it for external and reference-backed state changes
+    /// read by the view tree. Use nil while declaration reads untracked live
+    /// values. Time-dependent layout can call StateStore.requireLayoutNextFrame().
+    /// Time-dependent paint can read the current render context or live data.
     @discardableResult
-    public func render(time: Double? = nil, pixelScale: Float = 1, useFonts: Bool = true) async -> XUIFrame {
+    public func render(time: Double? = nil, pixelScale: Float = 1, useFonts: Bool = true, layoutRevision: UInt64? = nil) async -> XUIFrame {
         if !useFonts { host.fonts = nil }
         else if dynamicFonts != nil { host.fonts = fontSnapshot }
-        var frame = await host.render(app.body, time: time)
+        var frame = await host.render(time: time, layoutRevision: layoutRevision) { app.body }
         if let dynamicFonts, useFonts {
             // Resolve glyph metrics before the final layout, so hit targets and
             // line wrapping are measured with the same faces used to draw.
@@ -88,7 +93,12 @@ public final class XAppSession<App: XApp> {
                 fontSnapshot = dynamicFonts.snapshot()
                 fontRevision = dynamicFonts.revision
                 host.fonts = fontSnapshot
-                frame = await host.render(app.body, time: time)
+                let first = frame.stats
+                frame = await host.render(time: time, layoutRevision: layoutRevision) { app.body }
+                var stats = frame.stats
+                stats.layoutPasses += first.layoutPasses
+                stats.measureCalls += first.measureCalls
+                frame = XUIFrame(scene: frame.scene, layout: frame.layout, stats: stats)
                 dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
                 if fontRevision != dynamicFonts.revision {
                     fontSnapshot = dynamicFonts.snapshot()

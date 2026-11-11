@@ -33,19 +33,37 @@ public struct LayoutHost {
     @discardableResult
     @XUIActor
     public func render(_ view: some XView, into surface: any XCanvas, store: StateStore = StateStore()) async -> RenderResult {
+        await render(into: surface, store: store, reusing: nil) { view }.result
+    }
+
+    package struct PlacedRoot {
+        fileprivate let node: LayoutNode
+    }
+
+    @XUIActor
+    package func render<View: XView>(
+        into surface: any XCanvas, store: StateStore, reusing placed: PlacedRoot?,
+        view: @XUIActor () async -> View
+    ) async -> (result: RenderResult, root: PlacedRoot) {
         XViewProfiler.beginFrame()
-        store.beginPass(now: environment.fxTime)
-        defer { store.endPass() }
+        let rebuild = placed == nil
+        if rebuild { store.beginPass(now: environment.fxTime) }
+        else { store.advanceClock(to: environment.fxTime) }
+        defer { if rebuild { store.endPass() } }
 
         var env = environment
         env.measureText = { surface.measureText($0, fontSize: $1, font: $2) }
-        var layoutContext = LayoutContext(environment: env, referenceSize: canvas, measurementRevision: measurementRevision)
-        layoutContext.pass = LayoutPass.next()
-
         return await _EnvironmentObjectContext.$current.withValue(env._environmentObjectContext()) {
-            let children = await lower(view, id: .root, store: store)
-            let root = LayoutNode(layout: RootLayout(), children: children)
-            await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+            let root: LayoutNode
+            if let placed {
+                root = placed.node
+            } else {
+                var layoutContext = LayoutContext(environment: env, referenceSize: canvas, measurementRevision: measurementRevision)
+                layoutContext.pass = LayoutPass.next()
+                let children = await lower(view(), id: .root, store: store)
+                root = LayoutNode(layout: RootLayout(), children: children)
+                await LayoutEngine.place(root, in: Rect(origin: .zero, size: canvas), layoutContext)
+            }
 
             let renderContext = RenderContext(canvas: surface, environment: env)
             LayoutEngine.render(root, into: renderContext)
@@ -54,7 +72,7 @@ public struct LayoutHost {
             }
             XViewProfiler.finishFrame()
 
-            return RenderResult(
+            let result = RenderResult(
                 regions: renderContext.regions,
                 shaders: renderContext.shaders,
                 controls: renderContext.controls,
@@ -68,6 +86,7 @@ public struct LayoutHost {
                 shortcuts: renderContext.shortcuts,
                 anchors: renderContext.anchors
             )
+            return (result, PlacedRoot(node: root))
         }
     }
 
