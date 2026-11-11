@@ -293,6 +293,75 @@ public final class SceneShapeCache {
     public init() {}
 }
 
+/// Reuses compiled text geometry from the preceding frame. Keep one cache per render session.
+public final class SceneTextCache {
+    fileprivate enum Geometry {
+        case atlas([Float], [(TextureID, Range<Int>)])
+        case vector([Float])
+
+        var floatCount: Int {
+            switch self {
+            case .atlas(let vertices, _), .vector(let vertices): vertices.count
+            }
+        }
+    }
+
+    fileprivate struct Entry {
+        var command: TextCommand
+        var geometry: Geometry
+    }
+
+    private var previous: [Entry?] = []
+    private var current: [Entry?] = []
+    private var dimensions: (RenderSize, RenderSize, Bool)?
+    private var fonts: FontBook?
+    private var floats = 0
+    private static let maxFloats = 2_000_000
+    private static let maxEntries = 4096
+    public private(set) var hits = 0
+    public private(set) var misses = 0
+
+    public init() {}
+
+    fileprivate func begin(canvas: RenderSize, framebuffer: RenderSize, fit: Bool, fonts: FontBook?) {
+        if dimensions?.0 != canvas || dimensions?.1 != framebuffer || dimensions?.2 != fit || self.fonts != fonts {
+            previous.removeAll(keepingCapacity: true)
+        }
+        dimensions = (canvas, framebuffer, fit)
+        self.fonts = fonts
+        floats = 0
+        hits = 0
+        misses = 0
+    }
+
+    fileprivate func reuse(_ command: TextCommand) -> Geometry? {
+        let index = current.count
+        guard index < Self.maxEntries, index < previous.count,
+              let entry = previous[index], entry.command == command else {
+            misses += 1
+            return nil
+        }
+        hits += 1
+        remember(command, floatCount: entry.geometry.floatCount) { entry.geometry }
+        return entry.geometry
+    }
+
+    fileprivate func remember(_ command: TextCommand, floatCount: Int, geometry: () -> Geometry) {
+        guard current.count < Self.maxEntries else { return }
+        guard floatCount <= Self.maxFloats - floats else {
+            current.append(nil)
+            return
+        }
+        current.append(Entry(command: command, geometry: geometry()))
+        floats += floatCount
+    }
+
+    fileprivate func end() {
+        swap(&previous, &current)
+        current.removeAll(keepingCapacity: true)
+    }
+}
+
 public enum SceneCompiler {
     /// Framebuffer pixels per logical unit `compile` will use — what text
     /// preparation needs to bake atlases at the size they will be drawn.
@@ -311,16 +380,18 @@ public enum SceneCompiler {
         framebuffer: RenderSize,
         fit: Bool = true,
         fonts: FontBook? = nil,
-        shapeCache: SceneShapeCache? = nil
+        shapeCache: SceneShapeCache? = nil,
+        textCache: SceneTextCache? = nil
     ) -> CompiledFrame {
         var frame = CompiledFrame(background: scene.background, postIntensity: scene.postIntensity)
         if framebuffer.width.isFinite, framebuffer.height.isFinite, framebuffer.width >= 1, framebuffer.height >= 1 {
             frame.framebufferWidth = UInt32(min(framebuffer.width.rounded(), Float(UInt32.max / 2)))
             frame.framebufferHeight = UInt32(min(framebuffer.height.rounded(), Float(UInt32.max / 2)))
         }
-        let box = Letterbox(canvas: scene.authoringCanvas ?? canvas, framebuffer: framebuffer, fit: fit)
+        let effectiveCanvas = scene.authoringCanvas ?? canvas
+        let box = Letterbox(canvas: effectiveCanvas, framebuffer: framebuffer, fit: fit)
+        textCache?.begin(canvas: effectiveCanvas, framebuffer: framebuffer, fit: fit, fonts: fonts)
         if let shapeCache {
-            let effectiveCanvas = scene.authoringCanvas ?? canvas
             if let size = shapeCache.dimensions, size.0 != effectiveCanvas || size.1 != framebuffer || size.2 != fit {
                 shapeCache.previous.removeAll()
             }
@@ -351,6 +422,12 @@ public enum SceneCompiler {
             shapeRun = nil
         }
         func clip(_ r: RenderRect?) -> PixelRect? { r.map(box.pixels) }
+        func appendFontDraws(_ ranges: [(TextureID, Range<Int>)], offset: Int, scissor: PixelRect?) {
+            for (texture, range) in ranges {
+                let rebased = (range.lowerBound + offset)..<(range.upperBound + offset)
+                frame.draws.append(.font(texture: texture, range: rebased, scissor: scissor))
+            }
+        }
         func openShapeRun(_ scissor: PixelRect?, lines: Bool = false) {
             if shapeRun == nil { shapeRun = (frame.shapeVertices.count / 6, scissor, lines) }
             else if shapeRun!.scissor != scissor || shapeRun!.lines != lines { flushShapes(); shapeRun = (frame.shapeVertices.count / 6, scissor, lines) }
@@ -395,21 +472,44 @@ public enum SceneCompiler {
                     appendNDC(&frame.shapeVertices, ShapeMesher.mesh(shape), box)
                 }
             case .text(let text):
+                let scissor = clip(text.clip)
+                if let geometry = textCache?.reuse(text) {
+                    switch geometry {
+                    case .atlas(let vertices, let ranges):
+                        flushShapes()
+                        let offset = frame.fontVertices.count / 14
+                        frame.fontVertices.append(contentsOf: vertices)
+                        appendFontDraws(ranges, offset: offset, scissor: scissor)
+                    case .vector(let vertices):
+                        openShapeRun(scissor)
+                        frame.shapeVertices.append(contentsOf: vertices)
+                    }
+                    continue
+                }
                 if let atlas = fonts?.atlas(for: text.font, capPixels: 7 * text.scale * box.scale),
                    text.string.contains(where: { ch in
                        fonts?.atlas(for: text.font, capPixels: 7 * text.scale * box.scale, character: ch)?.glyphs[ch] != nil
                    }) {
                     flushShapes()
+                    let start = frame.fontVertices.count
                     let ranges = appendGlyphs(
                         &frame.fontVertices, text, atlas, box,
                         atlasFor: { ch in fonts?.atlas(for: text.font, capPixels: 7 * text.scale * box.scale, character: ch) }
                     )
-                    for (texture, range) in ranges where !range.isEmpty {
-                        frame.draws.append(.font(texture: texture, range: range, scissor: clip(text.clip)))
+                    appendFontDraws(ranges, offset: 0, scissor: scissor)
+                    textCache?.remember(text, floatCount: frame.fontVertices.count - start) {
+                        let offset = start / 14
+                        return .atlas(Array(frame.fontVertices[start...]), ranges.map { texture, range in
+                            (texture, (range.lowerBound - offset)..<(range.upperBound - offset))
+                        })
                     }
                 } else {
-                    openShapeRun(clip(text.clip))
+                    openShapeRun(scissor)
+                    let start = frame.shapeVertices.count
                     appendNDC(&frame.shapeVertices, TextMesher.mesh(text), box)
+                    textCache?.remember(text, floatCount: frame.shapeVertices.count - start) {
+                        .vector(Array(frame.shapeVertices[start...]))
+                    }
                 }
             case .sprite(let sprite):
                 flushShapes()
@@ -516,6 +616,7 @@ public enum SceneCompiler {
         }
         flushShapes()
         if let shapeCache { swap(&shapeCache.previous, &shapeCache.current) }
+        textCache?.end()
         return frame
     }
 

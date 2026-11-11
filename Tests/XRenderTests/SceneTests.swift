@@ -239,6 +239,49 @@ private func square(_ layer: RenderLayer, color: RenderColor = .white) -> DrawCo
     #expect(abs(frame.fontVertices[12] - 2.8) < 0.001)
 }
 
+@Test func cachedTextMatchesUncachedAcrossVertexOffsetsAndFontChanges() {
+    let cache = SceneTextCache()
+    let canvas = RenderSize(width: 100, height: 100)
+    let clip = RenderRect(x: 5, y: 5, width: 40, height: 40)
+    var framebuffer = RenderSize(width: 200, height: 100)
+    var fit = true
+    func page(_ character: Character, texture: UInt32) -> FontAtlas {
+        FontAtlas(texture: TextureID(texture), atlasWidth: 256, atlasHeight: 128, pixelSize: 64,
+                  ascent: 50, descent: 14, lineHeight: 70, glyphs: [
+                    character: GlyphBox(x: 8, y: 6, w: 40, h: 44, advance: 44, left: 2, top: 44)
+                  ])
+    }
+    let a = page("A", texture: 61)
+    let b = page("B", texture: 62)
+    var fonts: FontBook? = FontBook(atlases: [.ui: a], sized: [.ui: [a, b]])
+    func text(_ string: String, color: RenderColor = .white) -> DrawCommand {
+        .text(TextCommand(string: string, origin: RenderPoint(x: 10, y: 10), scale: 2,
+                          color: color, centeredWidth: 80, clip: clip))
+    }
+    func check(_ leading: String, trailingColor: RenderColor = .white, hits: Int) {
+        let scene = Scene(commands: [text(leading), square(.ui), text("AB", color: trailingColor), text("7")])
+        let expected = SceneCompiler.compile(scene, canvas: canvas, framebuffer: framebuffer, fit: fit, fonts: fonts)
+        let actual = SceneCompiler.compile(scene, canvas: canvas, framebuffer: framebuffer, fit: fit,
+                                           fonts: fonts, textCache: cache)
+        #expect(actual == expected)
+        #expect(cache.hits == hits)
+        #expect(cache.misses == 3 - hits)
+    }
+    check("A", hits: 0)
+    check("A", hits: 3)
+    check("AAA", hits: 2)
+    check("AAA", trailingColor: .cyan, hits: 2)
+    framebuffer = RenderSize(width: 400, height: 200)
+    check("AAA", trailingColor: .cyan, hits: 0)
+    fit = false
+    check("AAA", trailingColor: .cyan, hits: 0)
+    fonts?.sized[.ui] = [a, page("B", texture: 63)]
+    check("AAA", trailingColor: .cyan, hits: 0)
+    fonts = nil
+    check("AAA", trailingColor: .cyan, hits: 0)
+    check("AAA", trailingColor: .cyan, hits: 3)
+}
+
 // MARK: - SceneBuilder
 
 @Test func builderLayerScopingRestores() {
