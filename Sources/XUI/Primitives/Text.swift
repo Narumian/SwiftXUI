@@ -87,6 +87,7 @@ public struct Text: XView, _PrimitiveXView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: TextLayout(string: string, fontSize: fontSize, font: font, lineLimit: lineLimit))
+        node.drawIsStatic = true
         let (string, fontSize, font, color, alignment, outline, lineLimit) =
             (string, fontSize, font, color, alignment, outline, lineLimit)
         node.draw = { rect, context in

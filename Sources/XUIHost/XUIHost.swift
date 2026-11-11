@@ -47,6 +47,8 @@ public final class XUIHost: @unchecked Sendable {
         let keyFocus: String?
     }
     private var placedLayout: (key: LayoutKey, root: LayoutHost.PlacedRoot)?
+    private final class DrawingEpoch {}
+    private var drawingEpoch = DrawingEpoch()
     /// Slop is in logical canvas units. A phone shows the canvas at about 0.36pt per unit, so the
     /// 10-unit default is under 4pt of finger travel and a plain tap reads as a drag.
     private var gestureRuntime = GestureRuntime(tapSlop: 24)
@@ -121,6 +123,10 @@ public final class XUIHost: @unchecked Sendable {
         } else {
             nil as LayoutHost.PlacedRoot?
         }
+        if key != nil {
+            if previous == nil { drawingEpoch = DrawingEpoch() }
+            surface.drawingEpoch = drawingEpoch
+        }
         let (layout, root) = await LayoutHost(
             canvas: Size(width: Double(size.width), height: Double(size.height)),
             environment: frameEnvironment,
@@ -138,7 +144,8 @@ public final class XUIHost: @unchecked Sendable {
             current: focusStore.selectedID
         )
         let frame = XUIFrame(scene: surface.scene, layout: layout,
-                             stats: XUIFrameStats(measureCalls: surface.measureCalls, layoutPasses: previous == nil ? 1 : 0))
+                             stats: XUIFrameStats(measureCalls: surface.measureCalls, layoutPasses: previous == nil ? 1 : 0,
+                                                  staticDrawHits: surface.staticDrawHits, staticDrawMisses: surface.staticDrawMisses))
         lastFrame = frame
         return frame
     }
@@ -268,8 +275,12 @@ public struct XUIFrameStats: Sendable, Equatable {
     /// Text-width requests made by layout and drawing.
     public var measureCalls = 0
     public var layoutPasses: Int
-    public init(measureCalls: Int = 0, layoutPasses: Int = 0) {
+    public var staticDrawHits: Int
+    public var staticDrawMisses: Int
+    public init(measureCalls: Int = 0, layoutPasses: Int = 0, staticDrawHits: Int = 0, staticDrawMisses: Int = 0) {
         self.measureCalls = measureCalls
         self.layoutPasses = layoutPasses
+        self.staticDrawHits = staticDrawHits
+        self.staticDrawMisses = staticDrawMisses
     }
 }

@@ -31,6 +31,7 @@ private struct _BorderView: XView, _PrimitiveXView {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
+        node.drawIsStatic = true
         let color = color
         let width = width
         let cornerRadius = cornerRadius

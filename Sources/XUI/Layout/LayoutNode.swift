@@ -62,7 +62,11 @@ final class LayoutNode {
     var frame: Rect = .zero
 
     /// Draw callback for leaves that paint (`Color`, `Text`, `DrawLayer`).
-    var draw: ((Rect, RenderContext) -> Void)?
+    var draw: ((Rect, RenderContext) -> Void)? {
+        didSet { staticDrawingCache = nil }
+    }
+    var drawIsStatic = false
+    var staticDrawingCache: AnyObject?
     /// Named-rect export set by `.anchor(_:)`.
     var anchor: AnchorID?
     /// Hit-region payload set by `.region(_:)` / `.onTapGesture(_:)`.

@@ -25,6 +25,7 @@ public struct Color: XView, _PrimitiveXView, Sendable {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
+        node.drawIsStatic = true
         let fill = value
         node.draw = { rect, context in
             context.canvas.fillRect(rect, color: fill)

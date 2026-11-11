@@ -13,6 +13,21 @@ public struct SceneBuilder {
     private var transform: Transform2D = .identity
     private var clip: RenderRect?
 
+    package struct DrawingState: Equatable {
+        let transform: Transform2D
+        let clip: RenderRect?
+        let layer: RenderLayer
+    }
+
+    package var drawingState: DrawingState {
+        DrawingState(transform: transform, clip: clip, layer: layer)
+    }
+
+    /// Commands already resolved against this builder's drawing state.
+    package mutating func appendPreparedCommands(_ commands: [DrawCommand]) {
+        scene.append(contentsOf: commands)
+    }
+
     public init(size: RenderSize, background: RenderColor = RenderColor(0.035, 0.018, 0.055, 1)) {
         self.size = size
         self.scene = Scene(background: background, authoringCanvas: size)

@@ -8,7 +8,7 @@ import XUI
 ///
 /// `SceneBuilder` is a value type built up imperatively; this reference wrapper
 /// lets the layout walk share one accumulator across every leaf's draw call.
-public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink, XUI.LaserPreviewSink {
+public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink, XUI.LaserPreviewSink, XUI.StaticDrawingSink {
     public internal(set) var builder: SceneBuilder
     private var layerStack: [(shader: AnyShader, rect: XUI.Rect, builder: SceneBuilder)] = []
     /// Supplies atlas metrics so `Text` sizing matches what the compiler draws.
@@ -22,6 +22,45 @@ public final class SceneCanvas: XUI.XCanvas, XUI.ShaderSink, XUI.LayerShaderSink
     public var layer: RenderLayer
     /// How many times layout asked for a text width this frame; text measurement is the usual hidden cost of a view.
     public private(set) var measureCalls = 0
+    public private(set) var staticDrawHits = 0
+    public private(set) var staticDrawMisses = 0
+    var drawingEpoch: AnyObject?
+
+    private final class CachedDrawing {
+        let epoch: AnyObject
+        let frame: XUI.Rect
+        let state: SceneBuilder.DrawingState
+        let layer: RenderLayer
+        let commands: [DrawCommand]
+
+        init(epoch: AnyObject, frame: XUI.Rect, state: SceneBuilder.DrawingState, layer: RenderLayer, commands: [DrawCommand]) {
+            self.epoch = epoch
+            self.frame = frame
+            self.state = state
+            self.layer = layer
+            self.commands = commands
+        }
+    }
+
+    package func drawStatic(cache: inout AnyObject?, frame: XUI.Rect, drawing: () -> Void) {
+        guard let drawingEpoch else {
+            drawing()
+            return
+        }
+        let state = builder.drawingState
+        if let cached = cache as? CachedDrawing,
+           cached.epoch === drawingEpoch, cached.frame == frame,
+           cached.state == state, cached.layer == layer {
+            builder.appendPreparedCommands(cached.commands)
+            staticDrawHits += 1
+            return
+        }
+        let start = builder.scene.commands.count
+        drawing()
+        let commands = Array(builder.scene.commands[start...])
+        cache = CachedDrawing(epoch: drawingEpoch, frame: frame, state: state, layer: layer, commands: commands)
+        staticDrawMisses += 1
+    }
 
     public init(
         size: RenderSize,

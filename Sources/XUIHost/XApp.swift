@@ -98,6 +98,8 @@ public final class XAppSession<App: XApp> {
                 var stats = frame.stats
                 stats.layoutPasses += first.layoutPasses
                 stats.measureCalls += first.measureCalls
+                stats.staticDrawHits += first.staticDrawHits
+                stats.staticDrawMisses += first.staticDrawMisses
                 frame = XUIFrame(scene: frame.scene, layout: frame.layout, stats: stats)
                 dynamicFonts.prepare(frame.scene, pixelScale: pixelScale)
                 if fontRevision != dynamicFonts.revision {

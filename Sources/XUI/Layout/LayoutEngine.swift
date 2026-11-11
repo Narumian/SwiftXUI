@@ -63,7 +63,14 @@ enum LayoutEngine {
         if node.clipsToBounds { context.canvas.pushClip(node.frame) }
         if let draw = node.draw {
             let drawStart = XViewProfiler.start()
-            draw(node.frame, context)
+            if node.drawIsStatic, let sink = context.canvas as? any StaticDrawingSink {
+                let frame = node.frame
+                sink.drawStatic(cache: &node.staticDrawingCache, frame: frame) {
+                    draw(frame, context)
+                }
+            } else {
+                draw(node.frame, context)
+            }
             if drawStart != 0 { XViewProfiler.record("draw", type: String(reflecting: type(of: node.layout)), startedAt: drawStart) }
         }
         for child in node.children {

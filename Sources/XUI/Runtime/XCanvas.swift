@@ -41,6 +41,12 @@ public protocol LaserPreviewSink: AnyObject {
                           matrix: [Float], in rect: Rect)
 }
 
+/// Optional scene-backed caching for primitive draws that have no per-frame
+/// state or input registration. The canvas owns the representation of a draw.
+package protocol StaticDrawingSink: AnyObject {
+    func drawStatic(cache: inout AnyObject?, frame: Rect, drawing: () -> Void)
+}
+
 public extension XCanvas {
     func fillRoundedRect(_ rect: Rect, cornerRadius: Double, color: XColorValue) {
         fillRect(rect, color: color)

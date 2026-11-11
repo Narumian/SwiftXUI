@@ -19,6 +19,7 @@ public struct Rectangle: XView, _PrimitiveXView, Sendable {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
+        node.drawIsStatic = true
         let fill = fill
         node.draw = { rect, context in
             context.canvas.fillRect(rect, color: fill)
@@ -47,6 +48,7 @@ public struct RoundedRectangle: XView, _PrimitiveXView, Sendable {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
+        node.drawIsStatic = true
         let cornerRadius = cornerRadius
         let fill = fill
         node.draw = { rect, context in
@@ -74,6 +76,7 @@ public struct Ellipse: XView, _PrimitiveXView, Sendable {
     @XUIActor
     func _lower(id: StateIdentity, store: StateStore) async -> [LayoutNode] {
         let node = LayoutNode(layout: FillLayout())
+        node.drawIsStatic = true
         let fill = fill
         node.draw = { rect, context in
             context.canvas.fillEllipse(in: rect, color: fill)
