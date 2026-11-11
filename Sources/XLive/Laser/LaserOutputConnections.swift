@@ -1,8 +1,5 @@
 import Foundation
 
-/// The app's view of its laser outputs: it turns an output's masks into the
-/// calibration pattern and hands that to XLive's `LaserOutputStreams`, which owns
-/// the sessions and the paced sample pumps.
 public actor LaserOutputConnections {
     public typealias Connector = @Sendable (LaserOutput) async throws -> any LaserOutputSession
     private let streams: LaserOutputStreams
@@ -43,8 +40,6 @@ public actor LaserOutputConnections {
         try await streams.disconnect(id)
     }
 
-    /// Preview is explicitly enabled by the editor. All grid samples are
-    /// filtered by the current mask; normal output remains black at (0, 0).
     public func setPreview(_ enabled: Bool, for id: UUID, masks: LaserMaskSettings) async throws {
         if enabled {
             let pattern = try LaserPreviewPattern.grid(masks: masks)
@@ -55,10 +50,6 @@ public actor LaserOutputConnections {
         }
     }
 
-    /// Called while editing. Pointer drags can produce hundreds of updates per
-    /// second, so only the latest masks are kept and the grid is rebuilt off
-    /// this actor: the sample pump must never wait behind geometry work, or the
-    /// device buffer runs dry.
     public func updatePreviewMasks(_ masks: LaserMaskSettings, for id: UUID) async {
         await streams.setMasks(masks, for: id)
         guard await streams.patternActive(id) else { return }
@@ -70,37 +61,36 @@ public actor LaserOutputConnections {
     private func rebuildPreview(_ id: UUID) async {
         while let masks = pendingMasks.removeValue(forKey: id) {
             let pattern = try? await Task.detached(priority: .utility) { try LaserPreviewPattern.grid(masks: masks) }.value
-            // Masks that cannot be rendered keep the previous pattern.
+
             if let pattern { await streams.replacePattern(pattern, for: id) }
         }
         rebuilding.remove(id)
     }
 
-    /// Sets the safety masks of an output. They are applied to what the output
-    /// plays, after the shared buffer, so they follow the edits while it plays.
     public func setMasks(_ masks: LaserMaskSettings, for id: UUID) async { await streams.setMasks(masks, for: id) }
 
-    /// Plays one scanner stream in a zone at the rate it declares, replacing previews on
-    /// the zone's outputs or an earlier stream of the zone. The stream holds everything
-    /// that is common to the zone's outputs; each output adds only its rate conversion
-    /// and masks.
     public func play<Stream: Laser2DStream>(_ stream: Stream, zone: UUID = LaserOutputStreams.defaultZone) async throws {
         pendingMasks.removeAll()
         try await streams.play(stream: stream, zone: zone)
     }
-    /// Moves an output to a zone (the default zone if nil); it joins the zone if that plays.
-    /// The choice is kept, so an output that connects later (or again) comes up in its zone.
+    public func play<Source: AsyncSequence & Sendable>(source: Source, sampleRate: UInt32,
+                                                        zone: UUID = LaserOutputStreams.defaultZone) async throws
+    where Source.Element == [LaserPoint] {
+        pendingMasks.removeAll()
+        try await streams.play(source: source, sampleRate: sampleRate, zone: zone)
+    }
+
     public func assign(_ id: UUID, to zone: UUID?) async {
         zones[id] = zone
         await streams.assign(id, to: zone)
     }
-    /// Stops the stream; every output returns to black at (0, 0).
+
     public func stopPlaying() async { await streams.stopSource() }
-    /// Stops one zone's stream; its outputs return to black.
+
     public func stopPlaying(zone: UUID) async { await streams.stopSource(zone: zone) }
-    /// Stops whatever is playing on one output; it returns to black at (0, 0).
+
     public func stopPlaying(for id: UUID) async throws { try await streams.stopPattern(for: id) }
-    /// The zone an output is connected in, nil if it is not connected.
+
     public func zoneOf(_ id: UUID) async -> UUID? { await streams.zone(of: id) }
     public func isPlayingStream(_ id: UUID) async -> Bool { await streams.sourceActive(id) }
 

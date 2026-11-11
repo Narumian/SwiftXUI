@@ -1,23 +1,32 @@
 import Foundation
 
-/// The one buffer between a sample producer and the outputs that play it. The
-/// producer pushes at its own pace; each output reads through its own `Reader`, on
-/// its own clock, and never waits. A reader that finds the buffer empty is topped
-/// up with blanked samples parked at its last position, so a starved output goes
-/// dark instead of holding a lit point or repeating content.
-///
-/// The producer waits when the buffer is full for the reader that is furthest
-/// ahead, so the buffer is paced by whichever output is consuming. A reader that
-/// falls more than `capacity` behind (a link that stalled, say) is moved forward to
-/// the oldest sample still kept: it loses that stretch, and the others never wait
-/// for it.
 public final class LaserSampleRing: @unchecked Sendable {
     public let capacity: Int
+    public let maximumReaderLagSamples: Int
     private let lock = NSLock()
     private var storage: [LaserPoint]
-    /// Samples ever written. A sample's index in `storage` is its number modulo `capacity`.
+    private let startedAt = DispatchTime.now().uptimeNanoseconds
+
     private var written = 0
-    /// Readers are held weakly: one that is dropped stops holding the producer up.
+    private struct AvailabilityWaiter {
+        let id: UUID
+        let threshold: Int
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+    private struct SpaceWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+    private var availabilityWaiters: [AvailabilityWaiter] = []
+    private var spaceWaiters: [SpaceWaiter] = []
+    private struct ReadWaiter {
+        let id: UUID
+        let reader: Reader
+        let requested: Int
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+    private var readWaiters: [ReadWaiter] = []
+
     private var readers: [ObjectIdentifier: WeakReader] = [:]
     private struct WeakReader { weak var reader: Reader? }
     private var live: [Reader] {
@@ -25,83 +34,185 @@ public final class LaserSampleRing: @unchecked Sendable {
         return readers.values.compactMap(\.reader)
     }
 
-    public init(capacity: Int) {
+    public init(capacity: Int, maximumReaderLagSamples: Int? = nil) {
         precondition(capacity > 0)
         self.capacity = capacity
+        self.maximumReaderLagSamples = min(capacity, max(1, maximumReaderLagSamples ?? capacity))
         storage = Array(repeating: try! LaserPoint(xy: .zero, rgb: .zero, isBlanked: true), count: capacity)
     }
 
-    /// One output's way of reading the ring. It starts at the live end.
+    public var availableLength: Int { lock.withLock { availableLengthLocked() } }
+
+    public func waitForAvailableLength(atMost threshold: Int) async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                } else if !live.isEmpty && availableLengthLocked() <= max(0, threshold) {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    availabilityWaiters.append(AvailabilityWaiter(id: id, threshold: max(0, threshold), continuation: continuation))
+                    lock.unlock()
+                }
+            }
+        } onCancel: {
+            self.lock.lock()
+            let waiter = self.availabilityWaiters.firstIndex { $0.id == id }.map { self.availabilityWaiters.remove(at: $0) }
+            self.lock.unlock()
+            waiter?.continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    private func waitForSpace() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                } else if hasSpaceLocked() {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    spaceWaiters.append(SpaceWaiter(id: id, continuation: continuation))
+                    lock.unlock()
+                }
+            }
+        } onCancel: {
+            self.lock.lock()
+            let waiter = self.spaceWaiters.firstIndex { $0.id == id }.map { self.spaceWaiters.remove(at: $0) }
+            self.lock.unlock()
+            waiter?.continuation.resume(throwing: CancellationError())
+        }
+    }
+
     public final class Reader: @unchecked Sendable {
         fileprivate let ring: LaserSampleRing
+        fileprivate let maximumLagSamples: Int
         fileprivate var position: Int
-        fileprivate var last: LaserPoint
         fileprivate var starved = 0
         fileprivate var starvedPulls = 0
         fileprivate var skipped = 0
-        fileprivate init(ring: LaserSampleRing, position: Int) {
-            self.ring = ring; self.position = position
-            last = try! LaserPoint(xy: .zero, rgb: .zero, isBlanked: true)
+        fileprivate var recentStarvations: [String] = []
+        fileprivate init(ring: LaserSampleRing, position: Int, maximumLagSamples: Int) {
+            self.ring = ring; self.position = position; self.maximumLagSamples = maximumLagSamples
         }
 
-        /// Samples waiting for this reader.
         public var fill: Int { ring.lock.withLock { min(ring.capacity, ring.written - position) } }
-        /// Samples invented because the producer was late.
-        public var starvedSamples: Int { ring.lock.withLock { starved } }
-        /// Pulls that needed at least one invented sample.
-        public var starvedPullCount: Int { ring.lock.withLock { starvedPulls } }
-        /// Samples lost because this reader fell too far behind.
-        public var skippedSamples: Int { ring.lock.withLock { skipped } }
 
-        /// Takes exactly `requested` samples, topping up with blanked samples at the
-        /// last position when fewer are buffered. Never waits.
+        public var starvedSamples: Int { ring.lock.withLock { starved } }
+
+        public var starvedPullCount: Int { ring.lock.withLock { starvedPulls } }
+
+        public var skippedSamples: Int { ring.lock.withLock { skipped } }
+        public var starvationTrace: String { ring.lock.withLock { recentStarvations.joined(separator: ",") } }
+
+        @discardableResult
+        public func catchUpIfNeeded() -> Int {
+            ring.lock.withLock {
+                let before = skipped
+                ring.catchUp(self, maximumLag: maximumLagSamples)
+                ring.resumeAvailabilityWaitersIfReady()
+                return skipped - before
+            }
+        }
+
+        public func waitForAvailableLength(atLeast requested: Int) async throws {
+            guard requested > 0 else { return }
+            let id = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    ring.lock.lock()
+                    if Task.isCancelled {
+                        ring.lock.unlock()
+                        continuation.resume(throwing: CancellationError())
+                    } else if ring.availableLengthLocked(for: self, maximumLag: maximumLagSamples) >= requested {
+                        ring.lock.unlock()
+                        continuation.resume()
+                    } else {
+                        ring.readWaiters.append(ReadWaiter(id: id, reader: self, requested: requested, continuation: continuation))
+                        ring.lock.unlock()
+                    }
+                }
+            } onCancel: {
+                self.ring.lock.lock()
+                let waiter = self.ring.readWaiters.firstIndex { $0.id == id }.map { self.ring.readWaiters.remove(at: $0) }
+                self.ring.lock.unlock()
+                waiter?.continuation.resume(throwing: CancellationError())
+            }
+        }
+
         public func pull(_ requested: Int) -> [LaserPoint] {
             guard requested > 0 else { return [] }
             return ring.lock.withLock {
-                ring.catchUp(self)
+                ring.catchUp(self, maximumLag: maximumLagSamples)
                 let available = min(requested, ring.written - position)
                 var out: [LaserPoint] = []
-                out.reserveCapacity(requested)
+                out.reserveCapacity(available)
                 for _ in 0..<available {
                     out.append(ring.storage[position % ring.capacity])
                     position += 1
                 }
-                if let tail = out.last { last = tail }
                 if available < requested {
-                    starved += requested - available
+                    let missing = requested - available
+                    starved += missing
                     starvedPulls += 1
-                    let dark = try! LaserPoint(xy: last.xy, rgb: .zero, isBlanked: true)
-                    out.append(contentsOf: Array(repeating: dark, count: requested - available))
-                    last = dark
+                    let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- ring.startedAt) / 1_000_000
+                    recentStarvations.append(String(format: "%.1fms:-%d", elapsed, missing))
+                    if recentStarvations.count > 16 { recentStarvations.removeFirst() }
                 }
+                ring.resumeAvailabilityWaitersIfReady()
                 return out
             }
         }
     }
 
-    /// A new reader, starting at what is being written now.
-    public func makeReader() -> Reader {
+    public func makeReader(maximumLagSamples: Int? = nil) -> Reader {
         lock.withLock {
-            let reader = Reader(ring: self, position: written)
+            let maximumLag = min(capacity, max(1, maximumLagSamples ?? maximumReaderLagSamples))
+            let reader = Reader(ring: self, position: written, maximumLagSamples: maximumLag)
             readers[ObjectIdentifier(reader)] = WeakReader(reader: reader)
+            resumeAvailabilityWaitersIfReady()
             return reader
         }
     }
 
     public func remove(_ reader: Reader) {
-        lock.withLock { _ = readers.removeValue(forKey: ObjectIdentifier(reader)) }
+        lock.withLock {
+            _ = readers.removeValue(forKey: ObjectIdentifier(reader))
+            resumeAvailabilityWaitersIfReady()
+        }
     }
 
     public var readerCount: Int { lock.withLock { live.count } }
 
-    /// Moves a reader that fell behind up to the oldest sample still kept.
-    private func catchUp(_ reader: Reader) {
-        let oldest = written - capacity
+    private func catchUp(_ reader: Reader, maximumLag: Int) {
+        let oldest = max(written - capacity, written - maximumLag)
         if reader.position < oldest { reader.skipped += oldest - reader.position; reader.position = oldest }
     }
 
-    /// Appends as many samples as fit and returns how many were taken. With no
-    /// reader nothing is taken.
+    private func availableLengthLocked(for reader: Reader, maximumLag: Int) -> Int {
+        catchUp(reader, maximumLag: maximumLag)
+        resumeAvailabilityWaitersIfReady()
+        return max(0, written - reader.position)
+    }
+
+    private func resumeReadWaitersIfReady() {
+        var ready: [CheckedContinuation<Void, any Error>] = []
+        for index in readWaiters.indices.reversed() {
+            let waiter = readWaiters[index]
+            if availableLengthLocked(for: waiter.reader, maximumLag: waiter.reader.maximumLagSamples) >= waiter.requested {
+                ready.append(readWaiters.remove(at: index).continuation)
+            }
+        }
+        for continuation in ready { continuation.resume() }
+    }
+
     public func tryPush(_ points: ArraySlice<LaserPoint>) -> Int {
         lock.withLock {
             guard let ahead = live.map(\.position).max() else { return 0 }
@@ -110,33 +221,54 @@ public final class LaserSampleRing: @unchecked Sendable {
                 storage[written % capacity] = point
                 written += 1
             }
+            resumeReadWaitersIfReady()
             return accepted
         }
     }
 
-    /// Appends all of `points`, suspending while the buffer is full. Throws when
-    /// the calling task is cancelled.
     public func push(_ points: [LaserPoint]) async throws {
         var rest = points[...]
         while !rest.isEmpty {
+            try Task.checkCancellation()
             let taken = tryPush(rest)
             rest = rest.dropFirst(taken)
-            if !rest.isEmpty { try await Task.sleep(nanoseconds: 2_000_000) }
+            if !rest.isEmpty { try await waitForSpace() }
         }
     }
 
-    /// Drops everything buffered, e.g. when the source is replaced.
     public func clear() {
-        lock.withLock { for reader in live { reader.position = written } }
+        lock.withLock {
+            for reader in live { reader.position = written }
+            resumeAvailabilityWaitersIfReady()
+        }
+    }
+
+    private func availableLengthLocked() -> Int {
+        guard let ahead = live.map(\.position).max() else { return 0 }
+        return max(0, written - ahead)
+    }
+
+    private func hasSpaceLocked() -> Bool {
+        guard let ahead = live.map(\.position).max() else { return false }
+        let oldest = max(ahead, written - capacity)
+        return written - oldest < capacity
+    }
+
+    private func resumeAvailabilityWaitersIfReady() {
+        guard !live.isEmpty else { return }
+        if !availabilityWaiters.isEmpty {
+            let available = availableLengthLocked()
+            let ready = availabilityWaiters.filter { available <= $0.threshold }
+            availabilityWaiters.removeAll { available <= $0.threshold }
+            for waiter in ready { waiter.continuation.resume() }
+        }
+        guard hasSpaceLocked(), !spaceWaiters.isEmpty else { return }
+        let space = spaceWaiters
+        spaceWaiters.removeAll()
+        for waiter in space { waiter.continuation.resume() }
     }
 }
 
-/// Converts a stream of samples from one point rate to another by linear
-/// interpolation of position and colour. A sample between two blanked-or-lit
-/// neighbours is blanked if either neighbour is, so conversion can only darken
-/// the edge of a lit run, never light a travel move. Equal rates pass through
-/// untouched. Geometry sampled this way is smoothed: corners dwelt on for a few
-/// samples are rounded off when the rates differ.
 public struct LaserRateConverter: Sendable {
     public let sourceRate: Double
     public let outputRate: Double
@@ -154,8 +286,14 @@ public struct LaserRateConverter: Sendable {
 
     public var isPassthrough: Bool { sourceRate == outputRate }
 
-    /// Produces `count` output samples, calling `pull` for the source samples it
-    /// needs in chunks of `chunk`. `pull(n)` must return exactly `n` samples.
+    public mutating func reset() {
+        current = nil
+        following = nil
+        phase = 0
+        pending = []
+        pendingIndex = 0
+    }
+
     public mutating func convert(count: Int, chunk: Int = 64, pull: (Int) -> [LaserPoint]) -> [LaserPoint] {
         guard count > 0 else { return [] }
         if isPassthrough { return pull(count) }
@@ -164,7 +302,7 @@ public struct LaserRateConverter: Sendable {
         out.reserveCapacity(count)
         func next() -> LaserPoint {
             if pendingIndex == pending.count {
-                // Surplus beyond this call is kept for the next one, never dropped.
+
                 pending = pull(chunk)
                 pendingIndex = 0
             }
@@ -184,12 +322,41 @@ public struct LaserRateConverter: Sendable {
         return out
     }
 
+    public mutating func convertAsync(count: Int, chunk: Int = 16,
+                                      pull: (Int) async throws -> [LaserPoint]) async throws -> [LaserPoint] {
+        guard count > 0 else { return [] }
+        if isPassthrough { return try await pull(count) }
+        let step = sourceRate / outputRate
+        var out: [LaserPoint] = []
+        out.reserveCapacity(count)
+        if current == nil { current = try await nextAsync(chunk: chunk, pull: pull); following = try await nextAsync(chunk: chunk, pull: pull) }
+        for _ in 0..<count {
+            out.append(Self.lerp(current!, following!, Float(phase)))
+            phase += step
+            while phase >= 1 {
+                current = following
+                following = try await nextAsync(chunk: chunk, pull: pull)
+                phase -= 1
+            }
+        }
+        return out
+    }
+
+    private mutating func nextAsync(chunk: Int, pull: (Int) async throws -> [LaserPoint]) async throws -> LaserPoint {
+        if pendingIndex == pending.count {
+            pending = try await pull(chunk)
+            pendingIndex = 0
+        }
+        defer { pendingIndex += 1 }
+        return pending[pendingIndex]
+    }
+
     private static func lerp(_ a: LaserPoint, _ b: LaserPoint, _ t: Float) -> LaserPoint {
         if t == 0 { return a }
         func mix(_ x: Float, _ y: Float) -> Float { x + (y - x) * t }
         let xy = SIMD2<Float>(min(1, max(-1, mix(a.xy.x, b.xy.x))), min(1, max(-1, mix(a.xy.y, b.xy.y))))
         let rgb = SIMD3<Float>(min(1, max(0, mix(a.rgb.x, b.rgb.x))), min(1, max(0, mix(a.rgb.y, b.rgb.y))), min(1, max(0, mix(a.rgb.z, b.rgb.z))))
-        // A point between two others moves: dark if either end is dark, never a dwell.
+
         return try! LaserPoint(xy: xy, rgb: rgb, mode: a.isBlanked || b.isBlanked ? .blank : .normal)
     }
 }

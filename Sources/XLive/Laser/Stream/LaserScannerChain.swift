@@ -1,10 +1,5 @@
 import Foundation
 
-/// The whole path from shapes to scanner samples that every output shares, in the order
-/// the zone applies it: mastering (in 3D, a placeholder for now), projection, then padding
-/// (dwell and blank at the ends of each shape), corner dwell, and the resampler. Each stage is read from the
-/// `LaserScannerSettings` in `live` before every frame, so a setting that changes
-/// while the chain plays takes effect on the next frame, without a rebuild.
 public struct LaserScannerChain: Laser2DStream {
     private let source: LaserLive<Laser3DBuffer>
     public let rate: UInt32?
@@ -30,7 +25,6 @@ public struct LaserScannerChain: Laser2DStream {
         process(source.value)
     }
 
-    /// The shapes through the stages with the settings as they are now.
     public mutating func process(_ shapes: Laser3DBuffer) -> [Laser2DShape] {
         tune(live.value)
         return resampler.process(corners.process(padding.process(projector.project(mastering.value.process(shapes)))))

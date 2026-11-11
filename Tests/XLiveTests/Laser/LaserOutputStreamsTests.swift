@@ -25,6 +25,50 @@ private final class StubSession: LaserOutputSession, @unchecked Sendable {
     func disconnect() async throws { await recorder.disconnect() }
 }
 
+private actor VirtualLaserRecorder {
+    private let delayNanoseconds: UInt64
+    private var rates: [UInt32] = []
+    private var writes: [[LaserPoint]] = []
+
+    init(delayNanoseconds: UInt64 = 0) { self.delayNanoseconds = delayNanoseconds }
+    func start(_ rate: UInt32) { rates.append(rate) }
+    func write(_ points: [LaserPoint]) async throws {
+        if delayNanoseconds > 0 { try await Task.sleep(nanoseconds: delayNanoseconds) }
+        writes.append(points)
+    }
+    func samples() -> [LaserPoint] { writes.flatMap { $0 } }
+    func startedRates() -> [UInt32] { rates }
+}
+
+private final class VirtualLaserSession: LaserOutputSession, @unchecked Sendable {
+    let recorder: VirtualLaserRecorder
+    let capabilities: LaserOutputCapabilities
+    let states = AsyncStream<LaserOutputState> { $0.finish() }
+    init(_ recorder: VirtualLaserRecorder, maximumPointRate: UInt32) {
+        self.recorder = recorder
+        capabilities = LaserOutputCapabilities(maximumPointRate: maximumPointRate)
+    }
+    func start(pointRate: UInt32) async throws { await recorder.start(pointRate) }
+    func write(_ points: [LaserPoint]) async throws { try await recorder.write(points) }
+    func stop() async throws {}
+    func disconnect() async throws {}
+}
+
+private struct SampleSequence: AsyncSequence, Sendable {
+    typealias Element = [LaserPoint]
+    struct Iterator: AsyncIteratorProtocol {
+        var nextIndex = 0
+        mutating func next() async -> [LaserPoint]? {
+            let start = nextIndex
+            nextIndex += 256
+            return (start..<nextIndex).map { index in
+                try! LaserPoint(xy: SIMD2<Float>(Float(index % 10_000) / 10_000, 0), rgb: SIMD3<Float>(repeating: 0.5))
+            }
+        }
+    }
+    func makeAsyncIterator() -> Iterator { Iterator() }
+}
+
 final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
     func testBlackCenterIsOnlyBlankCenterPoints() {
         let points = LaserPoint.blackCenter(count: 280)
@@ -125,20 +169,56 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         try await streams.disconnect(id)
     }
 
-    func testAStarvedSourceGoesDarkWithoutFailingTheStream() async throws {
+    func testVirtualLasersAtDifferentRatesSkipLateSamplesWithoutStarving() async throws {
+        let fast = VirtualLaserRecorder(delayNanoseconds: 5_000_000)
+        let slow = VirtualLaserRecorder(delayNanoseconds: 30_000_000)
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 0)
+        let fastID = UUID(), slowID = UUID()
+        try await streams.connect(fastID) { VirtualLaserSession(fast, maximumPointRate: 30000) }
+        try await streams.connect(slowID) { VirtualLaserSession(slow, maximumPointRate: 20000) }
+        try await streams.play(source: SampleSequence(), sampleRate: 50000)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        let report = await streams.diagnosticsReport()
+        let fastSamples = await fast.samples(), slowSamples = await slow.samples()
+        let fastRates = await fast.startedRates(), slowRates = await slow.startedRates()
+        XCTAssertEqual(fastRates, [30000])
+        XCTAssertEqual(slowRates, [20000])
+        XCTAssertGreaterThan(fastSamples.count, 140)
+        XCTAssertGreaterThan(slowSamples.count, 140)
+        XCTAssertTrue(report.contains("source=50000Hz"), report)
+        XCTAssertTrue(report.contains("starved=0/0pulls"), report)
+        let slowReport = report.components(separatedBy: "\n").first { $0.contains("output=\(slowID)") } ?? ""
+        XCTAssertTrue(slowReport.contains("skipped="), report)
+        XCTAssertFalse(slowReport.contains("skipped=0 "), report)
+        let slowPositions = slowSamples.map { Int((Double($0.xy.x) * 10_000).rounded()) }
+        var unwrappedSlowIndices = [slowPositions[0]]
+        for position in slowPositions.dropFirst() {
+            let previous = unwrappedSlowIndices.last!
+            unwrappedSlowIndices.append(previous + (position - previous % 10_000 + 10_000) % 10_000)
+        }
+        XCTAssertTrue(zip(unwrappedSlowIndices, unwrappedSlowIndices.dropFirst()).contains { $1 - $0 > 100 }, report)
+        await streams.stopSource()
+        try await streams.disconnect(fastID)
+        try await streams.disconnect(slowID)
+    }
+
+    func testSilentSourceWaitsWithoutInjectingDarkSamples() async throws {
         let recorder = Recorder()
         let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 1)
         let id = UUID()
         try await streams.connect(id) { StubSession(recorder) }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let before = await recorder.blackWrites
         let silent = AsyncStream<[LaserPoint]> { _ in }   // never yields
         try await streams.play(source: silent, sampleRate: 30000)
-        try await Task.sleep(nanoseconds: 80_000_000)
+        try await Task.sleep(nanoseconds: 50_000_000)
         let lit = await recorder.litWrites, black = await recorder.blackWrites, failure = await streams.streamFailure(id)
         XCTAssertEqual(lit, 0)
-        XCTAssertGreaterThan(black, 0)
+        XCTAssertLessThanOrEqual(black, before + 1)
         XCTAssertNil(failure)
         let report = await streams.diagnosticsReport()
         XCTAssertTrue(report.contains("starved="), report)
+        XCTAssertTrue(report.contains("starved=0/0pulls"), report)
         try await streams.disconnect(id)
     }
 
@@ -239,7 +319,16 @@ final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
         let a = UUID(), b = UUID()
         try await streams.connect(a) { StubSession(first) }
         try await streams.connect(b) { StubSession(second) }
-        try await streams.play(source: AsyncStream<[LaserPoint]> { _ in }, sampleRate: 30000)
+        let dark = LaserPoint.blackCenter(count: 300)
+        let source = AsyncStream<[LaserPoint]> { continuation in
+            Task {
+                while !Task.isCancelled {
+                    continuation.yield(dark)
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+            }
+        }
+        try await streams.play(source: source, sampleRate: 30000)
         try await Task.sleep(nanoseconds: 100_000_000)
         let writesA = await first.blackWrites, writesB = await second.blackWrites
         XCTAssertGreaterThan(writesA, 3)

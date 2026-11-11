@@ -29,25 +29,57 @@ final class LaserSampleRingTests: XCTestCase {
         XCTAssertEqual(ring.tryPush([lit(0)][...]), 0)
     }
 
-    func testStarvedPullIsToppedUpWithBlankSamplesAtTheLastPosition() {
+    func testStarvedPullReturnsOnlyAvailableSamples() {
         let ring = LaserSampleRing(capacity: 8)
         let reader = ring.makeReader()
         _ = ring.tryPush([lit(0.25), lit(0.75)][...])
         let out = reader.pull(5)
-        XCTAssertEqual(out.count, 5)
+        XCTAssertEqual(out.count, 2)
         XCTAssertEqual(out[0].xy.x, 0.25)
         XCTAssertEqual(out[1].xy.x, 0.75)
         XCTAssertFalse(out[1].isBlanked)
-        for point in out.dropFirst(2) { XCTAssertTrue(point.isBlanked && point.rgb == .zero && point.xy.x == 0.75) }
         XCTAssertEqual(reader.starvedSamples, 3)
         XCTAssertEqual(reader.starvedPullCount, 1)
-        // Later pulls stay dark at the same place until the producer catches up.
-        XCTAssertTrue(reader.pull(2).allSatisfy { $0.isBlanked && $0.xy.x == 0.75 })
+        XCTAssertTrue(reader.pull(2).isEmpty)
     }
 
     func testEmptyRingNeverEmitsLightAndStartsAtCentre() {
         let out = LaserSampleRing(capacity: 4).makeReader().pull(6)
-        XCTAssertTrue(out.allSatisfy { $0.isBlanked && $0.xy == .zero && $0.rgb == .zero })
+        XCTAssertTrue(out.isEmpty)
+    }
+
+    func testReaderWaitsForSamplesInsteadOfReturningSyntheticPoints() async throws {
+        actor Signal {
+            var didResume = false
+            func set() { didResume = true }
+            func value() -> Bool { didResume }
+        }
+        let ring = LaserSampleRing(capacity: 8)
+        let reader = ring.makeReader()
+        let signal = Signal()
+        let waiting = Task {
+            try await reader.waitForAvailableLength(atLeast: 3)
+            await signal.set()
+        }
+        XCTAssertEqual(ring.tryPush([lit(0.1), lit(0.2)][...]), 2)
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let resumedBeforeEnoughSamples = await signal.value()
+        XCTAssertFalse(resumedBeforeEnoughSamples)
+        XCTAssertEqual(ring.tryPush([lit(0.3)][...]), 1)
+        try await waiting.value
+        let resumedAfterEnoughSamples = await signal.value()
+        XCTAssertTrue(resumedAfterEnoughSamples)
+        XCTAssertEqual(reader.pull(3).map(\.xy.x), [0.1, 0.2, 0.3])
+    }
+
+    func testSlowReaderSkipsToItsBoundedLiveWindow() {
+        let ring = LaserSampleRing(capacity: 8, maximumReaderLagSamples: 2)
+        let reader = ring.makeReader()
+        let points = (1...8).map { lit(Float($0) / 10) }
+        XCTAssertEqual(ring.tryPush(points[...]), 8)
+        XCTAssertEqual(reader.pull(2).map(\.xy.x), [0.7, 0.8])
+        XCTAssertEqual(reader.skippedSamples, 6)
+        XCTAssertEqual(reader.starvedSamples, 0)
     }
 
     func testAsyncPushWaitsForSpaceAndCancellationEndsIt() async throws {

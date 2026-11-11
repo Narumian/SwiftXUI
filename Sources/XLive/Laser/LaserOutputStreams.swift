@@ -13,13 +13,11 @@ public enum LaserStreamError: Error, LocalizedError, Sendable {
     }
 }
 
-/// Timing probe for one output's sample pump. A device underruns when the
-/// producer's effective rate stays below the point rate, so the numbers that
-/// matter are how long each write blocks, the gap between writes, and the
-/// resulting samples-per-second since the first write.
 public struct LaserStreamStats: Sendable, CustomStringConvertible {
     public var writes = 0
     public var samples = 0
+    public var blankedSamples = 0
+    public var maskBlankedSamples = 0
     public var maxWriteMs = 0.0
     public var maxGapMs = 0.0
     public var totalWriteMs = 0.0
@@ -29,11 +27,12 @@ public struct LaserStreamStats: Sendable, CustomStringConvertible {
     var lastEnd: UInt64?
     public var effectiveRate: Double { elapsedMs > 0 ? Double(samples) / (elapsedMs / 1000) : 0 }
     static func ms(_ from: UInt64, _ to: UInt64) -> Double { Double(to &- from) / 1e6 }
-    mutating func record(start: UInt64, end: UInt64, count: Int) {
+    mutating func record(start: UInt64, end: UInt64, count: Int, blanked: Int, maskBlanked: Int) {
         if first == nil { first = start }
         let write = Self.ms(start, end)
         let gap = lastEnd.map { Self.ms($0, start) } ?? 0
         writes += 1; samples += count; totalWriteMs += write
+        blankedSamples += blanked; maskBlankedSamples += maskBlanked
         maxWriteMs = max(maxWriteMs, write); maxGapMs = max(maxGapMs, gap)
         elapsedMs = Self.ms(first!, end)
         lastEnd = end
@@ -41,47 +40,52 @@ public struct LaserStreamStats: Sendable, CustomStringConvertible {
     }
     public var description: String {
         let tail = recent.map { String(format: "%.0f/%.0f", $0.write, $0.gap) }.joined(separator: " ")
-        return String(format: "writes=%d samples=%d elapsed=%.0fms rate=%.0f/s avgWrite=%.1fms maxWrite=%.1fms maxGap=%.1fms recent(write/gap ms)=[%@]",
-                      writes, samples, elapsedMs, effectiveRate, writes > 0 ? totalWriteMs / Double(writes) : 0, maxWriteMs, maxGapMs, tail)
+        return String(format: "writes=%d samples=%d blank=%d maskBlank=%d elapsed=%.0fms rate=%.0f/s avgWrite=%.1fms maxWrite=%.1fms maxGap=%.1fms recent(write/gap ms)=[%@]",
+                      writes, samples, blankedSamples, maskBlankedSamples, elapsedMs, effectiveRate,
+                      writes > 0 ? totalWriteMs / Double(writes) : 0, maxWriteMs, maxGapMs, tail)
     }
 }
 
 extension LaserPoint {
-    /// Blanked samples parked at the scanner centre: the idle stream of an
-    /// output that has nothing to show. It can never emit light.
+
     public static func blackCenter(count: Int) -> [LaserPoint] {
         let point = try! LaserPoint(xy: .zero, rgb: .zero, isBlanked: true)
         return Array(repeating: point, count: count)
     }
 }
 
-/// Owns one paced sample pump per connected output, keyed by a caller-chosen ID, and
-/// the zones that play on them. An idle output streams black (0, 0); a looping pattern
-/// can be played over it and removed again; a live source is played in a zone, and every
-/// output that belongs to the zone plays it. An output belongs to one zone: the one it
-/// was assigned, or the default zone. What the pattern depicts, which outputs exist and
-/// which zone each is in is the application's concern.
 public actor LaserOutputStreams {
     public typealias Opener = @Sendable () async throws -> any LaserOutputSession
 
-    /// The id of the zone an output belongs to until it is assigned another.
     public static let defaultZone = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
-    /// One output's way of playing its zone: its own reader on the zone's ring, and the
-    /// rate converter from the zone's rate to the device's. Only the pump touches the
-    /// converter.
     private final class Tap: @unchecked Sendable {
         let zone: LaserZonePlayback
         let reader: LaserSampleRing.Reader
         var converter: LaserRateConverter
-        init(zone: LaserZonePlayback, outputRate: UInt32) {
+        private var observedSkippedSamples = 0
+        init(zone: LaserZonePlayback, outputRate: UInt32, outputBlockSize: Int) {
             self.zone = zone
-            reader = zone.ring.makeReader()
+            let sourceBlockSize = Int(ceil(Double(outputBlockSize) * Double(zone.rate) / Double(outputRate)))
+            let maximumLag = max(Int(zone.rate) / 200, sourceBlockSize + 16)
+            reader = zone.ring.makeReader(maximumLagSamples: maximumLag)
             converter = LaserRateConverter(sourceRate: zone.rate, outputRate: outputRate)
         }
-        func pull(_ count: Int) -> [LaserPoint] {
+        func pull(_ count: Int) async throws -> [LaserPoint] {
             let reader = reader
-            return converter.convert(count: count) { reader.pull($0) }
+            if reader.catchUpIfNeeded() > 0 || reader.skippedSamples != observedSkippedSamples {
+                converter.reset()
+                observedSkippedSamples = reader.skippedSamples
+            }
+            let points = try await converter.convertAsync(count: count) { requested in
+                try await reader.waitForAvailableLength(atLeast: requested)
+                return reader.pull(requested)
+            }
+            if reader.skippedSamples != observedSkippedSamples {
+                converter.reset()
+                observedSkippedSamples = reader.skippedSamples
+            }
+            return points
         }
         func detach() { zone.ring.remove(reader) }
     }
@@ -93,15 +97,16 @@ public actor LaserOutputStreams {
         var generation: UUID
         var looping = false
         var tap: Tap?
-        /// The zone this output was assigned; nil means the default zone.
+
         var zone: UUID?
-        /// The output's own safety masks, applied to the live source after the ring.
+
         var masks = LaserMasking(LaserMaskSettings())
         var pattern: [LaserPoint] = []
         var offset = 0
         var failure: String?
         var changing = false
         var stats = LaserStreamStats()
+        var lastProbeLoggedAt: UInt64 = 0
     }
     private var streams: [UUID: Stream] = [:]
     private var zones: [UUID: LaserZonePlayback] = [:]
@@ -109,16 +114,12 @@ public actor LaserOutputStreams {
     private let blockSize: Int
     private let pauseNanoseconds: UInt64
     private let sourceBufferSamples: Int
-    /// `sourceBufferSamples` bounds the ring of each zone between its source and the pumps; the
-    /// default of two blocks keeps edits within roughly a block of the output.
     public init(blockSize: Int = 1400, pauseMilliseconds: Int = 20, sourceBufferSamples: Int? = nil) {
         self.blockSize = blockSize
-        self.sourceBufferSamples = max(1, sourceBufferSamples ?? 2 * blockSize)
+        self.sourceBufferSamples = max(1, sourceBufferSamples ?? max(1024, 2 * blockSize))
         self.pauseNanoseconds = UInt64(max(0, pauseMilliseconds)) * 1_000_000
     }
 
-    /// Human-readable state of every stream, served by an app's MCP
-    /// `app_diagnostics` tool so a running app can be measured from outside.
     public func diagnosticsReport() -> String {
         guard !streams.isEmpty else { return "no connected output" }
         return streams.map { id, stream in
@@ -127,20 +128,17 @@ public actor LaserOutputStreams {
     }
     private static func tapReport(_ tap: Tap?) -> String {
         guard let tap else { return "source=none" }
-        return "source=\(tap.zone.rate)Hz ring=\(tap.reader.fill)/\(tap.zone.ring.capacity) starved=\(tap.reader.starvedSamples)/\(tap.reader.starvedPullCount)pulls skipped=\(tap.reader.skippedSamples) sourceFailure=\(tap.zone.failure ?? "none")"
+        return "source=\(tap.zone.rate)Hz ring=\(tap.reader.fill)/\(tap.zone.ring.capacity) starved=\(tap.reader.starvedSamples)/\(tap.reader.starvedPullCount)pulls skipped=\(tap.reader.skippedSamples) events=[\(tap.reader.starvationTrace)] sourceFailure=\(tap.zone.failure ?? "none")\n  \(tap.zone.sourceDiagnostics)"
     }
     public func diagnostics(_ id: UUID) -> String? { streams[id].map { $0.stats.description } }
 
     public func hasSession(_ id: UUID) -> Bool { streams[id] != nil }
-    /// True while a pattern is looping and the stream has not failed.
+
     public func patternActive(_ id: UUID) -> Bool { streams[id]?.looping == true && streams[id]?.failure == nil }
-    /// True while a live source is attached and the stream has not failed.
+
     public func sourceActive(_ id: UUID) -> Bool { streams[id]?.tap != nil && streams[id]?.failure == nil }
     public func streamFailure(_ id: UUID) -> String? { streams[id]?.failure }
 
-    /// Opens a session through `open` and starts streaming black on it, or its zone if
-    /// that is playing. `masks` are the output's safety masks; `zone` is the zone the
-    /// output belongs to (the default zone if nil).
     public func connect(_ id: UUID, masks: LaserMaskSettings = LaserMaskSettings(), zone: UUID? = nil, open: Opener) async throws {
         guard streams[id] == nil else { return }
         guard connecting.insert(id).inserted else { throw LaserStreamError.busy }
@@ -153,7 +151,7 @@ public actor LaserOutputStreams {
             var stream = Stream(session: session, rate: rate, task: nil, generation: generation)
             stream.masks = LaserMasking(masks)
             stream.zone = zone
-            if let playing = zones[zone ?? Self.defaultZone] { stream.tap = Tap(zone: playing, outputRate: rate) }
+            if let playing = zones[zone ?? Self.defaultZone] { stream.tap = Tap(zone: playing, outputRate: rate, outputBlockSize: blockSize) }
             streams[id] = stream
             launch(id: id, generation: generation)
         } catch {
@@ -162,7 +160,6 @@ public actor LaserOutputStreams {
         }
     }
 
-    /// Streams `pattern` in a loop from its start. An empty pattern streams black.
     public func play(_ pattern: [LaserPoint], for id: UUID) throws {
         guard var stream = streams[id] else { throw LaserStreamError.notConnected }
         guard !stream.changing else { throw LaserStreamError.busy }
@@ -171,18 +168,19 @@ public actor LaserOutputStreams {
         stream.pattern = pattern
         stream.offset = 0
         stream.looping = true
+        stream.generation = UUID()
+        let generation = stream.generation
+        let previous = stream.task
+        stream.task = nil
         streams[id] = stream
+        previous?.cancel()
+        launch(id: id, generation: generation)
     }
 
-    /// Sets the safety masks of one output. They apply to the live source from the
-    /// next block, so they can be edited while it plays.
     public func setMasks(_ masks: LaserMaskSettings, for id: UUID) {
         streams[id]?.masks = LaserMasking(masks)
     }
 
-    /// Moves an output to a zone (the default zone if nil). If that zone is playing, the
-    /// output joins it at once; if it is not, what the output was playing from its old
-    /// zone stops and it streams black.
     public func assign(_ id: UUID, to zone: UUID?) {
         guard var stream = streams[id] else { return }
         stream.tap?.detach(); stream.tap = nil
@@ -190,22 +188,19 @@ public actor LaserOutputStreams {
         if !stream.changing, stream.failure == nil, let playing = zones[zone ?? Self.defaultZone] {
             stream.looping = false
             stream.pattern = []
-            stream.tap = Tap(zone: playing, outputRate: stream.rate)
+            stream.tap = Tap(zone: playing, outputRate: stream.rate, outputBlockSize: blockSize)
         }
+        stream.generation = UUID()
+        let generation = stream.generation
+        let previous = stream.task
+        stream.task = nil
         streams[id] = stream
+        previous?.cancel()
+        launch(id: id, generation: generation)
     }
 
-    /// The zone an output belongs to, nil if it is not connected.
     public func zone(of id: UUID) -> UUID? { streams[id].map { $0.zone ?? Self.defaultZone } }
 
-    /// Plays a live source of sample chunks recorded at `sampleRate` in a zone, replacing
-    /// any pattern on its outputs and the zone's earlier source. The zone has one source
-    /// and one ring; each of its outputs reads the ring on its own clock through its own
-    /// rate converter and applies its own masks. The source is pulled at its own pace and
-    /// suspends when the ring is full, so a slow source cannot stall a pump: the outputs
-    /// go dark meanwhile, and a stalled output loses its place without holding up the
-    /// others. Chunks need no particular size. An output that connects, or is assigned,
-    /// while the zone plays joins it. Other zones are not touched.
     public func play<Source: AsyncSequence & Sendable>(source: Source, sampleRate: UInt32, zone zoneID: UUID = LaserOutputStreams.defaultZone) throws
     where Source.Element == [LaserPoint] {
         guard sampleRate > 0 else { throw LaserOutputError.unsupportedPointRate }
@@ -217,19 +212,21 @@ public actor LaserOutputStreams {
         for (id, var stream) in streams where (stream.zone ?? Self.defaultZone) == zoneID && !stream.changing && stream.failure == nil {
             stream.looping = false
             stream.pattern = []
-            stream.tap = Tap(zone: next, outputRate: stream.rate)
+            stream.tap = Tap(zone: next, outputRate: stream.rate, outputBlockSize: blockSize)
+            stream.generation = UUID()
+            let generation = stream.generation
+            let previous = stream.task
+            stream.task = nil
             streams[id] = stream
+            previous?.cancel()
+            launch(id: id, generation: generation)
         }
         next.start(source)
         zones[zoneID] = next
     }
 
-    /// The failure that ended a zone's source, if it ended on one.
     public func sourceFailure(zone: UUID = LaserOutputStreams.defaultZone) -> String? { zones[zone]?.failure }
 
-    /// Swaps the looping pattern without interrupting what is already queued.
-    /// Ignored when nothing is looping, so a late replacement cannot revive a
-    /// pattern that was stopped meanwhile.
     public func replacePattern(_ pattern: [LaserPoint], for id: UUID) {
         guard var stream = streams[id], stream.looping else { return }
         stream.offset = pattern.isEmpty ? 0 : stream.offset % pattern.count
@@ -237,7 +234,6 @@ public actor LaserOutputStreams {
         streams[id] = stream
     }
 
-    /// Returns to black. Queued pattern samples are interrupted, not played out.
     public func stopPattern(for id: UUID) async throws {
         guard var stream = streams[id] else { throw LaserStreamError.notConnected }
         guard !stream.changing else { throw LaserStreamError.busy }
@@ -282,7 +278,6 @@ public actor LaserOutputStreams {
         }
     }
 
-    /// Stops one zone's source; its outputs return to black.
     public func stopSource(zone zoneID: UUID) async {
         zones.removeValue(forKey: zoneID)?.stop()
         for id in Array(streams.keys) where (streams[id]?.zone ?? Self.defaultZone) == zoneID && streams[id]?.tap != nil {
@@ -290,7 +285,6 @@ public actor LaserOutputStreams {
         }
     }
 
-    /// Stops every zone's source; every output returns to black.
     public func stopSource() async {
         for zoneID in Array(zones.keys) { await stopSource(zone: zoneID) }
     }
@@ -299,7 +293,7 @@ public actor LaserOutputStreams {
         guard let stream = streams.removeValue(forKey: id) else { return }
         stream.tap?.detach()
         stream.task?.cancel()
-        // Disconnect interrupts an in-flight write and disables output.
+
         try await stream.session.disconnect()
         _ = await stream.task?.result
     }
@@ -317,9 +311,17 @@ public actor LaserOutputStreams {
     private func pump(id: UUID, generation: UUID) async {
         while !Task.isCancelled {
             guard var stream = streams[id], stream.generation == generation else { return }
+            do {
             let samples: [LaserPoint]
+            var blankedBeforeMask = 0
+            var maskBlanked = 0
             if let tap = stream.tap {
-                samples = stream.masks.apply(tap.pull(blockSize))
+                let sourceSamples = try await tap.pull(blockSize)
+                guard let current = streams[id], current.generation == generation else { return }
+                stream = current
+                blankedBeforeMask = sourceSamples.reduce(into: 0) { if $1.isBlanked { $0 += 1 } }
+                samples = stream.masks.apply(sourceSamples)
+                maskBlanked = max(0, samples.reduce(into: 0) { if $1.isBlanked { $0 += 1 } } - blankedBeforeMask)
             } else if stream.looping && !stream.pattern.isEmpty {
                 var block: [LaserPoint] = []
                 block.reserveCapacity(blockSize)
@@ -332,12 +334,26 @@ public actor LaserOutputStreams {
                 samples = LaserPoint.blackCenter(count: blockSize)
             }
             streams[id] = stream
-            do {
                 let began = DispatchTime.now().uptimeNanoseconds
                 try await stream.session.write(samples)
-                streams[id]?.stats.record(start: began, end: DispatchTime.now().uptimeNanoseconds, count: samples.count)
-                // Real backends apply buffer backpressure. This also keeps mock
-                // or exceptionally fast backends from producing a busy loop.
+                let blanked = samples.reduce(into: 0) { if $1.isBlanked { $0 += 1 } }
+                let ended = DispatchTime.now().uptimeNanoseconds
+                if var current = streams[id], current.generation == generation {
+                    current.stats.record(start: began, end: ended, count: samples.count,
+                                         blanked: blanked, maskBlanked: maskBlanked)
+                    #if DEBUG
+                    if ended &- current.lastProbeLoggedAt >= 1_000_000_000 {
+                        current.lastProbeLoggedAt = ended
+                        streams[id] = current
+                        print("LASER_STREAM_PROBE output=\(id) block=\(blockSize) rate=\(stream.rate) \(current.stats) \(Self.tapReport(current.tap))")
+                    } else {
+                        streams[id] = current
+                    }
+                    #else
+                    streams[id] = current
+                    #endif
+                }
+
                 if pauseNanoseconds > 0 { try await Task.sleep(nanoseconds: pauseNanoseconds) } else { await Task.yield() }
             } catch {
                 if Task.isCancelled { return }
