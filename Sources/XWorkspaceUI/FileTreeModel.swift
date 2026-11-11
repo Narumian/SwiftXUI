@@ -8,7 +8,7 @@ import XWorkspace
 /// rows once per change, so a frame only reads `Snapshot.rows`.
 public final class FileTreeModel: @unchecked Sendable {
     /// A folder or file, identified across folders.
-    public struct NodeKey: Hashable, Sendable {
+    public struct NodeKey: Codable, Hashable, Sendable {
         public var folderID: UUID
         public var path: String
         public init(folderID: UUID, path: String) { self.folderID = folderID; self.path = path }
@@ -38,6 +38,7 @@ public final class FileTreeModel: @unchecked Sendable {
 
     private let workspace: Workspace
     private let only: UUID?
+    private let expansionPersistenceKey: String?
     private let invalidate: @Sendable () -> Void
     private let lock = NSLock()
 
@@ -64,11 +65,18 @@ public final class FileTreeModel: @unchecked Sendable {
 
     /// - Parameter folderID: show just this registered folder as the root; nil shows every registered folder.
     public init(workspace: Workspace, folderID: UUID? = nil, filter: BrowserFilter = .all, fileTypes: FileTypes = .standard,
+                expansionPersistenceKey: String? = nil,
                 invalidate: @escaping @Sendable () -> Void = {}) {
         self.workspace = workspace
         self.fileTypes = fileTypes
         self.only = folderID
         self.filter = filter
+        self.expansionPersistenceKey = expansionPersistenceKey
+        if let expansionPersistenceKey,
+           let data = UserDefaults.standard.data(forKey: expansionPersistenceKey),
+           let saved = try? JSONDecoder().decode([NodeKey].self, from: data) {
+            expanded = Set(saved)
+        }
         self.invalidate = invalidate
     }
 
@@ -263,6 +271,7 @@ public final class FileTreeModel: @unchecked Sendable {
     public func expand(_ key: NodeKey) {
         let needsLoad = lock.withLock { () -> Bool in
             expanded.insert(key)
+            persistExpandedLocked()
             guard children[key] == nil, !loading.contains(key) else { return false }
             loading.insert(key)
             return true
@@ -276,8 +285,21 @@ public final class FileTreeModel: @unchecked Sendable {
     }
 
     public func collapse(_ key: NodeKey) {
-        lock.withLock { _ = expanded.remove(key) }
+        lock.withLock {
+            _ = expanded.remove(key)
+            persistExpandedLocked()
+        }
         rebuild()
+    }
+
+    /// Saves the open folders when this tree has a persistence key. Called with `lock` held.
+    private func persistExpandedLocked() {
+        guard let expansionPersistenceKey else { return }
+        let data = try? JSONEncoder().encode(expanded.sorted {
+            if $0.folderID != $1.folderID { return $0.folderID.uuidString < $1.folderID.uuidString }
+            return $0.path < $1.path
+        })
+        UserDefaults.standard.set(data, forKey: expansionPersistenceKey)
     }
 
     /// Whether `entry` may be dropped on the folder `destination`: not on itself, its parent (no change) or a descendant.

@@ -45,6 +45,7 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
     let id: String?
     let label: String?
     let action: @Sendable () -> Void
+    let afterChildren: Bool
 
     @XUIActor
     func _lower(id stateID: StateIdentity, store: StateStore) async -> [LayoutNode] {
@@ -52,6 +53,7 @@ public struct _TapGestureModifier<Content: XView>: XView, _PrimitiveXView {
         wrapper.tapGestureID = id
         wrapper.tapGestureLabel = label
         wrapper.tapGesture = action
+        wrapper.tapGestureAfterChildren = afterChildren
         return [wrapper]
     }
 }
@@ -105,7 +107,8 @@ public extension XView {
             content: self,
             id: nil,
             label: nil,
-            action: gesture._endedAction ?? {}
+            action: gesture._endedAction ?? {},
+            afterChildren: false
         )
     }
 
@@ -166,7 +169,14 @@ public extension XView {
     /// Declarative tap entry point with semantic metadata for accessibility,
     /// automation, and app-side interaction region export.
     func onTapGesture(id: String, label: String, _ action: @escaping @Sendable () -> Void) -> _TapGestureModifier<Self> {
-        _TapGestureModifier(content: self, id: id, label: label, action: action)
+        _TapGestureModifier(content: self, id: id, label: label, action: action, afterChildren: false)
+    }
+
+    /// Register this view's tap after its descendants, so child controls win and the view can
+    /// still consume taps in its otherwise-empty area (for example, the body of a modal sheet).
+    func onTapGesture(id: String, label: String, afterChildren: Bool,
+                      _ action: @escaping @Sendable () -> Void) -> _TapGestureModifier<Self> {
+        _TapGestureModifier(content: self, id: id, label: label, action: action, afterChildren: afterChildren)
     }
 
     /// Declarative payload tap entry point for static views. This exports the same
