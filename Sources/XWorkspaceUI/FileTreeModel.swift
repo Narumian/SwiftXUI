@@ -128,6 +128,14 @@ public final class FileTreeModel: @unchecked Sendable {
 
     public func snapshot() -> Snapshot { lock.withLock { state } }
 
+    /// The entry under the tree's current selection, whether it was chosen by pointer or keyboard.
+    /// Returns nil when the selected row is no longer present in the current snapshot.
+    public var selectedEntry: WorkspaceEntry? {
+        let snapshot = snapshot()
+        guard let selected = snapshot.selected else { return nil }
+        return snapshot.rows.first { $0.key == selected }?.item.entry
+    }
+
     // MARK: - Loading
 
     /// Lists the roots again, and every open folder under them.
