@@ -238,6 +238,12 @@ public actor Workspace {
         try volume(folderID, writing: false).stamp(path: path)
     }
 
+    /// A cheap modification token for one selected file. Disk volumes answer with one metadata lookup;
+    /// other volumes may return nil when they cannot provide a stable token.
+    public func fileStamp(folderID: UUID, path: String) throws -> WorkspaceStamp? {
+        try volume(folderID, writing: false).stamp(path: path)
+    }
+
     public func read(folderID: UUID, path: String) throws -> Data {
         try volume(folderID, writing: false).read(path: path)
     }

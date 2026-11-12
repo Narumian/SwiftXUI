@@ -1,8 +1,7 @@
 import Foundation
 
-/// Tells whether the direct contents of a directory changed since the last time it was asked.
-/// Only equality means anything. A disk volume derives it from the modification time; a volume that
-/// is not on disk can count its own changes.
+    /// A cheap modification token for a file or directory. Only equality means anything. A disk volume
+    /// derives it from file metadata; a volume that is not on disk can count its own changes.
 public struct WorkspaceStamp: Hashable, Sendable {
     public let rawValue: Int64
     public init(rawValue: Int64) { self.rawValue = rawValue }
