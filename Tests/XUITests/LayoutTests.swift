@@ -76,9 +76,22 @@ private func fractionFrames(_ view: some XView, canvas: Size = Size(width: 300, 
     return surface.fills.map(\.rect)
 }
 
-@Test @XUIActor func fractionFrameTakesShareOfOffer() async {
+@Test @XUIActor func fractionFrameUsesParentOfferByDefault() async {
     let f = await fractionFrames(Color.white.frame(width: .fraction(0.5), height: .fraction(0.25)))
     #expect(f[0].isApproximately(Rect(x: 0, y: 0, width: 150, height: 50)))
+}
+
+@Test @XUIActor func localFractionUsesReducedParentOffer() async {
+    let f = await fractionFrames(
+        Color.white.frame(width: .fraction(0.5), height: .fraction(0.5)).padding(10))
+    #expect(f[0].isApproximately(Rect(x: 10, y: 10, width: 140, height: 90)))
+}
+
+@Test @XUIActor func globalFractionUsesCanvasEvenInsidePadding() async {
+    let f = await fractionFrames(
+        Color.white.frame(width: .fraction(0.5, coordinateSpace: .global),
+                          height: .fraction(0.5, coordinateSpace: .global)).padding(10))
+    #expect(f[0].isApproximately(Rect(x: 10, y: 10, width: 150, height: 100)))
 }
 
 @Test @XUIActor func fractionAndPointsMixAndLiteralsStayPoints() async {
@@ -88,11 +101,12 @@ private func fractionFrames(_ view: some XView, canvas: Size = Size(width: 300, 
 }
 
 @Test @XUIActor func fractionIsStableUnderWrappers() async {
-    // Wrappers re-measure a placed child; the result must not shrink each time.
+    // Re-measuring a placed frame uses its resolved rect rather than
+    // multiplying the fraction by that rect a second time.
     let f = await fractionFrames(
         Color.white.frame(width: .fraction(0.5), height: .fraction(0.5))
             .onTapGesture(id: "a", label: "a") {}
             .control(XControl(id: "c", label: "c"))
             .padding(10))
-    #expect(abs(f[0].width - 150) < 0.001 && abs(f[0].height - 100) < 0.001)
+    #expect(abs(f[0].width - 140) < 0.001 && abs(f[0].height - 90) < 0.001)
 }

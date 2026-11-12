@@ -51,6 +51,14 @@ struct PassthroughLayout: NodeLayout {
     }
 
     func placeChildren(in rect: Rect, _ children: [LayoutNode], _ context: LayoutContext) {
+        if children.count == 1, let child = children.first {
+            // A single-child wrapper (gesture, control, anchor, etc.) is
+            // geometrically transparent. Re-measuring here can reinterpret a
+            // local fractional frame against its already-resolved rect and
+            // apply the fraction twice.
+            child.frame = rect
+            return
+        }
         for child in children {
             let size = child.measure(ProposedSize(rect.size), context)
             child.frame = Rect(origin: rect.origin, size: size)

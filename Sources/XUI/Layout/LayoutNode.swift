@@ -6,7 +6,7 @@ import XShader
 /// layout-direction flip or a debug flag later.
 struct LayoutContext {
     var environment: EnvironmentValues
-    /// What `Length.fraction` is a fraction of: the canvas being laid out.
+    /// Canvas size used by `Length.fraction(..., coordinateSpace: .global)`.
     var referenceSize: Size = .zero
     /// Which layout pass this is. A node remembers the sizes it measured only
     /// for the pass that measured them (see `LayoutNode.measure`).
