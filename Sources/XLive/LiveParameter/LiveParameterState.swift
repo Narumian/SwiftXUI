@@ -177,7 +177,7 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
 
     /// How close a control must be to count as on the value: a step of the control, or half a
     /// step of the value when it is quantised more coarsely than that.
-    private var takeoverTolerance: Double {
+    var takeoverTolerance: Double {
         guard let step = mapping.step else { return LiveTakeover.tolerance }
         return max(LiveTakeover.tolerance, step / 2 / (mapping.range.upperBound - mapping.range.lowerBound))
     }
