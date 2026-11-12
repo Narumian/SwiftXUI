@@ -97,6 +97,16 @@ private func frames(_ view: some XView, canvas: Size = Size(width: 300, height: 
     #expect(f[0].isApproximately(Rect(x: 0, y: 0, width: 300, height: 200)))
 }
 
+@Test @XUIActor func flexibleFrameFillsItsOfferAroundFixedContent() async {
+    let view = Color.black
+        .frame(width: 40, height: 30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { Color.white }
+    let f = await frames(view)
+    #expect(f.contains { $0.isApproximately(Rect(x: 0, y: 0, width: 300, height: 200)) })
+    #expect(f.contains { $0.isApproximately(Rect(x: 130, y: 85, width: 40, height: 30)) })
+}
+
 @Test @XUIActor func frameMaxWidthFiniteCapsGrowth() async {
     // In an HStack the capped frame grows only to 100; the color takes the rest.
     let view = HStack {

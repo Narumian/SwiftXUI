@@ -96,7 +96,12 @@ struct FrameAxis {
     /// child's size, always re-clamped to `[min, max]`.
     func resolve(childLength: Double, proposal: Double?) -> Double {
         if isPassthrough { return childLength }
-        var value = (proposal == nil ? ideal : nil) ?? childLength
+        // A max-constrained frame fills its offer; the child may still keep its intrinsic size inside it.
+        var value = if let proposal, max != nil {
+            proposal
+        } else {
+            (proposal == nil ? ideal : nil) ?? childLength
+        }
         if let max { value = Swift.min(value, max) }
         if let min { value = Swift.max(value, min) }
         return Swift.max(0, value)
