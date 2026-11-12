@@ -30,7 +30,7 @@ public enum LiveFaderReception: Equatable, Sendable {
 ///
 /// Only the addresses are worth keeping; positions and targets are runtime state. It belongs to
 /// one thread or actor, like the parameters it drives.
-public final class LiveFaderBank {
+public final class LiveFaderBank: @unchecked Sendable {
     public let count: Int
     /// The MIDI controller of each slot, if any. Controllers only; a note is not a fader.
     public private(set) var addresses: [LiveMIDIAddress?]
@@ -86,6 +86,13 @@ public final class LiveFaderBank {
 
     /// Where the MIDI controller last was, 0...1, or nil before it was first moved.
     public func controlPosition(_ slot: Int) -> Double? { isSlot(slot) ? takeovers[slot].position : nil }
+
+    /// What the slot's label shows: nothing assigned, a controller assigned, or waiting for one to move.
+    public func midiState(_ slot: Int) -> LiveMIDIState {
+        guard isSlot(slot) else { return .none }
+        if learningSlot == slot { return .learning }
+        return addresses[slot] == nil ? .none : .assigned
+    }
 
     /// A moved controller that does not hold the target's value yet: it has to reach it first.
     public func isWaiting(_ slot: Int) -> Bool {

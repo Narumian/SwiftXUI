@@ -85,43 +85,48 @@ public struct LiveSlider: XView, Sendable {
         let onShow = onShowConfiguration
         return DrawLayer { rect, context in
             let state = parameter.state
-            context.canvas.fillRoundedRect(rect, cornerRadius: 8, color: labelColor(state.midiState))
-            let width = max(0, rect.width - 8)
-            let measure = context.environment.measureText
-            let title = title ?? state.label
-            let value = state.valueText
-            let titleSize = measure(title, 10, .ui)
-            let valueSize = measure(value, 10, .numeric)
-            let titleLines = Text.needsWrapping(title, natural: titleSize, maxWidth: width)
-                ? Text.visibleLines(title, maxWidth: width, lineLimit: 1) { measure($0, 10, .ui).width }
-                : [title]
-            let valueLines = Text.needsWrapping(value, natural: valueSize, maxWidth: width)
-                ? Text.visibleLines(value, maxWidth: width, lineLimit: nil) { measure($0, 10, .numeric).width }
-                : [value]
-            var y = rect.midY - (Double(titleLines.count) * titleSize.height + Double(valueLines.count) * valueSize.height) / 2
-            let x = rect.midX - width / 2
-            for line in titleLines {
-                context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: titleSize.height),
-                                        fontSize: 10, font: .ui, color: tint.opacity(0.9), alignment: .leading, outline: nil)
-                y += titleSize.height
-            }
-            for line in valueLines {
-                context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: valueSize.height),
-                                        fontSize: 10, font: .numeric, color: XColorValue.white.opacity(0.9),
-                                        alignment: .leading, outline: nil)
-                y += valueSize.height
-            }
+            Self.drawLabel(in: rect, context, title: title ?? state.label, value: state.valueText,
+                           fill: Self.labelColor(state.midiState, tint: tint), tint: tint)
         }
         .frame(width: labelWidth, height: height)
         .onTapGesture { onShow?() }
         .onLongPressGesture { parameter.toggleLearning() }
     }
 
-    private func labelColor(_ midi: LiveMIDIState) -> XColorValue {
+    static func labelColor(_ midi: LiveMIDIState, tint: XColorValue) -> XColorValue {
         switch midi {
         case .none: return XColorValue(1, 1, 1, 0.1)
         case .assigned: return tint.opacity(0.5)
-        case .learning: return Self.hueRotated(tint, degrees: 120).opacity(0.5)
+        case .learning: return hueRotated(tint, degrees: 120).opacity(0.5)
+        }
+    }
+
+    /// The label's drawing, shared with `LiveFaderSlider`: name over value on a rounded `fill`.
+    static func drawLabel(in rect: Rect, _ context: RenderContext, title: String, value: String,
+                          fill: XColorValue, tint: XColorValue) {
+        context.canvas.fillRoundedRect(rect, cornerRadius: 8, color: fill)
+        let width = max(0, rect.width - 8)
+        let measure = context.environment.measureText
+        let titleSize = measure(title, 10, .ui)
+        let valueSize = measure(value, 10, .numeric)
+        let titleLines = Text.needsWrapping(title, natural: titleSize, maxWidth: width)
+            ? Text.visibleLines(title, maxWidth: width, lineLimit: 1) { measure($0, 10, .ui).width }
+            : [title]
+        let valueLines = Text.needsWrapping(value, natural: valueSize, maxWidth: width)
+            ? Text.visibleLines(value, maxWidth: width, lineLimit: nil) { measure($0, 10, .numeric).width }
+            : [value]
+        var y = rect.midY - (Double(titleLines.count) * titleSize.height + Double(valueLines.count) * valueSize.height) / 2
+        let x = rect.midX - width / 2
+        for line in titleLines {
+            context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: titleSize.height),
+                                    fontSize: 10, font: .ui, color: tint.opacity(0.9), alignment: .leading, outline: nil)
+            y += titleSize.height
+        }
+        for line in valueLines {
+            context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: valueSize.height),
+                                    fontSize: 10, font: .numeric, color: XColorValue.white.opacity(0.9),
+                                    alignment: .leading, outline: nil)
+            y += valueSize.height
         }
     }
 
