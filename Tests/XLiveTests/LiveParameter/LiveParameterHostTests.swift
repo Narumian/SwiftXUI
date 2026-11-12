@@ -24,7 +24,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testMIDIAndSourcesAndReferences() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let level = XPassthroughSubject<Double, Never>()
         host.provide(.motion(.roll), level.eraseToAnyPublisher())
         let pace = host.add(try state("pace", range: 0...4, value: 2))
@@ -46,7 +46,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testRemoveAndReplace() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let first = host.add(try state("a", value: 1))
         let second = host.add(try state("a", value: 2))
         XCTAssertTrue(host.parameter(withID: first.id) === second)
@@ -63,7 +63,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testMessagesReachOnlyTheParametersThatFollowTheirControl() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let a = host.add(try state("a")), b = host.add(try state("b")), c = host.add(try state("c"))
         a.edit { $0.assign(address(1)) }
         b.edit { $0.assign(address(1)); $0.assign(address(2)) }
@@ -78,7 +78,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testANoteAddressFollowsNoteOnAndNoteOff() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let p = host.add(try state("p"))
         p.edit { $0.assign(address(60, kind: .note)) }
         host.send(.noteOn(channel: 0, note: 60, velocity: 127))
@@ -88,7 +88,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testLearningTakesTheMessageWithoutApplyingItThenFollowsTheControl() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let p = host.add(try state("p"))
         p.toggleLearning()
         host.send(.controlChange(channel: 0, controller: 9, value: 127))
@@ -109,7 +109,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testChangingAddressesChangesTheRoute() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let p = host.add(try state("p"))
         p.edit { $0.assign(address(1)) }
         p.edit { $0.unassign(address(1)); $0.assign(address(2)) }
@@ -123,7 +123,7 @@ final class LiveParameterHostTests: XCTestCase {
     }
 
     func testAutomationIgnoresMIDIAndMIDIComesBackWhenItStops() throws {
-        let host = LiveParameterHost()
+        let host = LiveParameterHost(); host.midiTakeover = .jump
         let p = host.add(try state("p"))
         p.edit { $0.assign(address(1)); $0.setSource(.lfo); $0.setAutomation(on: true) }
         host.send(.controlChange(channel: 0, controller: 1, value: 127))
@@ -139,6 +139,7 @@ final class LiveParameterHostTests: XCTestCase {
             let clockSubject = XPassthroughSubject<LiveClockTick, Never>()
             var clock: XAnyPublisher<LiveClockTick, Never> { clockSubject.eraseToAnyPublisher() }
             var midi: XAnyPublisher<MIDIMessage, Never> { subject.eraseToAnyPublisher() }
+            var midiTakeover: LiveTakeoverMode { .jump }
         }
         let plain = Plain()
         let p = LiveParameter(state: try state("p"), environment: plain)

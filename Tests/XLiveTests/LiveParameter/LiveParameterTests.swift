@@ -42,6 +42,7 @@ private final class Host: LiveParameterEnvironment {
     let midiSource = Tracked<MIDIMessage>()
     var sources: [LiveSourceDescriptor: Tracked<Double>] = [:]
     var registry: [LiveObjectID: LiveParameter] = [:]
+    var midiTakeover: LiveTakeoverMode = .jump
 
     var clock: XAnyPublisher<LiveClockTick, Never> { clockSource.eraseToAnyPublisher() }
     var midi: XAnyPublisher<MIDIMessage, Never> { midiSource.eraseToAnyPublisher() }

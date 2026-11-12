@@ -22,6 +22,9 @@ public protocol LiveParameterEnvironment: AnyObject {
     func publisher(for source: LiveSourceDescriptor) -> XAnyPublisher<Double, Never>?
     /// Another parameter, for the references that set LFO pace and pulse width.
     func parameter(withID id: LiveObjectID) -> LiveParameter?
+    /// What a MIDI control does to a parameter it does not hold: wait until it reaches the value
+    /// (the default), or move it at once.
+    var midiTakeover: LiveTakeoverMode { get }
 }
 
 public extension LiveParameterEnvironment {
@@ -31,4 +34,5 @@ public extension LiveParameterEnvironment {
     func midi(for address: LiveMIDIAddress) -> XAnyPublisher<MIDIMessage, Never>? { nil }
     func publisher(for source: LiveSourceDescriptor) -> XAnyPublisher<Double, Never>? { nil }
     func parameter(withID id: LiveObjectID) -> LiveParameter? { nil }
+    var midiTakeover: LiveTakeoverMode { .pickup }
 }

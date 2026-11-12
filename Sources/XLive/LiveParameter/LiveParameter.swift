@@ -97,8 +97,15 @@ public final class LiveParameter: Identifiable, @unchecked Sendable {
             guard !midiAutomated, midiAddresses.contains(where: { $0.value(in: message) != nil }) else { return .ignored }
         }
         var next = state
-        let reception = next.receive(message)
-        if reception != .ignored { state = next }
+        let reception = next.receive(message, takeover: environment?.midiTakeover ?? .pickup)
+        switch reception {
+        case .ignored: break
+        case .waiting:
+            // Only the control's position changed: the value, and so everything the subscriptions
+            // depend on, did not.
+            ticking = true; state = next; ticking = false
+        default: state = next
+        }
         return reception
     }
 

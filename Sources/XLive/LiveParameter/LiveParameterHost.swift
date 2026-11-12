@@ -18,6 +18,8 @@ public final class LiveParameterHost: LiveParameterEnvironment {
 
     /// The tempo that beat-length LFOs follow; nil holds them.
     public var bpm: Double?
+    /// What a MIDI control does to a parameter it does not hold; see `LiveTakeoverMode`.
+    public var midiTakeover: LiveTakeoverMode = .pickup
 
     public init(bpm: Double? = nil) { self.bpm = bpm }
 

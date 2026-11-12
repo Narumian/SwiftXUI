@@ -14,7 +14,9 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
     public var label: String
     public private(set) var mapping: LiveValueMapping
     public private(set) var defaultValue: Double
-    public private(set) var value: Double
+    /// Any write releases the MIDI control that held the value; `receive` engages it again after
+    /// its own write.
+    public private(set) var value: Double { didSet { takeover.release() } }
 
     // Automation
     public private(set) var source: LiveAutomationSource?
@@ -33,6 +35,8 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
     // MIDI
     public private(set) var midiAddresses: [LiveMIDIAddress]
     public private(set) var isLearning = false
+    /// Which control holds the value and where it last was. Runtime only: not saved.
+    public private(set) var takeover = LiveTakeover()
 
     // Runtime only: not saved.
     private var phase = LivePhase()
@@ -147,8 +151,11 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
     /// While learning, the first learnable message adds its control and ends learning without
     /// moving the value. Otherwise a message for an assigned control sets the value through the
     /// response curve of `amount`, unless automation is on, which ignores MIDI.
+    ///
+    /// With `.pickup` a controller that does not hold the value is `.waiting`: it sets nothing
+    /// until it reaches the value (see `LiveTakeover`). Notes always set the value at once.
     @discardableResult
-    public mutating func receive(_ message: MIDIMessage) -> LiveMIDIReception {
+    public mutating func receive(_ message: MIDIMessage, takeover mode: LiveTakeoverMode = .pickup) -> LiveMIDIReception {
         if isLearning {
             guard let learned = LiveMIDIAddress(learning: message) else { return .ignored }
             assign(learned); isLearning = false
@@ -159,10 +166,20 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
             guard let raw = address.value(in: message) else { continue }
             let position = LiveAmount.response(Double(raw) / 127, curve: amount)
             guard let constrained = mapping.value(forNormal: position) else { return .ignored }
+            let reached = takeover.accepts(position, from: address, current: mapping.normalized(value), tolerance: takeoverTolerance)
+            guard reached || mode == .jump || address.kind == .note else { return .waiting }
             value = constrained; resetGlide = nil
+            takeover.engage(address)
             return .applied(constrained)
         }
         return .ignored
+    }
+
+    /// How close a control must be to count as on the value: a step of the control, or half a
+    /// step of the value when it is quantised more coarsely than that.
+    private var takeoverTolerance: Double {
+        guard let step = mapping.step else { return LiveTakeover.tolerance }
+        return max(LiveTakeover.tolerance, step / 2 / (mapping.range.upperBound - mapping.range.lowerBound))
     }
 
     // MARK: Clock

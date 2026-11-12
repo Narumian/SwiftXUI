@@ -51,6 +51,9 @@ public enum LiveMIDIReception: Equatable, Sendable {
     case learned(LiveMIDIAddress)
     /// The message set the value to this.
     case applied(Double)
+    /// The message was for this parameter, but its control has not reached the value yet
+    /// (pickup), so the value is unchanged.
+    case waiting
 }
 
 public enum LiveMIDIState: Equatable, Sendable { case none, assigned, learning }
