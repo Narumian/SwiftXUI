@@ -77,7 +77,7 @@ final class LiveFaderKnobTests: XCTestCase {
     func testItShowsTheTargetsNameValueAndArc() async throws {
         let (_, bank, p) = try make()
         let (render, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.texts, ["Gain", "0.50000"])
+        XCTAssertEqual(canvas.texts, ["Gain", "0.500"], "the value is cut to five characters")
         XCTAssertEqual(canvas.strokes.count, 3, "rim, value arc, pointer — and no waiting mark")
         XCTAssertEqual(canvas.strokes[1].color.opacity, 1)
         XCTAssertNotNil(render.dragGestures.first)
@@ -91,7 +91,7 @@ final class LiveFaderKnobTests: XCTestCase {
         let (_, bank, _) = try make()
         bank.setTargets([nil, nil, nil])
         let (render, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.texts, ["empty", ""])
+        XCTAssertEqual(canvas.texts, ["empty"], "no value line")
         XCTAssertTrue(render.dragGestures.isEmpty)
         XCTAssertEqual(canvas.strokes.count, 1, "the rim only")
     }
@@ -181,7 +181,7 @@ final class LiveFaderKnobTests: XCTestCase {
         let canvas = Recorder()
         let row = LiveFaderKnobRow(bank: bank, tint: tint, size: 56, spacing: 6) { slot in tapped.count = slot + 10 }
         let render = await LayoutHost(canvas: Size(width: 56 * 3 + 12, height: 90)).render(row, into: canvas)
-        XCTAssertEqual(canvas.texts, ["Gain", "0.50000", "empty", "", "empty", ""])
+        XCTAssertEqual(canvas.texts, ["Gain", "0.500", "empty", "empty"])
         let secondLabel = Point(x: 56 + 6 + 28, y: 56 + 2 + 14)
         var runtime = GestureRuntime()
         _ = runtime.handle(.init(phase: .began, position: secondLabel, timestamp: 1), in: render)

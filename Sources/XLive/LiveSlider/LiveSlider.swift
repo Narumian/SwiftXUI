@@ -101,32 +101,17 @@ public struct LiveSlider: XView, Sendable {
         }
     }
 
-    /// The label's drawing, shared with `LiveFaderKnob`: name over value on a rounded `fill`.
+    /// The label's drawing, shared with `LiveFaderKnob`: name over value on a rounded `fill`, laid
+    /// out by `LiveLabelLayout`. The knob centres its text; the slider leaves it at the left.
     static func drawLabel(in rect: Rect, _ context: RenderContext, title: String, value: String,
-                          fill: XColorValue, tint: XColorValue) {
-        context.canvas.fillRoundedRect(rect, cornerRadius: 8, color: fill)
-        let width = max(0, rect.width - 8)
-        let measure = context.environment.measureText
-        let titleSize = measure(title, 10, .ui)
-        let valueSize = measure(value, 10, .numeric)
-        let titleLines = Text.needsWrapping(title, natural: titleSize, maxWidth: width)
-            ? Text.visibleLines(title, maxWidth: width, lineLimit: 1) { measure($0, 10, .ui).width }
-            : [title]
-        let valueLines = Text.needsWrapping(value, natural: valueSize, maxWidth: width)
-            ? Text.visibleLines(value, maxWidth: width, lineLimit: nil) { measure($0, 10, .numeric).width }
-            : [value]
-        var y = rect.midY - (Double(titleLines.count) * titleSize.height + Double(valueLines.count) * valueSize.height) / 2
-        let x = rect.midX - width / 2
-        for line in titleLines {
-            context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: titleSize.height),
-                                    fontSize: 10, font: .ui, color: tint.opacity(0.9), alignment: .leading, outline: nil)
-            y += titleSize.height
-        }
-        for line in valueLines {
-            context.canvas.drawText(line, in: Rect(x: x, y: y, width: width, height: valueSize.height),
-                                    fontSize: 10, font: .numeric, color: XColorValue.white.opacity(0.9),
-                                    alignment: .leading, outline: nil)
-            y += valueSize.height
+                          fill: XColorValue, tint: XColorValue, alignment: HorizontalAlignment = .leading) {
+        context.canvas.fillRoundedRect(rect, cornerRadius: LiveLabelLayout.cornerRadius, color: fill)
+        let layout = LiveLabelLayout(title: title, value: value, in: rect, measure: context.environment.measureText)
+        for line in layout.lines {
+            context.canvas.drawText(line.text, in: line.rect, fontSize: LiveLabelLayout.fontSize,
+                                    font: line.isTitle ? .ui : .numeric,
+                                    color: line.isTitle ? tint.opacity(0.9) : XColorValue.white.opacity(0.9),
+                                    alignment: alignment, outline: nil)
         }
     }
 

@@ -64,14 +64,14 @@ public struct LiveFaderKnob: XView, Sendable {
     private let onShowConfiguration: (@Sendable () -> Void)?
 
     public init(bank: LiveFaderBank, slot: Int, title: String? = nil,
-                tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, labelHeight: Double = 32,
+                tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, labelHeight: Double = 36,
                 onShowConfiguration: (@Sendable () -> Void)? = nil) {
         self.bank = bank
         self.slot = slot
         self.title = title
         self.tint = tint
         self.size = size.isFinite ? max(24, size) : 56
-        self.labelHeight = labelHeight.isFinite ? max(8, labelHeight) : 32
+        self.labelHeight = labelHeight.isFinite ? max(8, labelHeight) : 36
         self.onShowConfiguration = onShowConfiguration
     }
 
@@ -136,8 +136,8 @@ public struct LiveFaderKnob: XView, Sendable {
         let onShow = onShowConfiguration
         return DrawLayer { rect, context in
             let target = bank.target(slot)?.state
-            LiveSlider.drawLabel(in: rect, context, title: title ?? target?.label ?? "empty", value: target?.valueText ?? "",
-                                 fill: LiveSlider.labelColor(bank.midiState(slot), tint: tint), tint: tint)
+            LiveSlider.drawLabel(in: rect, context, title: title ?? target?.label ?? "empty", value: String(target?.valueText.prefix(5) ?? ""),
+                                 fill: LiveSlider.labelColor(bank.midiState(slot), tint: tint), tint: tint, alignment: .center)
         }
         .frame(width: size, height: labelHeight)
         .onTapGesture { onShow?() }
