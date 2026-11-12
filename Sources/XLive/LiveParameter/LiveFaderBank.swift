@@ -39,6 +39,7 @@ public final class LiveFaderBank: @unchecked Sendable {
     public private(set) weak var environment: (any LiveParameterEnvironment)?
 
     private var targets: [LiveParameter?]
+    private var held: Set<Int> = []
     private var takeovers: [LiveTakeover]
     /// The target's value as this bank last wrote it; if it differs, something else moved it.
     private var written: [Double?]
@@ -102,6 +103,11 @@ public final class LiveFaderBank: @unchecked Sendable {
     }
 
     // MARK: On-screen fader
+
+    /// A finger is on the slot's on-screen fader (the label shows the value meanwhile).
+    public func isHeld(_ slot: Int) -> Bool { held.contains(slot) }
+    public func hold(_ slot: Int) { if isSlot(slot) { held.insert(slot) } }
+    public func letGo(_ slot: Int) { held.remove(slot) }
 
     /// The on-screen fader moved to `normalized` (0...1). It sets the value at once.
     public func move(_ slot: Int, to normalized: Double) {

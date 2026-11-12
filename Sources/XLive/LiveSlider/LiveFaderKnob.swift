@@ -41,16 +41,18 @@ public struct LiveKnobGeometry: Equatable, Sendable {
     }
 }
 
-/// One fader of a `LiveFaderBank` as a knob with its name and value underneath. A row of them
-/// is the common fader laid out side by side (`LiveFaderKnobRow`).
+/// One fader of a `LiveFaderBank` as a knob with its name above it. A row of them is the common
+/// fader laid out side by side (`LiveFaderKnobRow`).
 ///
 /// - **Knob**: the arc shows the target's own value, so it is right whoever moved the value last.
 ///   Dragging up or down turns it, relative to where it was grabbed (`LiveFaderBank.move`). A
 ///   target that is automated (locked), or no target, dims it and takes no drag.
 /// - **Waiting mark**: a short tick across the outer hairline where the MIDI controller is, drawn only
 ///   while the controller has not reached the value yet.
-/// - **Label**: tap calls `onShowConfiguration`; long press starts MIDI learn for this slot, or
-///   cancels it. The background shows the slot's MIDI state like `LiveSlider`'s label.
+/// - **Label**: one line of plain text above the knob, the target's name; while the knob is held
+///   the line shows the value instead. Its colour tells the slot's MIDI state (grey: none, tint:
+///   assigned, white: learning). Tap calls `onShowConfiguration`; long press starts MIDI learn for
+///   this slot, or cancels it.
 ///
 /// It reads the bank every time it paints, so its fixed layout can be reused. Long press needs a
 /// host that sends pointer timestamps (see `LongPressGesture`).
@@ -64,21 +66,21 @@ public struct LiveFaderKnob: XView, Sendable {
     private let onShowConfiguration: (@Sendable () -> Void)?
 
     public init(bank: LiveFaderBank, slot: Int, title: String? = nil,
-                tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, labelHeight: Double = 36,
+                tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, labelHeight: Double = 14,
                 onShowConfiguration: (@Sendable () -> Void)? = nil) {
         self.bank = bank
         self.slot = slot
         self.title = title
         self.tint = tint
         self.size = size.isFinite ? max(24, size) : 56
-        self.labelHeight = labelHeight.isFinite ? max(8, labelHeight) : 36
+        self.labelHeight = labelHeight.isFinite ? max(8, labelHeight) : 14
         self.onShowConfiguration = onShowConfiguration
     }
 
     public var body: some XView {
         VStack(spacing: 2) {
-            knob
             label
+            knob
         }
         .frame(width: size)
     }
@@ -124,8 +126,9 @@ public struct LiveFaderKnob: XView, Sendable {
             if !locked {
                 context.addDragGesture(rect, gesture: DragGesture(minimumDistance: 0.1).onChanged { drag in
                     guard let next = LiveKnobGeometry.draggedNormal(start: normal, translationY: drag.translation.y) else { return }
+                    bank.hold(slot)
                     bank.move(slot, to: next)
-                })
+                }.onEnded { _ in bank.letGo(slot) })
             }
         }
         .frame(width: size, height: size)
@@ -144,8 +147,25 @@ public struct LiveFaderKnob: XView, Sendable {
         let onShow = onShowConfiguration
         return DrawLayer { rect, context in
             let target = bank.target(slot)?.state
-            LiveSlider.drawLabel(in: rect, context, title: title ?? target?.label ?? "empty", value: String(target?.valueText.prefix(5) ?? ""),
-                                 fill: LiveSlider.labelColor(bank.midiState(slot), tint: tint), tint: tint, alignment: .center)
+            let held = bank.isHeld(slot) && target != nil
+            let text = held ? String(target?.valueText.prefix(5) ?? "") : title ?? target?.label ?? "empty"
+            let font: TextFont = held ? .numeric : .ui
+            let color: XColorValue
+            switch bank.midiState(slot) {
+            case .learning: color = .white
+            case .assigned: color = tint.opacity(0.9)
+            case .none: color = XColorValue(1, 1, 1, held ? 0.9 : 0.55)
+            }
+            let measure = context.environment.measureText
+            let fontSize = LiveLabelLayout.fontSize
+            let natural = measure(text, fontSize, font)
+            let line = min(natural.height, LiveLabelLayout.maxLineHeight)
+            let fit = Text.needsWrapping(text, natural: Size(width: natural.width, height: line), maxWidth: rect.width)
+                ? Text.visibleLines(text, maxWidth: rect.width, lineLimit: 1) { measure($0, fontSize, font).width }.first ?? text
+                : text
+            context.canvas.fillRect(rect, color: .clear)
+            context.canvas.drawText(fit, in: Rect(x: rect.x, y: rect.midY - line / 2, width: rect.width, height: line),
+                                    fontSize: fontSize, font: font, color: color, alignment: .center, outline: nil)
         }
         .frame(width: size, height: labelHeight)
         .onTapGesture { onShow?() }

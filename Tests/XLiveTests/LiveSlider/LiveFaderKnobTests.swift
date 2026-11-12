@@ -8,6 +8,7 @@ private final class Recorder: XCanvas {
     var strokes: [Stroke] = []
     var ellipses = 0
     var texts: [String] = []
+    var textColors: [XColorValue] = []
     func fillRect(_ rect: Rect, color: XColorValue) { fills.append(color) }
     func fillRoundedRect(_ rect: Rect, cornerRadius: Double, color: XColorValue) { fills.append(color) }
     func fillEllipse(in rect: Rect, color: XColorValue) { ellipses += 1 }
@@ -15,7 +16,7 @@ private final class Recorder: XCanvas {
         strokes.append(Stroke(points: path.elements.count, color: color, lineWidth: lineWidth))
     }
     func drawText(_ string: String, in rect: Rect, fontSize: Double, font: TextFont, color: XColorValue,
-                  alignment: HorizontalAlignment, outline: TextOutline?) { texts.append(string) }
+                  alignment: HorizontalAlignment, outline: TextOutline?) { texts.append(string); textColors.append(color) }
 }
 
 private final class Box: @unchecked Sendable { var count = 0 }
@@ -77,7 +78,7 @@ final class LiveFaderKnobTests: XCTestCase {
     func testItShowsTheTargetsNameValueAndArc() async throws {
         let (_, bank, p) = try make()
         let (render, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.texts, ["Gain", "0.500"], "the value is cut to five characters")
+        XCTAssertEqual(canvas.texts, ["Gain"], "just the name while nothing holds the knob")
         XCTAssertEqual(canvas.strokes.count, 5, "hairline, track, value arc, pointer halo, pointer — and no waiting mark")
         XCTAssertEqual(canvas.strokes[2].color.opacity, 1)
         XCTAssertEqual(canvas.strokes.last?.color, XColorValue.white)
@@ -85,6 +86,13 @@ final class LiveFaderKnobTests: XCTestCase {
         p.setManualValue(0)
         let (_, empty) = await draw(bank)
         XCTAssertEqual(empty.strokes.count, 4, "a value at the very start has no arc")
+        p.setManualValue(0.5)
+        bank.hold(0)
+        let (_, held) = await draw(bank)
+        XCTAssertEqual(held.texts, ["0.500"], "the value takes the name's place while the knob is held")
+        bank.letGo(0)
+        let (_, after) = await draw(bank)
+        XCTAssertEqual(after.texts, ["Gain"])
     }
 
     @XUIActor
@@ -92,7 +100,7 @@ final class LiveFaderKnobTests: XCTestCase {
         let (_, bank, _) = try make()
         bank.setTargets([nil, nil, nil])
         let (render, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.texts, ["empty"], "no value line")
+        XCTAssertEqual(canvas.texts, ["empty"])
         XCTAssertTrue(render.dragGestures.isEmpty)
         XCTAssertEqual(canvas.strokes.count, 2, "the hairline and the track only")
     }
@@ -124,14 +132,13 @@ final class LiveFaderKnobTests: XCTestCase {
     func testLabelColourShowsTheSlotsMIDIState() async throws {
         let (_, bank, _) = try make()
         var (_, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.fills.last(where: { $0 != .clear }), tint.opacity(0.5))
+        XCTAssertEqual(canvas.textColors.last, tint.opacity(0.9), "assigned: the tint")
         bank.unassign(0)
         (_, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.fills.last(where: { $0 != .clear }), XColorValue(1, 1, 1, 0.1))
+        XCTAssertEqual(canvas.textColors.last, XColorValue(1, 1, 1, 0.55), "no controller: grey")
         bank.beginLearning(0)
         (_, canvas) = await draw(bank)
-        XCTAssertEqual(canvas.fills.last(where: { $0 != .clear })?.opacity, 0.5)
-        XCTAssertNotEqual(canvas.fills.last(where: { $0 != .clear }), tint.opacity(0.5))
+        XCTAssertEqual(canvas.textColors.last, .white, "learning: white")
     }
 
     // MARK: Gestures
@@ -161,7 +168,7 @@ final class LiveFaderKnobTests: XCTestCase {
         let (_, bank, _) = try make()
         let shown = Box()
         let (render, _) = await draw(bank, onShow: { shown.count += 1 })
-        let onLabel = Point(x: 28, y: 56 + 2 + 14)
+        let onLabel = Point(x: 28, y: 7)
         var runtime = GestureRuntime()
         _ = runtime.handle(.init(phase: .began, position: onLabel, timestamp: 1), in: render)
         _ = runtime.handle(.init(phase: .ended, position: onLabel, timestamp: 1.1), in: render)
@@ -183,8 +190,8 @@ final class LiveFaderKnobTests: XCTestCase {
         let canvas = Recorder()
         let row = LiveFaderKnobRow(bank: bank, tint: tint, size: 56, spacing: 6) { slot in tapped.count = slot + 10 }
         let render = await LayoutHost(canvas: Size(width: 56 * 3 + 12, height: 90)).render(row, into: canvas)
-        XCTAssertEqual(canvas.texts, ["Gain", "0.500", "empty", "empty"])
-        let secondLabel = Point(x: 56 + 6 + 28, y: 56 + 2 + 14)
+        XCTAssertEqual(canvas.texts, ["Gain", "empty", "empty"])
+        let secondLabel = Point(x: 56 + 6 + 28, y: 7)
         var runtime = GestureRuntime()
         _ = runtime.handle(.init(phase: .began, position: secondLabel, timestamp: 1), in: render)
         _ = runtime.handle(.init(phase: .ended, position: secondLabel, timestamp: 1.1), in: render)
