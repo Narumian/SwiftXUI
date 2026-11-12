@@ -78,12 +78,13 @@ final class LiveFaderKnobTests: XCTestCase {
         let (_, bank, p) = try make()
         let (render, canvas) = await draw(bank)
         XCTAssertEqual(canvas.texts, ["Gain", "0.500"], "the value is cut to five characters")
-        XCTAssertEqual(canvas.strokes.count, 3, "rim, value arc, pointer — and no waiting mark")
-        XCTAssertEqual(canvas.strokes[1].color.opacity, 1)
+        XCTAssertEqual(canvas.strokes.count, 5, "hairline, track, value arc, pointer halo, pointer — and no waiting mark")
+        XCTAssertEqual(canvas.strokes[2].color.opacity, 1)
+        XCTAssertEqual(canvas.strokes.last?.color, XColorValue.white)
         XCTAssertNotNil(render.dragGestures.first)
         p.setManualValue(0)
         let (_, empty) = await draw(bank)
-        XCTAssertEqual(empty.strokes.count, 2, "a value at the very start has no arc")
+        XCTAssertEqual(empty.strokes.count, 4, "a value at the very start has no arc")
     }
 
     @XUIActor
@@ -93,7 +94,7 @@ final class LiveFaderKnobTests: XCTestCase {
         let (render, canvas) = await draw(bank)
         XCTAssertEqual(canvas.texts, ["empty"], "no value line")
         XCTAssertTrue(render.dragGestures.isEmpty)
-        XCTAssertEqual(canvas.strokes.count, 1, "the rim only")
+        XCTAssertEqual(canvas.strokes.count, 2, "the hairline and the track only")
     }
 
     @XUIActor
@@ -102,7 +103,8 @@ final class LiveFaderKnobTests: XCTestCase {
         p.edit { $0.setSource(.lfo); $0.setAutomation(on: true) }
         let (render, canvas) = await draw(bank)
         XCTAssertTrue(render.dragGestures.isEmpty)
-        XCTAssertEqual(canvas.strokes[1].color.opacity, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(canvas.strokes[2].color.opacity, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(canvas.strokes.last?.color.opacity ?? 1, 0.4, accuracy: 1e-9, "and so does the pointer")
     }
 
     @XUIActor
@@ -111,11 +113,11 @@ final class LiveFaderKnobTests: XCTestCase {
         host.send(.controlChange(channel: 0, controller: 1, value: 0))
         XCTAssertTrue(bank.isWaiting(0))
         let (_, waiting) = await draw(bank)
-        XCTAssertEqual(waiting.strokes.count, 4)
+        XCTAssertEqual(waiting.strokes.count, 6)
         XCTAssertEqual(waiting.strokes.last?.color, tint.opacity(0.9))
         host.send(.controlChange(channel: 0, controller: 1, value: 64))
         let (_, held) = await draw(bank)
-        XCTAssertEqual(held.strokes.count, 3)
+        XCTAssertEqual(held.strokes.count, 5)
     }
 
     @XUIActor

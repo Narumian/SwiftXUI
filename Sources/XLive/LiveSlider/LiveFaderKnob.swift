@@ -47,7 +47,7 @@ public struct LiveKnobGeometry: Equatable, Sendable {
 /// - **Knob**: the arc shows the target's own value, so it is right whoever moved the value last.
 ///   Dragging up or down turns it, relative to where it was grabbed (`LiveFaderBank.move`). A
 ///   target that is automated (locked), or no target, dims it and takes no drag.
-/// - **Waiting mark**: a short tick outside the rim where the MIDI controller is, drawn only
+/// - **Waiting mark**: a short tick across the outer hairline where the MIDI controller is, drawn only
 ///   while the controller has not reached the value yet.
 /// - **Label**: tap calls `onShowConfiguration`; long press starts MIDI learn for this slot, or
 ///   cancels it. The background shows the slot's MIDI state like `LiveSlider`'s label.
@@ -98,19 +98,27 @@ public struct LiveFaderKnob: XView, Sendable {
                 guard let box = Self.bounds(points) else { return }
                 canvas.strokePath(Path(points: points, closed: false), in: box, color: color, lineWidth: width)
             }
-            stroke(g.arc(from: 0, to: 1, radius: g.radius, origin: origin), XColorValue(1, 1, 1, 0.25), 3)
+            let dim = locked ? 0.4 : 1.0
+            let rim = g.radius - 0.5, face = g.radius - 7
+            // A hairline outside the track, the track, and the value arc on it.
+            stroke(g.arc(from: 0, to: 1, radius: g.radius + 3.5, origin: origin), XColorValue(1, 1, 1, 0.15), 1)
+            stroke(g.arc(from: 0, to: 1, radius: rim, origin: origin), XColorValue(1, 1, 1, 0.2), 4)
             if normal > 0 {
-                stroke(g.arc(from: 0, to: normal, radius: g.radius, origin: origin), tint.opacity(locked ? 0.4 : 1), 3)
+                stroke(g.arc(from: 0, to: normal, radius: rim, origin: origin), tint.opacity(dim), 4)
             }
-            let face = g.radius - 6
-            canvas.fillEllipse(in: Rect(x: rect.x + g.center.x - face, y: rect.y + g.center.y - face, width: face * 2, height: face * 2),
-                               color: XColorValue(1, 1, 1, 0.1))
+            // The face, with a ring round it.
+            let faceBox = Rect(x: rect.x + g.center.x - face, y: rect.y + g.center.y - face, width: face * 2, height: face * 2)
+            canvas.fillEllipse(in: faceBox, color: XColorValue(1, 1, 1, 0.08))
+            canvas.strokeRoundedRect(faceBox, cornerRadius: face, color: XColorValue(1, 1, 1, 0.18), lineWidth: 1)
+            // The pointer: a white line from the middle of the face to its rim, on a soft halo of the tint.
             if state != nil {
-                stroke([g.point(normal, radius: face * 0.3, origin: origin), g.point(normal, radius: face * 0.9, origin: origin)],
-                       XColorValue.white.opacity(locked ? 0.4 : 1), 2)
+                let line = [g.point(normal, radius: face * 0.35, origin: origin), g.point(normal, radius: face * 0.92, origin: origin)]
+                stroke(line, tint.opacity(0.3 * dim), 6)
+                stroke(line, XColorValue.white.opacity(dim), 2.4)
             }
+            // Where a waiting MIDI controller is, across the hairline and to the edge of the box.
             if bank.isWaiting(slot), let position = bank.controlPosition(slot) {
-                stroke([g.point(position, radius: g.radius + 1, origin: origin), g.point(position, radius: g.radius + 5, origin: origin)],
+                stroke([g.point(position, radius: g.radius + 2, origin: origin), g.point(position, radius: g.radius + 5, origin: origin)],
                        tint.opacity(0.9), 2.5)
             }
             if !locked {
