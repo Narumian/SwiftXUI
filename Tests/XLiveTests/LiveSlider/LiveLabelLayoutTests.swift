@@ -46,4 +46,13 @@ final class LiveLabelLayoutTests: XCTestCase {
         let layout = LiveLabelLayout(title: "Gain", value: "0.5", in: Rect(x: 0, y: 0, width: 10, height: 30), measure: measure)
         XCTAssertTrue(layout.lines.allSatisfy { $0.rect.width == 0 })
     }
+
+    func testAFontThatMeasuresTallDoesNotPushTheLinesOutOfTheBox() {
+        let tall: (String, Double, TextFont) -> Size = { text, size, _ in Size(width: Double(text.count) * 6, height: size * 2.07) }
+        let layout = LiveLabelLayout(title: "Gain", value: "0.50", in: box, measure: tall)
+        XCTAssertEqual(layout.lines[0].rect.height, LiveLabelLayout.maxLineHeight)
+        XCTAssertGreaterThanOrEqual(layout.lines[0].rect.y, box.y)
+        XCTAssertLessThanOrEqual(layout.lines[1].rect.maxY, box.maxY)
+        XCTAssertEqual(layout.lines[1].rect.maxY - box.midY, box.midY - layout.lines[0].rect.y, accuracy: 1e-9)
+    }
 }

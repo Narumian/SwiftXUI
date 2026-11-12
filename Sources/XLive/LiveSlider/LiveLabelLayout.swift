@@ -13,6 +13,9 @@ struct LiveLabelLayout: Equatable {
     static let horizontalPadding = 8.0
     static let lineGap = 1.0
     static let fontSize = 10.0
+    /// The tallest a line is taken to be, in font sizes. A font may measure far taller than its glyphs
+    /// (the UI font measures 2.07 sizes for ten points), and two such lines would not fit the box.
+    static let maxLineHeight = 1.3 * fontSize
 
     struct Line: Equatable {
         let text: String
@@ -24,8 +27,11 @@ struct LiveLabelLayout: Equatable {
 
     init(title: String, value: String, in rect: Rect, measure: (String, Double, TextFont) -> Size) {
         let width = max(0, rect.width - 2 * Self.horizontalPadding)
-        let titleSize = measure(title, Self.fontSize, .ui)
-        let valueSize = measure(value, Self.fontSize, .numeric)
+        var titleSize = measure(title, Self.fontSize, .ui)
+        var valueSize = measure(value, Self.fontSize, .numeric)
+        let titleHeight = min(titleSize.height, Self.maxLineHeight), valueHeight = min(valueSize.height, Self.maxLineHeight)
+        titleSize = Size(width: titleSize.width, height: titleHeight)
+        valueSize = Size(width: valueSize.width, height: valueHeight)
         let titleLines = Text.needsWrapping(title, natural: titleSize, maxWidth: width)
             ? Text.visibleLines(title, maxWidth: width, lineLimit: 1) { measure($0, Self.fontSize, .ui).width }
             : [title]
