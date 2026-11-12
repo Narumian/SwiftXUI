@@ -101,7 +101,7 @@ public struct LiveSlider: XView, Sendable {
         }
     }
 
-    /// The label's drawing, shared with `LiveFaderSlider`: name over value on a rounded `fill`.
+    /// The label's drawing, shared with `LiveFaderKnob`: name over value on a rounded `fill`.
     static func drawLabel(in rect: Rect, _ context: RenderContext, title: String, value: String,
                           fill: XColorValue, tint: XColorValue) {
         context.canvas.fillRoundedRect(rect, cornerRadius: 8, color: fill)
