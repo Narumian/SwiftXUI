@@ -8,7 +8,10 @@ import XUI
 public struct LaserPreview3D: XView, Sendable {
     private let draw: @Sendable (Rect, RenderContext) -> Void
 
+    /// The renderer takes vertices as drawn, so shapes that carry a model matrix or tint have them applied
+    /// first (`baked()`); a buffer without any is retained as it is.
     public init(_ source: Laser3DBuffer, projection: LaserProjection) {
+        let source = source.baked()
         let ranges = Self.ranges(of: source)
         let matrix = Self.matrix(for: projection)
         draw = { rect, context in
@@ -24,7 +27,7 @@ public struct LaserPreview3D: XView, Sendable {
         let matrix = Self.matrix(for: projection)
         draw = { rect, context in
             guard let sink = context.canvas as? LaserPreviewSink else { return }
-            let buffer = source()
+            let buffer = source().baked()
             guard !buffer.shapes.isEmpty else { return }
             sink.drawLaserPreview(vertices: buffer.vertexValues, modes: buffer.vertexModes,
                                   shapes: Self.ranges(of: buffer), matrix: matrix, in: rect)

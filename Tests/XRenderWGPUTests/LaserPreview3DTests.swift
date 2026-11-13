@@ -27,6 +27,31 @@ import XRender
     #expect(source.shapes.map { Int($0.start)..<(Int($0.start) + Int($0.count)) } == [2..<3, 0..<3])
 }
 
+@Test @XUIActor func laserPreviewShowsShapesWithTheirModelMatrixAndTint() async throws {
+    var move = matrix_identity_float4x4
+    move.columns.3 = SIMD4(0.5, 0, 0, 1)
+    var source = Laser3DBuffer()
+    try source.beginShape(id: 1, attributes: Laser3DShapeAttributes(matrix: move, tint: SIMD4(1, 0.5, 1, 0.5)))
+    try source.appendVertex(LaserVertex(x: 0, y: 0))
+    try source.appendVertex(LaserVertex(x: 0.2, y: 0))   // a path needs two points to be drawn
+    let projection = LaserProjection(projection: matrix_identity_double4x4)
+    let host = XUIHost(size: RenderSize(width: 64, height: 64), background: RenderColor(0, 0, 0, 1))
+    let frozen = source
+    for view in [LaserPreview3D(frozen, projection: projection), LaserPreview3D(projection: projection, source: { frozen })] {
+        let scene = await host.render(view).scene
+        guard case .laserPreview(let command) = try #require(scene.commands.first) else { Issue.record("Expected laser preview command"); return }
+        #expect(Array(command.vertices.prefix(8)) == [0.5, 0, 0, 1, 1, 0.5, 1, 0.5])
+    }
+    // A buffer without attributes is handed over as it is.
+    var plain = Laser3DBuffer()
+    try plain.beginShape(id: 1)
+    try plain.appendVertex(LaserVertex(x: 0.25, y: 0))
+    try plain.appendVertex(LaserVertex(x: 0.5, y: 0))
+    let scene = await host.render(LaserPreview3D(plain, projection: projection)).scene
+    guard case .laserPreview(let command) = try #require(scene.commands.first) else { return }
+    #expect(command.vertices == plain.vertexValues)
+}
+
 @Test @XUIActor func laserPreviewProjectsAndSeparatesPathsOnGPU() async throws {
     var source = Laser3DBuffer()
     try source.beginShape(id: 1)
