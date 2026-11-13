@@ -61,6 +61,8 @@ func frames(_ name: String, n: Int, _ build: () -> (Rig, () -> Void)) {
 }
 
 func perMessage(_ name: String, n: Int, messages: Int, _ build: () -> (Rig, (Int) -> Void)) {
+    if let only, !name.contains(only) { return }
+    if let onlyN, onlyN != n { return }
     let (r, send) = build()
     let total = median { for i in 0..<messages { send(i) } }
     print(String(format: "%-34@ N=%-5d %10.2f µs/message", name as NSString, n, total / Double(messages) / 1000))
@@ -168,16 +170,17 @@ func fullState(_ i: Int) -> LiveParameterState {
 
 func coding(_ name: String, n: Int, _ make: (Int) -> LiveParameterState) {
     if let only, !name.contains(only) { return }
+    if let onlyN, onlyN != n { return }
     let states = (0..<n).map(make)
     let encoder = JSONEncoder(), decoder = JSONDecoder()
     var data = Data()
-    let enc = median { data = try! encoder.encode(states) }
+    let enc = median(runs: 21) { data = try! encoder.encode(states) }
     var back: [LiveParameterState] = []
-    let dec = median { back = try! decoder.decode([LiveParameterState].self, from: data) }
+    let dec = median(runs: 21) { back = try! decoder.decode([LiveParameterState].self, from: data) }
     let plistEncoder = PropertyListEncoder(); plistEncoder.outputFormat = .binary
     var plist = Data()
-    let pEnc = median { plist = try! plistEncoder.encode(states) }
-    let pDec = median { _ = try! PropertyListDecoder().decode([LiveParameterState].self, from: plist) }
+    let pEnc = median(runs: 21) { plist = try! plistEncoder.encode(states) }
+    let pDec = median(runs: 21) { _ = try! PropertyListDecoder().decode([LiveParameterState].self, from: plist) }
     checksum += Double(back.count + data.count)
     print(String(format: "%-26@ N=%-5d JSON enc %8.2f µs/param dec %8.2f µs/param  %5d bytes/param |  plist enc %6.2f dec %6.2f µs  %5d bytes",
                  name as NSString, n, enc / Double(n) / 1000, dec / Double(n) / 1000, data.count / n, pEnc / Double(n) / 1000, pDec / Double(n) / 1000, plist.count / n))

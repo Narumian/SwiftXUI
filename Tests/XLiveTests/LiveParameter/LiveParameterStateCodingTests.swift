@@ -135,4 +135,34 @@ final class LiveParameterStateCodingTests: XCTestCase {
         XCTAssertEqual(back.count, states.count)
         for (a, b) in zip(states, back) { try assertSame(a, b) }
     }
+
+    private func performanceStates(_ count: Int) throws -> [LiveParameterState] {
+        try (0..<count).map { i in
+            var state = try LiveParameterState(id: LiveObjectID(rawValue: "p\(i)"), label: "P\(i)", value: 0.5,
+                                               mapping: LiveValueMapping(range: 0...127))
+            state.setSource(i.isMultiple(of: 2) ? .lfo : .audio(.low))
+            state.setAutomation(on: true)
+            state.setLFO(try LiveLFO(period: .beats(4)))
+            state.setWave(LiveWave(shape: .pwm))
+            state.assign(try LiveMIDIAddress(kind: .control, channel: 1, number: UInt8(i % 128)))
+            state.assign(try LiveMIDIAddress(kind: .note, channel: 2, number: UInt8(i % 128)))
+            return state
+        }
+    }
+
+    func testEncodingOneHundredLiveParametersPerformance() throws {
+        let states = try performanceStates(100)
+        let encoder = encoder()
+        var output = Data()
+        measure { output = try! encoder.encode(states) }
+        XCTAssertEqual(try JSONDecoder().decode([LiveParameterState].self, from: output).count, 100)
+    }
+
+    func testDecodingOneHundredLiveParametersPerformance() throws {
+        let data = try encoder().encode(performanceStates(100))
+        let decoder = JSONDecoder()
+        var decodedCount = 0
+        measure { decodedCount = try! decoder.decode([LiveParameterState].self, from: data).count }
+        XCTAssertEqual(decodedCount, 100)
+    }
 }
