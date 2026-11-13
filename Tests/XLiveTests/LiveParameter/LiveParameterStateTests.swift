@@ -47,6 +47,17 @@ final class LiveParameterStateTests: XCTestCase {
         XCTAssertEqual(p.value, 1.25, accuracy: 1e-9)
     }
 
+    func testNoiseLFODoesNotJumpAtCycleBoundary() throws {
+        var p = try make(range: -360...360)
+        p.setSource(.lfo); p.setAutomation(on: true)
+        p.setLFO(try LiveLFO(period: .seconds(1)))
+        p.setWave(LiveWave(shape: .noise, seed: 5))
+        p.tick(LiveTick(deltaTime: 0.999_999))
+        let before = p.value
+        p.tick(LiveTick(deltaTime: 0.000_002))
+        XCTAssertEqual(p.value, before, accuracy: 1e-5)
+    }
+
     func testPulseWidthComesFromTheTick() throws {
         var p = try make()
         p.setSource(.lfo); p.setAutomation(on: true)

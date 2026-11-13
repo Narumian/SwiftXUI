@@ -1,6 +1,6 @@
 import Foundation
 
-public enum LiveWaveShape: String, CaseIterable, Equatable, Sendable, Codable {
+public enum LiveWaveShape: String, CaseIterable, Equatable, Hashable, Sendable, Codable {
     case sin, cos, tri, saw, square, pwm
     /// Smooth value noise: random lattice values, eased between.
     case noise
@@ -13,7 +13,7 @@ public enum LiveWaveShape: String, CaseIterable, Equatable, Sendable, Codable {
 ///
 /// Randomness comes from `seed` through a hash, never from a global table, so the same
 /// seed gives the same signal after a save and reload.
-public struct LiveWave: Equatable, Sendable, Codable {
+public struct LiveWave: Equatable, Hashable, Sendable, Codable {
     public var shape: LiveWaveShape
     /// Fraction of the cycle spent high, for `.pwm`. Kept inside 0...1.
     public private(set) var pulseWidth: Double
@@ -43,26 +43,37 @@ public struct LiveWave: Equatable, Sendable, Codable {
     public func sample(cycles: Double) -> Double {
         guard cycles.isFinite else { return 0.5 }
         let whole = cycles.rounded(.down)
-        let fraction = cycles - whole
+        let position = LivePhase.Position(cycleIndex: Self.latticeIndex(whole), fraction: cycles - whole)
+        return sample(position: position)
+    }
+
+    /// Samples from a phase that retains both its cycle number and position within that cycle.
+    public func sample(position: LivePhase.Position) -> Double {
+        let whole = position.cycleIndex
+        let fraction = position.fraction
         switch shape {
-        case .sin: return sin(cycles * 2 * .pi) * 0.5 + 0.5
-        case .cos: return cos(cycles * 2 * .pi) * 0.5 + 0.5
+        case .sin: return sin(fraction * 2 * .pi) * 0.5 + 0.5
+        case .cos: return cos(fraction * 2 * .pi) * 0.5 + 0.5
         case .tri: return fraction < 0.5 ? fraction * 2 : 2 - fraction * 2
         case .saw: return fraction
         case .square: return fraction < 0.5 ? 0 : 1
         case .pwm: return fraction < pulseWidth ? 1 : 0
         case .noise:
             let eased = fraction * fraction * (3 - 2 * fraction)
-            let a = lattice(whole), b = lattice(whole + 1)
+            let a = lattice(whole), b = lattice(whole &+ 1)
             return a * (1 - eased) + b * eased
         case .random: return lattice(whole)
         }
     }
 
+    /// Keeps the legacy Double-based sampler safe for positions outside Int64's range.
+    private static func latticeIndex(_ index: Double) -> Int64 {
+        Int64(max(-9e15, min(9e15, index)))
+    }
+
     /// A reproducible value in 0..<1 for each whole cycle (SplitMix64 over seed and index).
-    private func lattice(_ index: Double) -> Double {
-        let clamped = Int64(max(-9e15, min(9e15, index)))
-        var z = seed &+ UInt64(bitPattern: clamped) &* 0x9E37_79B9_7F4A_7C15
+    private func lattice(_ index: Int64) -> Double {
+        var z = seed &+ UInt64(bitPattern: index) &* 0x9E37_79B9_7F4A_7C15
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         z ^= z >> 31

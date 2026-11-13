@@ -1,7 +1,7 @@
 import Foundation
 
-public struct LiveLFO: Equatable, Sendable, Codable {
-    public enum Period: Equatable, Sendable, Codable {
+public struct LiveLFO: Equatable, Hashable, Sendable, Codable {
+    public enum Period: Equatable, Hashable, Sendable, Codable {
         case seconds(Double)
         case beats(Double)
 

@@ -43,10 +43,31 @@ final class LiveWaveTests: XCTestCase {
         XCTAssertEqual(left, right, accuracy: 1e-6)
     }
 
+    func testNoiseIsContinuousAcrossTrackedCycleBoundary() {
+        let wave = LiveWave(shape: .noise, seed: 5)
+        var phase = LivePhase()
+        phase.advance(seconds: 0.999_999, cyclesPerSecond: 1)
+        let left = wave.sample(position: phase.position())
+        phase.advance(seconds: 0.000_002, cyclesPerSecond: 1)
+        let right = wave.sample(position: phase.position())
+        XCTAssertEqual(phase.cycleIndex, 1)
+        XCTAssertEqual(left, right, accuracy: 1e-5)
+    }
+
     func testRandomHoldsForTheWholeCycle() {
         let w = LiveWave(shape: .random, seed: 9)
         XCTAssertEqual(w.sample(cycles: 4.0), w.sample(cycles: 4.99))
         XCTAssertNotEqual(w.sample(cycles: 4.5), w.sample(cycles: 5.5))
+    }
+
+    func testRandomUsesTheTrackedCycleIndex() {
+        let wave = LiveWave(shape: .random, seed: 9)
+        var phase = LivePhase()
+        phase.advance(seconds: 0.75, cyclesPerSecond: 1)
+        let first = wave.sample(position: phase.position())
+        phase.advance(seconds: 0.5, cyclesPerSecond: 1)
+        let next = wave.sample(position: phase.position())
+        XCTAssertNotEqual(first, next)
     }
 
     func testCodableRoundTripAndPulseWidthClamp() throws {

@@ -3,7 +3,7 @@ import Foundation
 /// How a normalised (0...1) position becomes a value, and back: a visible range, an optional
 /// hard limit, and an optional step. Inversion is not here — it belongs to the automation
 /// stage, which flips a source's output, not to the slider.
-public struct LiveValueMapping: Equatable, Sendable, Codable {
+public struct LiveValueMapping: Equatable, Hashable, Sendable, Codable {
     /// The range the slider spans.
     public let range: ClosedRange<Double>
     /// A hard clamp applied after the range. Must overlap `range`.

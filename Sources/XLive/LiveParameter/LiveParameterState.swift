@@ -216,7 +216,7 @@ public struct LiveParameterState: Sendable, Codable, Identifiable {
             phase.advance(seconds: tick.deltaTime, period: lfo.period, bpm: tick.bpm, pace: tick.pace)
             var shaped = wave
             if let width = tick.pulseWidth { shaped.setPulseWidth(width) }
-            return shaped.sample(cycles: phase.cycles + lfo.phase)
+            return shaped.sample(position: phase.position(adding: lfo.phase))
         case .audio:
             guard let level = tick.sourceValue, level.isFinite else { return nil }
             return audioEnvelope.process(min(1, max(0, level)), deltaTime: tick.deltaTime)

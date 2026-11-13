@@ -197,4 +197,24 @@ final class LiveFaderKnobTests: XCTestCase {
         _ = runtime.handle(.init(phase: .ended, position: secondLabel, timestamp: 1.1), in: render)
         XCTAssertEqual(tapped.count, 11)
     }
+
+    @XUIActor
+    func testARowWithColumnsWrapsIntoLines() async throws {
+        let (_, bank, _) = try make()
+        bank.setTargets([nil, nil, nil])
+        let canvas = Recorder()
+        let row = LiveFaderKnobRow(bank: bank, tint: tint, size: 56, spacing: 6, columns: 2)
+        let render = await LayoutHost(canvas: Size(width: 56 * 2 + 6, height: 300)).render(row, into: canvas)
+        XCTAssertEqual(canvas.texts.count, 3, "one label per slot")
+        let tops = Set(render.tapGestures.map { $0.rect.minY })
+        XCTAssertEqual(tops.count, 2, "two lines of two and one")
+    }
+
+    func testALongNameIsCutToTheColumnWithAnEllipsis() {
+        let width: (String) -> Double = { Double($0.count) * 6 }
+        XCTAssertEqual(LiveFaderKnob.ellipsised("Size", width: 30, widthOf: width), "Size")
+        XCTAssertEqual(LiveFaderKnob.ellipsised("Segments", width: 30, widthOf: width), "Segm…")
+        XCTAssertEqual(LiveFaderKnob.ellipsised("Segments", width: 3, widthOf: width), "…")
+        XCTAssertEqual(LiveFaderKnob.ellipsised("Segments", width: .infinity, widthOf: width), "Segments")
+    }
 }

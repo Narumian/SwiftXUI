@@ -61,18 +61,23 @@ public struct LiveFaderKnob: XView, Sendable {
     private let slot: Int
     private let title: String?
     private let tint: XColorValue
+    /// The colour of a slot a MIDI controller is assigned to; the tint when nil.
+    private let liveTint: XColorValue?
+    /// The largest the knob grows to (`size` in the initialisers); it takes the width it is offered, down to `minimumSize`, and stays round.
     private let size: Double
     private let labelHeight: Double
     private let onShowConfiguration: (@Sendable () -> Void)?
+    static let minimumSize = 24.0
 
     public init(bank: LiveFaderBank, slot: Int, title: String? = nil,
-                tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, labelHeight: Double = 14,
+                tint: XColorValue = XColorValue(0.25, 0.6, 1), liveTint: XColorValue? = nil, size: Double = 56, labelHeight: Double = 14,
                 onShowConfiguration: (@Sendable () -> Void)? = nil) {
         self.bank = bank
         self.slot = slot
         self.title = title
         self.tint = tint
-        self.size = size.isFinite ? max(24, size) : 56
+        self.liveTint = liveTint
+        self.size = size.isFinite ? max(Self.minimumSize, size) : 56
         self.labelHeight = labelHeight.isFinite ? max(8, labelHeight) : 14
         self.onShowConfiguration = onShowConfiguration
     }
@@ -82,7 +87,7 @@ public struct LiveFaderKnob: XView, Sendable {
             label
             knob
         }
-        .frame(width: size)
+        .frame(minWidth: Self.minimumSize, idealWidth: size, maxWidth: size)
     }
 
     private var knob: some XView {
@@ -131,7 +136,16 @@ public struct LiveFaderKnob: XView, Sendable {
                 }.onEnded { _ in bank.letGo(slot) })
             }
         }
-        .frame(width: size, height: size)
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    /// `text` cut to one line of at most `width`, with a "…" where it was cut. A single long word is cut too,
+    /// which `Text`'s own wrapping does not do.
+    static func ellipsised(_ text: String, width: Double, widthOf measure: (String) -> Double) -> String {
+        guard width.isFinite, measure(text) > width else { return text }
+        var cut = text
+        while !cut.isEmpty, measure(cut + "…") > width { cut.removeLast() }
+        return cut.isEmpty ? "…" : cut + "…"
     }
 
     /// A stroked path is scaled into the box it is given, so the box is the points' own bounds.
@@ -143,7 +157,7 @@ public struct LiveFaderKnob: XView, Sendable {
     }
 
     private var label: some XView {
-        let bank = self.bank, slot = self.slot, tint = self.tint
+        let bank = self.bank, slot = self.slot, tint = self.liveTint ?? self.tint
         let onShow = onShowConfiguration
         return DrawLayer { rect, context in
             let target = bank.target(slot)?.state
@@ -158,16 +172,13 @@ public struct LiveFaderKnob: XView, Sendable {
             }
             let measure = context.environment.measureText
             let fontSize = LiveLabelLayout.fontSize
-            let natural = measure(text, fontSize, font)
-            let line = min(natural.height, LiveLabelLayout.maxLineHeight)
-            let fit = Text.needsWrapping(text, natural: Size(width: natural.width, height: line), maxWidth: rect.width)
-                ? Text.visibleLines(text, maxWidth: rect.width, lineLimit: 1) { measure($0, fontSize, font).width }.first ?? text
-                : text
+            let line = min(measure(text, fontSize, font).height, LiveLabelLayout.maxLineHeight)
+            let fit = Self.ellipsised(text, width: rect.width) { measure($0, fontSize, font).width }
             context.canvas.fillRect(rect, color: .clear)
             context.canvas.drawText(fit, in: Rect(x: rect.x, y: rect.midY - line / 2, width: rect.width, height: line),
                                     fontSize: fontSize, font: font, color: color, alignment: .center, outline: nil)
         }
-        .frame(width: size, height: labelHeight)
+        .frame(height: labelHeight)
         .onTapGesture { onShow?() }
         .onLongPressGesture {
             if bank.learningSlot == slot { bank.cancelLearning() } else { bank.beginLearning(slot) }
@@ -175,30 +186,47 @@ public struct LiveFaderKnob: XView, Sendable {
     }
 }
 
-/// The whole bank as a row of knobs, left to right in slot order.
+/// The whole bank as knobs in slot order, left to right and then top to bottom. `columns` is how many
+/// to a row (all of them in one row by default); the last row may be short.
 public struct LiveFaderKnobRow: XView, Sendable {
     private struct Slot: Identifiable, Sendable { let id: Int }
+    private struct Line: Identifiable, Sendable { let id: Int; let slots: [Slot] }
 
     private let bank: LiveFaderBank
     private let tint: XColorValue
+    private let liveTint: XColorValue?
     private let size: Double
     private let spacing: Double
+    private let columns: Int
     private let onShowConfiguration: (@Sendable (Int) -> Void)?
 
-    public init(bank: LiveFaderBank, tint: XColorValue = XColorValue(0.25, 0.6, 1), size: Double = 56, spacing: Double = 6,
-                onShowConfiguration: (@Sendable (Int) -> Void)? = nil) {
+    public init(bank: LiveFaderBank, tint: XColorValue = XColorValue(0.25, 0.6, 1), liveTint: XColorValue? = nil, size: Double = 56, spacing: Double = 6,
+                columns: Int? = nil, onShowConfiguration: (@Sendable (Int) -> Void)? = nil) {
         self.bank = bank
         self.tint = tint
+        self.liveTint = liveTint
         self.size = size
         self.spacing = spacing
+        self.columns = max(1, columns ?? max(1, bank.count))
         self.onShowConfiguration = onShowConfiguration
     }
 
+    private var lines: [Line] {
+        let slots = (0..<bank.count).map { Slot(id: $0) }
+        return stride(from: 0, to: slots.count, by: columns).enumerated().map { index, start in
+            Line(id: index, slots: Array(slots[start..<min(start + columns, slots.count)]))
+        }
+    }
+
     public var body: some XView {
-        let bank = self.bank, tint = self.tint, size = self.size, onShow = onShowConfiguration
-        return HStack(spacing: spacing) {
-            ForEach((0..<bank.count).map { Slot(id: $0) }) { item in
-                LiveFaderKnob(bank: bank, slot: item.id, tint: tint, size: size) { onShow?(item.id) }
+        let bank = self.bank, tint = self.tint, liveTint = self.liveTint, size = self.size, spacing = self.spacing, onShow = onShowConfiguration
+        return VStack(spacing: spacing) {
+            ForEach(lines) { line in
+                HStack(spacing: spacing) {
+                    ForEach(line.slots) { item in
+                        LiveFaderKnob(bank: bank, slot: item.id, tint: tint, liveTint: liveTint, size: size) { onShow?(item.id) }
+                    }
+                }
             }
         }
     }
