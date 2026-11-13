@@ -85,19 +85,39 @@ public struct LaserProjector: Sendable {
         var out: [Laser2DShape] = []
         out.reserveCapacity(shapes.shapeCount)
         var samples: [Sample] = []
-        for shape in shapes.shapes {
+        let matrices = shapes.shapeMatrixValues, tints = shapes.shapeTintValues
+        for (shapeIndex, shape) in shapes.shapes.enumerated() {
             previous = nil; screenPrevious = nil
             var points: [LaserPoint] = []
             points.reserveCapacity(Int(shape.count))
+            // The shape's model matrix and tint are applied here, once per shape, not per vertex in the buffer.
+            let placement = Placement(camera: settings.camera * Self.modelMatrix(matrices, shape: shapeIndex),
+                                      tint: SIMD4(Double(tints[shapeIndex * 4]), Double(tints[shapeIndex * 4 + 1]),
+                                                  Double(tints[shapeIndex * 4 + 2]), Double(tints[shapeIndex * 4 + 3])))
             for index in Int(shape.start)..<(Int(shape.start) + Int(shape.count)) {
                 let vertex = shapes.vertex(at: index)
                 samples.removeAll(keepingCapacity: true)
-                project(vertex, into: &samples)
+                project(vertex, placement, into: &samples)
                 for sample in samples { screen(sample, into: &points) }
             }
             if !points.isEmpty { out.append(Laser2DShape(id: shape.id, points: points)) }
         }
         return out
+    }
+
+    /// A shape's camera-space transform (camera * model) and tint.
+    private struct Placement {
+        var camera: simd_double4x4
+        var tint: SIMD4<Double>
+    }
+
+    /// The row-major model matrix of `shape` as a column-major matrix.
+    private static func modelMatrix(_ values: [Float], shape: Int) -> simd_double4x4 {
+        let o = shape * 16
+        func row(_ r: Int) -> SIMD4<Double> {
+            SIMD4(Double(values[o + r * 4]), Double(values[o + r * 4 + 1]), Double(values[o + r * 4 + 2]), Double(values[o + r * 4 + 3]))
+        }
+        return simd_double4x4(rows: [row(0), row(1), row(2), row(3)])
     }
 
     // MARK: Samples
@@ -128,13 +148,14 @@ public struct LaserProjector: Sendable {
 
     private func isInside(_ camera: SIMD4<Double>) -> Bool { camera.z > settings.near && camera.z < settings.far }
 
-    private mutating func project(_ vertex: LaserVertex, into samples: inout [Sample]) {
+    private mutating func project(_ vertex: LaserVertex, _ placement: Placement, into samples: inout [Sample]) {
         let s = settings
         let position = SIMD4<Double>(Double(vertex.position.x), Double(vertex.position.y),
                                      Double(vertex.position.z), Double(vertex.position.w))
-        let cam = s.camera * position
-        let color = SIMD3<Double>(Double(vertex.rgba.x), Double(vertex.rgba.y), Double(vertex.rgba.z))
-            * Double(vertex.rgba.w)
+        let cam = placement.camera * position
+        let tinted = SIMD4<Double>(Double(vertex.rgba.x), Double(vertex.rgba.y), Double(vertex.rgba.z), Double(vertex.rgba.w))
+            * placement.tint
+        let color = SIMD3<Double>(tinted.x, tinted.y, tinted.z) * tinted.w
         defer { previous = cam }
 
         /// The sample for a camera-space position, or nil if it does not project.

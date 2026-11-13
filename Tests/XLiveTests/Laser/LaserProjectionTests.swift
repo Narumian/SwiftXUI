@@ -80,4 +80,75 @@ final class LaserProjectionTests: XCTestCase {
         let again = projector.project([shape(1, [vertex(0, 0)])])
         XCTAssertEqual(flat(again).map(\.mode), [.normal])                          // no entry padding for a new frame
     }
+
+    // MARK: Shape model matrix and tint
+
+    private func placed(_ attributes: [Laser3DShapeAttributes], _ vertices: [[LaserVertex]]) -> Laser3DBuffer {
+        var buffer = Laser3DBuffer()
+        for (index, shape) in vertices.enumerated() {
+            try! buffer.beginShape(id: LaserShapeID(UInt32(index + 1)), attributes: attributes[index])
+            for vertex in shape { try! buffer.appendVertex(vertex) }
+        }
+        return buffer
+    }
+
+    private func translation(_ x: Float, _ y: Float, _ z: Float) -> simd_float4x4 {
+        var m = matrix_identity_float4x4
+        m.columns.3 = SIMD4(x, y, z, 1)
+        return m
+    }
+
+    func testTheModelMatrixMovesTheShapeBeforeTheCamera() {
+        var projector = LaserProjector(settings())
+        let moved = placed([Laser3DShapeAttributes(matrix: translation(0.5, 0.25, 0))], [[LaserVertex(x: 0, y: 0)]])
+        let p = flat(projector.project(moved))[0]
+        XCTAssertEqual(p.xy.x, -0.25, accuracy: 1e-6)   // same as a vertex at x = 0.5
+        XCTAssertEqual(p.xy.y, 0.125, accuracy: 1e-6)
+    }
+
+    func testTheModelMatrixOfOneShapeDoesNotLeakIntoTheNext() {
+        var projector = LaserProjector(settings())
+        let buffer = placed([Laser3DShapeAttributes(matrix: translation(0.5, 0, 0)), .identity],
+                            [[LaserVertex(x: 0, y: 0)], [LaserVertex(x: 0, y: 0)]])
+        let out = projector.project(buffer)
+        XCTAssertEqual(out.map(\.id), [1, 2])
+        XCTAssertEqual(out[0].points[0].xy.x, -0.25, accuracy: 1e-6)
+        XCTAssertEqual(out[1].points[0].xy.x, 0, accuracy: 1e-6)
+    }
+
+    func testTheTintMultipliesTheColourBeforeAlphaAndLimit() {
+        var projector = LaserProjector(settings())
+        let tinted = placed([Laser3DShapeAttributes(tint: SIMD4(0.5, 1, 0, 0.5))],
+                            [[LaserVertex(x: 0, y: 0, rgba: SIMD4(1, 0.5, 1, 1))]])
+        let p = flat(projector.project(tinted))[0]
+        XCTAssertEqual(p.rgb.x, 0.25, accuracy: 1e-6)    // 1 * 0.5 * alpha(1 * 0.5)
+        XCTAssertEqual(p.rgb.y, 0.25, accuracy: 1e-6)
+        XCTAssertEqual(p.rgb.z, 0, accuracy: 1e-6)
+    }
+
+    func testTheModelMatrixTakesTheShapeThroughNearAndFarCuts() {
+        var projector = LaserProjector(settings(dwell: 1, blank: 1))
+        // Pushed 100 away along z, the shape is wholly out of view and dropped.
+        let far = placed([Laser3DShapeAttributes(matrix: translation(0, 0, 100))], [[vertex(0.1), vertex(0.2)]])
+        XCTAssertTrue(projector.project(far).isEmpty)
+        // One vertex stays in view, so the path is cut on the plane like an untransformed one.
+        let half = placed([Laser3DShapeAttributes(matrix: translation(0, 0, 50))], [[vertex(0.5, -49), vertex(0.5, 100)]])
+        XCTAssertEqual(flat(projector.project(half)).map(\.mode), [.normal, .normal, .dwell, .blank])
+    }
+
+    func testProjectingAShapeEqualsProjectingTheBufferWithItBakedIn() {
+        let rotate = simd_float4x4(rows: [SIMD4(0.8, -0.6, 0, 0.1), SIMD4(0.6, 0.8, 0, -0.2), SIMD4(0, 0, 1, 0.3), SIMD4(0, 0, 0, 1)])
+        let buffer = placed([Laser3DShapeAttributes(matrix: rotate, tint: SIMD4(0.9, 0.8, 0.7, 0.6)), .identity],
+                            [[vertex(0.3), vertex(-0.4, 0.5), vertex(0.1, -0.2)], [vertex(0.2)]])
+        var lazy = LaserProjector(settings(dwell: 2, blank: 2)), eager = LaserProjector(settings(dwell: 2, blank: 2))
+        let a = lazy.project(buffer), b = eager.project(buffer.baked())
+        XCTAssertEqual(a.map(\.id), b.map(\.id))
+        let (pa, pb) = (flat(a), flat(b))
+        XCTAssertEqual(pa.count, pb.count)
+        for (x, y) in zip(pa, pb) {
+            XCTAssertEqual(x.xy.x, y.xy.x, accuracy: 1e-5); XCTAssertEqual(x.xy.y, y.xy.y, accuracy: 1e-5)
+            XCTAssertEqual(x.rgb.x, y.rgb.x, accuracy: 1e-5); XCTAssertEqual(x.rgb.y, y.rgb.y, accuracy: 1e-5)
+            XCTAssertEqual(x.mode, y.mode)
+        }
+    }
 }
