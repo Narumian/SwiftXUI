@@ -288,4 +288,35 @@ final class LiveParameterStateTests: XCTestCase {
             XCTAssertEqual(LiveValueFormat.text(v), expected(v), "\(v)")
         }
     }
+
+    // MARK: Settings
+
+    func testApplyingSettingsSetsUpAFreshParameterAndLeavesItsValueAndPhaseAlone() throws {
+        var source = try make(range: -10...10, value: 3)
+        source.setSource(.lfo); source.setAutomation(on: true); source.setInverse(true); source.setAmount(0.3)
+        source.setLFO(try LiveLFO(period: .seconds(2), phase: 0.25)); source.setWave(LiveWave(shape: .tri, seed: 1))
+        source.assign(try LiveMIDIAddress(kind: .control, channel: 1, number: 7))
+        let settings = LiveParameterSnapshot(source)
+
+        var target = try make(range: 0...10, value: 3)
+        target.apply(settings: settings)
+        XCTAssertTrue(LiveParameterSnapshot(target).hasSameSettings(as: settings))
+        XCTAssertEqual(target.value, 3)                                   // the value is the hand's, not the settings'
+
+        // Running, then applying the same settings again changes nothing: the LFO keeps its place.
+        target.tick(LiveTick(deltaTime: 0.7, bpm: 120, pace: 1, pulseWidth: nil, sourceValue: nil))
+        let running = target.value
+        target.apply(settings: settings)
+        XCTAssertEqual(target.value, running)
+        target.tick(LiveTick(deltaTime: 0.1, bpm: 120, pace: 1, pulseWidth: nil, sourceValue: nil))
+        XCTAssertNotEqual(target.value, running)
+    }
+
+    func testSettingsThatDifferOnlyInValueAreTheSame() throws {
+        var a = try make(value: 2), b = try make(value: 2)
+        a.setSource(.lfo); b.setSource(.lfo); b.setManualValue(8)
+        XCTAssertTrue(LiveParameterSnapshot(a).hasSameSettings(as: LiveParameterSnapshot(b)))
+        b.setAmount(0.9)
+        XCTAssertFalse(LiveParameterSnapshot(a).hasSameSettings(as: LiveParameterSnapshot(b)))
+    }
 }
