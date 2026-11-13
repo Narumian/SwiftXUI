@@ -127,7 +127,7 @@ func draggingSelectsAndTypingReplacesTheSelection() async {
     _ = runtime.handle(PointerInput(id: 1, phase: .moved, position: Point(x: padding + glyph * 4, y: 20)), in: first)
     release(first, runtime: &runtime, x: padding + glyph * 4)
     let (surface, _) = await renderField(model, focus: focus, state: state)
-    #expect(surface.fills.contains { $0.color == TextFieldStyle().selection })
+    #expect(surface.fills.contains { $0.color == TextFieldStyle().colors(.standard).selection })
     _ = focus.send(.insert("-"))
     #expect(model.text == "a-ef")
 }

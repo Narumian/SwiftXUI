@@ -158,6 +158,7 @@ public final class XAppSession<App: XApp> {
     public func mcpServer(port: UInt16 = 47321,
                           capture: @escaping XUIMCPServer.Capture,
                           diagnostics: XUIMCPServer.Diagnostics? = nil,
+                          tools: [XUIMCPTool] = [],
                           invalidate: @escaping @Sendable () -> Void) -> XUIMCPServer? {
         guard app.configuration.mcpEnabled else { return nil }
         return XUIMCPServer(port: port,
@@ -182,7 +183,7 @@ public final class XAppSession<App: XApp> {
                 let handled = self.pointer(PointerEvent(phase: converted, position: RenderPoint(x: Float(x), y: Float(y))))
                 if handled { invalidate() }
                 return handled
-            }, capture: capture, diagnostics: diagnostics)
+            }, capture: capture, diagnostics: diagnostics, tools: tools)
     }
 }
 

@@ -1,17 +1,34 @@
 import Foundation
 
-/// Colours and shape of the on-screen keyboard.
+/// Colours and shape of the on-screen keyboard. A colour left nil comes from the palette in the environment.
 public struct KeyboardStyle: Sendable, Equatable {
-    public var background = XColorValue(0.07, 0.075, 0.10)
-    public var key = XColorValue(0.22, 0.24, 0.31)
-    public var functionKey = XColorValue(0.14, 0.15, 0.20)
-    public var accentKey = XColorValue(0.1, 0.62, 0.78)
-    public var pressedKey = XColorValue(0.42, 0.46, 0.58)
-    public var text = XColorValue(0.96, 0.96, 0.98)
-    public var dimText = XColorValue(0.75, 0.77, 0.84)
+    public var background: XColorValue?
+    public var key: XColorValue?
+    public var functionKey: XColorValue?
+    public var accentKey: XColorValue?
+    public var pressedKey: XColorValue?
+    public var text: XColorValue?
+    public var dimText: XColorValue?
     public var keyShadow = XColorValue(0, 0, 0, 0.35)
     public var cornerRadius: Double = 7
     public init() {}
+
+    /// The colours to draw with: the ones set on the style, and the palette's for the rest.
+    public func colors(_ palette: XPalette) -> Colors {
+        Colors(
+            background: background ?? palette.neutral.window,
+            key: key ?? palette.neutral.raised,
+            functionKey: functionKey ?? palette.neutral.panel,
+            accentKey: accentKey ?? palette.primary.fill,
+            pressedKey: pressedKey ?? palette.neutral.border,
+            text: text ?? palette.neutral.textPrimary,
+            dimText: dimText ?? palette.neutral.textSecondary
+        )
+    }
+
+    public struct Colors: Sendable, Equatable {
+        public let background, key, functionKey, accentKey, pressedKey, text, dimText: XColorValue
+    }
 }
 
 /// Everything the keyboard remembers between frames: which page it is on, shift,
@@ -173,6 +190,7 @@ final class KeyboardRuntime: @unchecked Sendable {
         rect: Rect, field: TextFocusStore.Field, container: Size, context: RenderContext,
         style: KeyboardStyle, store: TextFocusStore?
     ) {
+        let colors = style.colors(context.environment.palette)
         follow(field: field)
         tick(time: context.environment.fxTime, store: store)
 
@@ -190,7 +208,7 @@ final class KeyboardRuntime: @unchecked Sendable {
 
         store?.recordKeyboard(rect: kbRect) { [weak self] input in self?.pointer(input, store: store) }
 
-        canvas.fillRoundedRect(kbRect, cornerRadius: style.cornerRadius * 1.6, color: style.background)
+        canvas.fillRoundedRect(kbRect, cornerRadius: style.cornerRadius * 1.6, color: colors.background)
         let keyHeight = placedKeys.first?.rect.height ?? 40
         let labelSize = keyHeight * 0.38
         for placedKey in placedKeys {
@@ -199,22 +217,22 @@ final class KeyboardRuntime: @unchecked Sendable {
             let isDown = pressed.contains { $0.row == placedKey.row && $0.column == placedKey.column }
             let base: XColorValue
             switch key.role {
-            case .character: base = style.key
-            case .function: base = style.functionKey
-            case .accent: base = style.accentKey
+            case .character: base = colors.key
+            case .function: base = colors.functionKey
+            case .accent: base = colors.accentKey
             }
             var rect = placedKey.rect
             canvas.fillRoundedRect(rect.offsetBy(dx: 0, dy: 1.5), cornerRadius: style.cornerRadius, color: style.keyShadow)
-            canvas.fillRoundedRect(rect, cornerRadius: style.cornerRadius, color: isDown ? style.pressedKey : base)
+            canvas.fillRoundedRect(rect, cornerRadius: style.cornerRadius, color: isDown ? colors.pressedKey : base)
             let large = key.role == .character && key.action != .space
             let size = large ? labelSize : labelSize * 0.72
             let height = size * 1.3
             rect = Rect(x: rect.x, y: rect.midY - height / 2, width: rect.width, height: height)
-            if KeyIcons.draw(key.action, shift: shiftState, in: placedKey.rect, color: key.role == .function ? style.dimText : style.text, canvas: canvas) {
+            if KeyIcons.draw(key.action, shift: shiftState, in: placedKey.rect, color: key.role == .function ? colors.dimText : colors.text, canvas: canvas) {
                 // Icons are drawn as shapes: no font carries these symbols reliably.
             } else if !key.label.isEmpty && key.action != .space {
                 canvas.drawText(key.label, in: rect, fontSize: size, font: .ui,
-                                color: key.role == .function ? style.dimText : style.text,
+                                color: key.role == .function ? colors.dimText : colors.text,
                                 alignment: .center, outline: nil)
             }
         }
@@ -224,10 +242,10 @@ final class KeyboardRuntime: @unchecked Sendable {
             let w = down.rect.width * 1.5, h = down.rect.height * 1.3
             var bubble = Rect(x: down.rect.midX - w / 2, y: down.rect.y - h - 4, width: w, height: h)
             bubble.x = min(max(kbRect.x, bubble.x), kbRect.maxX - w)
-            canvas.fillRoundedRect(bubble, cornerRadius: style.cornerRadius * 1.4, color: style.pressedKey)
+            canvas.fillRoundedRect(bubble, cornerRadius: style.cornerRadius * 1.4, color: colors.pressedKey)
             let size = keyHeight * 0.7
             canvas.drawText(down.key.label, in: Rect(x: bubble.x, y: bubble.midY - size * 0.65, width: w, height: size * 1.3),
-                            fontSize: size, font: .ui, color: style.text, alignment: .center, outline: nil)
+                            fontSize: size, font: .ui, color: colors.text, alignment: .center, outline: nil)
         }
     }
 }

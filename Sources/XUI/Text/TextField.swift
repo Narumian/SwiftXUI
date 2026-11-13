@@ -1,22 +1,40 @@
 import Foundation
 
-/// How a `TextField` looks. Every colour is explicit so an app can match its theme.
+/// How a `TextField` looks. A colour left nil comes from the palette in the environment (`EnvironmentValues.palette`):
+/// grey surfaces, and the primary accent for the caret, selection and focused border. Set one to match something else.
 public struct TextFieldStyle: Sendable, Equatable {
     public var fontSize: Double = 17
     public var font: TextFont = .ui
-    public var textColor = XColorValue(0.95, 0.95, 0.97)
-    public var placeholderColor = XColorValue(0.55, 0.56, 0.62)
-    public var background = XColorValue(0.12, 0.13, 0.17)
-    public var border = XColorValue(0.28, 0.30, 0.38)
-    public var focusedBorder = XColorValue(0.1, 0.85, 1)
-    public var selection = XColorValue(0.1, 0.85, 1, 0.35)
-    public var caret = XColorValue(0.1, 0.85, 1)
+    public var textColor: XColorValue?
+    public var placeholderColor: XColorValue?
+    public var background: XColorValue?
+    public var border: XColorValue?
+    public var focusedBorder: XColorValue?
+    public var selection: XColorValue?
+    public var caret: XColorValue?
     public var cornerRadius: Double = 10
     public var horizontalPadding: Double = 12
     public var verticalPadding: Double = 9
     public var borderWidth: Double = 1.5
 
     public init() {}
+
+    /// The colours to draw with: the ones set on the style, and the palette's for the rest.
+    public func colors(_ palette: XPalette) -> Colors {
+        Colors(
+            text: textColor ?? palette.neutral.textPrimary,
+            placeholder: placeholderColor ?? palette.neutral.textDisabled,
+            background: background ?? palette.neutral.inset,
+            border: border ?? palette.neutral.border,
+            focusedBorder: focusedBorder ?? palette.primary.base,
+            selection: selection ?? palette.primary.base.opacity(0.35),
+            caret: caret ?? palette.primary.base
+        )
+    }
+
+    public struct Colors: Sendable, Equatable {
+        public let text, placeholder, background, border, focusedBorder, selection, caret: XColorValue
+    }
 }
 
 /// A single-line text field.
@@ -219,6 +237,7 @@ final class TextFieldRuntime: @unchecked Sendable {
         let canvas = context.canvas
         let measure = context.environment.measureText
         let time = context.environment.fxTime
+        let colors = style.colors(context.environment.palette)
 
         let (caretX, selectionX, markedX, textWidth, scroll, blinkOn) = lock.withLock { () -> (Double, (Double, Double)?, (Double, Double)?, Double, Double, Bool) in
             editing.reconcile(with: text)
@@ -246,7 +265,7 @@ final class TextFieldRuntime: @unchecked Sendable {
         }
 
         // Frame.
-        canvas.fillRoundedRect(rect, cornerRadius: style.cornerRadius, color: style.background)
+        canvas.fillRoundedRect(rect, cornerRadius: style.cornerRadius, color: colors.background)
         let inner = Rect(
             x: rect.x + style.horizontalPadding, y: rect.y,
             width: max(0, rect.width - style.horizontalPadding * 2), height: rect.height
@@ -257,36 +276,36 @@ final class TextFieldRuntime: @unchecked Sendable {
         let originX = inner.x - scroll
 
         if let (from, to) = selectionX {
-            canvas.fillRect(Rect(x: originX + from, y: lineY, width: to - from, height: lineHeight), color: style.selection)
+            canvas.fillRect(Rect(x: originX + from, y: lineY, width: to - from, height: lineHeight), color: colors.selection)
         }
         if text.isEmpty {
             if !placeholder.isEmpty {
                 canvas.drawText(
                     placeholder, in: Rect(x: inner.x, y: lineY, width: inner.width, height: lineHeight),
-                    fontSize: style.fontSize, font: style.font, color: style.placeholderColor,
+                    fontSize: style.fontSize, font: style.font, color: colors.placeholder,
                     alignment: .leading, outline: nil
                 )
             }
         } else {
             canvas.drawText(
                 text, in: Rect(x: originX, y: lineY, width: textWidth + 4, height: lineHeight),
-                fontSize: style.fontSize, font: style.font, color: style.textColor,
+                fontSize: style.fontSize, font: style.font, color: colors.text,
                 alignment: .leading, outline: nil
             )
         }
         if let (from, to) = markedX {
             // The composition is underlined until it is confirmed.
-            canvas.fillRect(Rect(x: originX + from, y: lineY + lineHeight - 2, width: max(2, to - from), height: 2), color: style.caret)
+            canvas.fillRect(Rect(x: originX + from, y: lineY + lineHeight - 2, width: max(2, to - from), height: 2), color: colors.caret)
         }
         if focused, blinkOn, selectionX == nil {
-            canvas.fillRect(Rect(x: originX + caretX - 1, y: lineY + 1, width: 2, height: lineHeight - 2), color: style.caret)
+            canvas.fillRect(Rect(x: originX + caretX - 1, y: lineY + 1, width: 2, height: lineHeight - 2), color: colors.caret)
         }
         canvas.popClip()
 
         canvas.strokeRoundedRect(
             rect.inset(by: EdgeInsets(style.borderWidth / 2)),
             cornerRadius: style.cornerRadius,
-            color: focused ? style.focusedBorder : style.border,
+            color: focused ? colors.focusedBorder : colors.border,
             lineWidth: focused ? style.borderWidth + 0.5 : style.borderWidth
         )
     }

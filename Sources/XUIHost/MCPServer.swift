@@ -8,6 +8,33 @@ import Darwin
 import Glibc
 #endif
 
+/// A tool the application adds to its MCP endpoint, next to the screen tools. Arguments arrive as strings (numbers
+/// and booleans in their text form) and the answer is text, usually JSON.
+public struct XUIMCPTool: Sendable {
+    public struct Property: Sendable {
+        public var name: String, type: String, summary: String, options: [String], required: Bool
+        public init(_ name: String, _ type: String = "string", _ summary: String = "", options: [String] = [], required: Bool = false) {
+            self.name = name; self.type = type; self.summary = summary; self.options = options; self.required = required
+        }
+    }
+    public var name: String, summary: String, properties: [Property]
+    public var handler: @Sendable ([String: String]) async throws -> String
+    public init(name: String, summary: String, properties: [Property] = [], handler: @escaping @Sendable ([String: String]) async throws -> String) {
+        self.name = name; self.summary = summary; self.properties = properties; self.handler = handler
+    }
+    var schema: [String: Any] {
+        var props: [String: Any] = [:]
+        for property in properties {
+            var entry: [String: Any] = ["type": property.type]
+            if !property.summary.isEmpty { entry["description"] = property.summary }
+            if !property.options.isEmpty { entry["enum"] = property.options }
+            props[property.name] = entry
+        }
+        return ["name": name, "description": summary,
+                "inputSchema": ["type": "object", "properties": props, "required": properties.filter(\.required).map(\.name)] as [String: Any]]
+    }
+}
+
 /// MCP endpoint for a running XAppSession. The transport binds loopback only.
 /// The renderer supplies a capture of the same frame presented to the user.
 public final class XUIMCPServer: @unchecked Sendable {
@@ -18,6 +45,7 @@ public final class XUIMCPServer: @unchecked Sendable {
     /// Host-supplied text report about app internals that are not visible on screen.
     public typealias Diagnostics = @Sendable () async -> String
     private let diagnostics: Diagnostics?
+    private let appTools: [XUIMCPTool]
     private let state: State
     private let tap: Tap
     private let pointer: Pointer
@@ -27,7 +55,9 @@ public final class XUIMCPServer: @unchecked Sendable {
     public let port: UInt16
 
     public init(port: UInt16 = 47321, state: @escaping State, tap: @escaping Tap,
-                pointer: @escaping Pointer, capture: @escaping Capture, diagnostics: Diagnostics? = nil) {
+                pointer: @escaping Pointer, capture: @escaping Capture, diagnostics: Diagnostics? = nil,
+                tools: [XUIMCPTool] = []) {
+        appTools = tools
         self.port = port; self.state = state; self.tap = tap; self.pointer = pointer; self.capture = capture
         self.diagnostics = diagnostics
     }
@@ -172,7 +202,11 @@ public final class XUIMCPServer: @unchecked Sendable {
                 case "app_diagnostics":
                     guard let diagnostics else { throw XUIMCPError.invalidRequest("Unknown tool") }
                     result = ["content": [["type": "text", "text": await diagnostics()]]]
-                default: throw XUIMCPError.invalidRequest("Unknown tool")
+                default:
+                    guard let tool = appTools.first(where: { $0.name == name }) else { throw XUIMCPError.invalidRequest("Unknown tool") }
+                    var text: [String: String] = [:]
+                    for (key, value) in args { text[key] = (value as? String) ?? String(describing: value) }
+                    result = ["content": [["type": "text", "text": try await tool.handler(text)]]]
                 }
             case "ping": result = [:]
             default: return try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found"]])
@@ -192,6 +226,7 @@ public final class XUIMCPServer: @unchecked Sendable {
         if diagnostics != nil {
             tools.append(["name": "app_diagnostics", "description": "Read the host application's diagnostic report (internal state not shown on screen)", "inputSchema": ["type": "object", "properties": [:]]])
         }
+        tools.append(contentsOf: appTools.map(\.schema))
         return tools
     }
 }

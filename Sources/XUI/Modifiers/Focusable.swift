@@ -7,7 +7,7 @@ public struct _FocusableModifier<Content: XView>: XView, _PrimitiveXView {
 
     let content: Content
     let control: XControl
-    let ringColor: XColorValue
+    let ringColor: XColorValue?
     let ringWidth: Double
     let cornerRadius: Double
 
@@ -24,14 +24,14 @@ public struct _FocusableModifier<Content: XView>: XView, _PrimitiveXView {
             .selectedID == control.id
         let ring = LayoutNode(layout: FillLayout())
         if selected {
-            let color = ringColor
+            let fixed = ringColor
             let width = ringWidth
             let radius = cornerRadius
             ring.draw = { rect, context in
                 context.canvas.strokeRoundedRect(
                     rect.inset(by: EdgeInsets(width / 2)),
                     cornerRadius: max(0, radius - width / 2),
-                    color: color,
+                    color: fixed ?? context.environment.palette.primary.base,
                     lineWidth: width
                 )
             }
@@ -49,7 +49,7 @@ public extension XView {
     func focusable(
         id: String,
         label: String,
-        ringColor: XColorValue = XColorValue(0.1, 0.85, 1),
+        ringColor: XColorValue? = nil,
         ringWidth: Double = 3,
         cornerRadius: Double = 12
     ) -> _FocusableModifier<Self> {
@@ -66,7 +66,7 @@ public extension XView {
     func focusable(
         id: ControlID,
         label: String,
-        ringColor: XColorValue = XColorValue(0.1, 0.85, 1),
+        ringColor: XColorValue? = nil,
         ringWidth: Double = 3,
         cornerRadius: Double = 12
     ) -> _FocusableModifier<Self> {
