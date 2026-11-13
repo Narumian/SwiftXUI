@@ -18,6 +18,9 @@ public struct LaserOutputConfigView: XView, Sendable {
     private var _addressError: StateStore.Box<Bool>?
     private var _connectionStates: StateStore.Box<[UUID: String]>?
     private var _statusPolling: StateStore.Box<Bool>?
+    private var _testPattern: StateStore.Box<[UUID: String]>?
+    private var _testPower: StateStore.Box<Int>?
+    private var _testNote: StateStore.Box<[UUID: String]>?
     private var collection: LaserOutputCollection { _collection?.value ?? initialOutputs }
     private var selectedID: UUID? { _selectedID?.value ?? nil }
     private var editingMasks: Bool { _editingMasks?.value ?? false }
@@ -27,6 +30,10 @@ public struct LaserOutputConfigView: XView, Sendable {
     private var addressDraft: String { _addressDraft?.value ?? "" }
     private var addressError: Bool { _addressError?.value ?? false }
     private var connectionStates: [UUID: String] { _connectionStates?.value ?? [:] }
+    /// The test pattern each output is showing (absent: none), its brightness in percent, and what went wrong.
+    private var testPattern: [UUID: String] { _testPattern?.value ?? [:] }
+    private var testPower: Int { _testPower?.value ?? 10 }
+    private var testNote: [UUID: String] { _testNote?.value ?? [:] }
     public mutating func _installState(id: StateIdentity, store: StateStore) {
         _collection = store._xstateBox(id: id, name: "collection", default: { initialOutputs })
         _selectedID = store._xstateBox(id: id, name: "selectedID", default: { nil })
@@ -38,6 +45,17 @@ public struct LaserOutputConfigView: XView, Sendable {
         _addressError = store._xstateBox(id: id, name: "addressError", default: { false })
         _connectionStates = store._xstateBox(id: id, name: "connectionStates", default: { [:] })
         _statusPolling = store._xstateBox(id: id, name: "statusPolling", default: { false })
+        _testPattern = store._xstateBox(id: id, name: "testPattern", default: { [:] })
+        _testPower = store._xstateBox(id: id, name: "testPower", default: { 10 })
+        _testNote = store._xstateBox(id: id, name: "testNote", default: { [:] })
+        if let shown = _testPattern, let connections {
+            // Leaving this screen darkens what it lit: a test pattern is shown only while it is in front of the person.
+            shown.onRemove = { _ in
+                let active = Array(shown.value.keys)
+                guard !active.isEmpty else { return }
+                Task { for id in active { try? await connections.setPreview(false, for: id, masks: .init()) } }
+            }
+        }
         if let polling = _statusPolling, !polling.value, let statuses = _connectionStates, let collection = _collection, let connections {
             polling.value = true
             polling.onRemove = { _ in polling.value = false }
@@ -46,10 +64,8 @@ public struct LaserOutputConfigView: XView, Sendable {
                 while polling.value, !Task.isCancelled {
                     var next: [UUID: String] = [:]
                     for item in collection.value.outputs where item.device == .laserCube && LaserOutput.isValidIPv4(item.address) {
-                        let failure = await connections.streamFailure(item.id)
-                        let connected = await connections.hasSession(item.id)
-                        let paused = await connections.isManuallyDisconnected(item.id)
-                        next[item.id] = failure.map { "FAILED: \($0)" } ?? (connected ? "CONNECTED" : (paused ? "NOT CONNECTED" : "AUTO CONNECTING"))
+                        let state = await connections.status(of: item.id)
+                        next[item.id] = state.failure.map { "FAILED: \($0)" } ?? (state.connected ? "CONNECTED" : (state.pausedByUser ? "NOT CONNECTED" : "AUTO CONNECTING"))
                     }
                     if next != statuses.value { statuses.value = next; invalidate() }
                     do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
@@ -59,9 +75,9 @@ public struct LaserOutputConfigView: XView, Sendable {
     }
     let initialOutputs: LaserOutputCollection
     let onChange: @Sendable (LaserOutputCollection) -> Void
-    let connections: LaserOutputConnections?
+    let connections: (any ZoneOutputProtocol)?
     let invalidate: @Sendable () -> Void
-    public init(initialOutputs: LaserOutputCollection = .init(), onChange: @escaping @Sendable (LaserOutputCollection) -> Void = { _ in }, connections: LaserOutputConnections? = nil, invalidate: @escaping @Sendable () -> Void = {}) {
+    public init(initialOutputs: LaserOutputCollection = .init(), onChange: @escaping @Sendable (LaserOutputCollection) -> Void = { _ in }, connections: (any ZoneOutputProtocol)? = nil, invalidate: @escaping @Sendable () -> Void = {}) {
         self.initialOutputs = initialOutputs; self.onChange = onChange
         self.connections = connections; self.invalidate = invalidate
     }
@@ -136,7 +152,7 @@ public struct LaserOutputConfigView: XView, Sendable {
                             scannerPage: StateStore.Box<Bool>?) -> some XView {
         VStack(alignment: .leading, spacing: 9) {
             Text("ALL OUTPUTS", size: 12, color: outputMuted)
-            button("SCANNER SETTINGS   ›") { scannerPage?.value = true }
+            button("SCANNER SETTINGS   ›") { Task { await stopTestPatterns() }; scannerPage?.value = true }
             Text("OUTPUTS", size: 12, color: outputMuted)
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 3) {
@@ -145,13 +161,13 @@ public struct LaserOutputConfigView: XView, Sendable {
                 }.padding(9).frame(maxWidth: .infinity, alignment: .leading)
                     .background { RoundedRectangle(cornerRadius: 5, fill: item.id == selectedID ? XColorValue(hex: 0x354b42) : outputPanel) }
                     .onTapGesture(id: "output.select.\(item.id)", label: item.name) {
+                        Task { await stopTestPatterns() }
                         selection?.value = item.id; detail?.value = true; addressPage?.value = false
                         if let connections {
                             let statuses = _connectionStates
                             Task { @XUIActor in
-                                let connected = await connections.hasSession(item.id)
-                                let failure = await connections.streamFailure(item.id)
-                                setStatus(statuses, item.id, failure.map { "FAILED: \($0)" } ?? (connected ? "CONNECTED" : "NOT CONNECTED"))
+                                let state = await connections.status(of: item.id)
+                                setStatus(statuses, item.id, state.failure.map { "FAILED: \($0)" } ?? (state.connected ? "CONNECTED" : "NOT CONNECTED"))
                                 invalidate()
                             }
                         }
@@ -217,6 +233,7 @@ public struct LaserOutputConfigView: XView, Sendable {
                         button("DISCONNECT") {
                             setStatus(statuses, output.id, "DISCONNECTING"); invalidate()
                             Task { @XUIActor in
+                                await stopTestPatterns()
                                 do { try await connections.disconnect(output.id); setStatus(statuses, output.id, "NOT CONNECTED") }
                                 catch { setStatus(statuses, output.id, "DISCONNECT FAILED: \(error)") }
                                 invalidate()
@@ -226,7 +243,7 @@ public struct LaserOutputConfigView: XView, Sendable {
                         button("CONNECT") {
                             setStatus(statuses, output.id, "CONNECTING"); invalidate()
                             Task { @XUIActor in
-                                do { try await connections.connect(output); setStatus(statuses, output.id, "CONNECTED") }
+                                do { try await connections.connect(output, automatic: false); setStatus(statuses, output.id, "CONNECTED") }
                                 catch { setStatus(statuses, output.id, "CONNECT FAILED: \(error)") }
                                 invalidate()
                             }
@@ -235,19 +252,75 @@ public struct LaserOutputConfigView: XView, Sendable {
                 }
                 Text("OUTPUT SETTINGS", size: 12, color: outputMuted)
                 button("SAFETY MASKS   \(output.masks.masks.count)   ›") {
+                    Task { await stopTestPatterns() }
                     guard let connections else { masksPage?.value = true; return }
                     Task { @XUIActor in
-                        let hasSession = await connections.hasSession(output.id)
+                        let hasSession = await connections.status(of: output.id).connected
                         setStatus(statuses, output.id, hasSession ? "CONNECTED" : "NOT CONNECTED")
                         masksPage?.value = true
                         invalidate()
                     }
                 }
                 Text("Masks belong to this output and remain when its device changes.", size: 11, color: outputMuted)
+                if status == "CONNECTED", connections != nil {
+                    let active = testPattern[output.id], power = testPower
+                    Text("TEST PATTERN", size: 12, color: outputMuted)
+                    HStack(spacing: 8) {
+                        ForEach(LaserTestPatterns.all.map(\.name)) { name in
+                            button(active == name ? "● \(name)" : "○ \(name)") { showTestPattern(active == name ? nil : name, on: output, percent: power) }
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Text("BRIGHTNESS", size: 11, color: outputMuted)
+                        ForEach(["5", "10", "25", "50"]) { percent in
+                            button(power == Int(percent) ? "● \(percent)%" : "○ \(percent)%") {
+                                guard let value = Int(percent) else { return }
+                                _testPower?.value = value
+                                if let active { showTestPattern(active, on: output, percent: value) } else { invalidate() }
+                            }
+                        }
+                    }
+                    if let active {
+                        Text("SHOWING \(active) AT \(power)%  ·  THE LASER IS ON, NOT PLAYING ITS ZONE", size: 11, color: outputAccent)
+                        button("TEST PATTERN OFF") { showTestPattern(nil, on: output, percent: power) }
+                    }
+                    if let note = testNote[output.id] { Text(note, size: 11, color: XColorValue(hex: 0xef9185)) }
+                    Text("The ILDA test pattern goes to the device as it is, without masks. It ends when this screen is left.", size: 11, color: outputMuted)
+                }
             } else {
                 Text("SELECT OR CREATE AN OUTPUT", size: 15, color: outputMuted)
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading).background { Rectangle(fill: outputBackground) }
+    }
+
+    /// Shows the test pattern `name` on the output (`nil`: ends it and gives the laser back to its zone).
+    private func showTestPattern(_ name: String?, on output: LaserOutput, percent: Int) {
+        guard let connections, let shown = _testPattern, let notes = _testNote else { return }
+        let invalidate = invalidate
+        Task { @XUIActor in
+            do {
+                if let name {
+                    let points = try LaserTestPatterns.points(named: name, intensity: Float(percent) / 100)
+                    try await connections.showPattern(points, for: output.id)
+                    var next = shown.value; next[output.id] = name; shown.value = next
+                } else {
+                    try await connections.setPreview(false, for: output.id, masks: .init())
+                    var next = shown.value; next[output.id] = nil; shown.value = next
+                }
+                var next = notes.value; next[output.id] = nil; notes.value = next
+            } catch {
+                var next = notes.value; next[output.id] = "\(error)"; notes.value = next
+            }
+            invalidate()
+        }
+    }
+
+    /// Ends every test pattern this screen is showing.
+    private func stopTestPatterns() async {
+        guard let connections, let shown = _testPattern else { return }
+        let active = Array(shown.value.keys)
+        shown.value = [:]
+        for id in active { try? await connections.setPreview(false, for: id, masks: .init()) }
     }
 
     private func button(_ title: String, action: @escaping @Sendable () -> Void) -> some XView {

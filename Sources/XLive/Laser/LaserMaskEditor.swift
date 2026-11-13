@@ -27,14 +27,14 @@ public struct LaserMaskEditor: XView, Sendable {
     let initialSettings: LaserMaskSettings
     let outputName: String
     let hasConnection: Bool
-    let connections: LaserOutputConnections?
+    let connections: (any ZoneOutputProtocol)?
     let outputID: UUID?
     let invalidate: @Sendable () -> Void
     let onSave: @Sendable (LaserMaskSettings) -> Void
     let onBack: @Sendable () -> Void
 
     public init(initialSettings: LaserMaskSettings = .init(), outputName: String = "LASER 01", hasConnection: Bool = false,
-         connections: LaserOutputConnections? = nil, outputID: UUID? = nil, invalidate: @escaping @Sendable () -> Void = {},
+         connections: (any ZoneOutputProtocol)? = nil, outputID: UUID? = nil, invalidate: @escaping @Sendable () -> Void = {},
          onSave: @escaping @Sendable (LaserMaskSettings) -> Void = { _ in },
          onBack: @escaping @Sendable () -> Void = {}) {
         self.initialSettings = initialSettings; self.outputName = outputName; self.hasConnection = hasConnection
@@ -144,7 +144,7 @@ public struct LaserMaskEditor: XView, Sendable {
                                 if enable {
                                     while previewBox.value == "ON" {
                                         try? await Task.sleep(nanoseconds: 250_000_000)
-                                        if let failure = await connections.streamFailure(outputID) {
+                                        if let failure = await connections.status(of: outputID).failure {
                                             previewBox.value = "ERROR: \(failure)"
                                             invalidate()
                                             break

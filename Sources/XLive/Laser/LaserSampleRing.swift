@@ -93,7 +93,7 @@ public final class LaserSampleRing: @unchecked Sendable {
 
     public final class Reader: @unchecked Sendable {
         fileprivate let ring: LaserSampleRing
-        fileprivate let maximumLagSamples: Int
+        fileprivate var maximumLagSamples: Int
         fileprivate var position: Int
         fileprivate var starved = 0
         fileprivate var starvedPulls = 0
@@ -104,6 +104,12 @@ public final class LaserSampleRing: @unchecked Sendable {
         }
 
         public var fill: Int { ring.lock.withLock { min(ring.capacity, ring.written - position) } }
+
+        /// Lets this reader lag at least this far behind the writer before it skips ahead (never less than it had). The
+        /// limit exists to drop what is old, and what the writer pushes in one piece (a long frame) is not old.
+        public func allowLag(atLeast samples: Int) {
+            ring.lock.withLock { maximumLagSamples = max(maximumLagSamples, min(ring.capacity, samples)) }
+        }
 
         public var starvedSamples: Int { ring.lock.withLock { starved } }
 

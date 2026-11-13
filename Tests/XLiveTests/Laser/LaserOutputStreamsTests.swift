@@ -69,7 +69,37 @@ private struct SampleSequence: AsyncSequence, Sendable {
     func makeAsyncIterator() -> Iterator { Iterator() }
 }
 
+/// Frames far longer than a few milliseconds (a zone with several cues makes frames of thousands of points). Point `i`
+/// of a frame sits at x = i / 4000, so a point that was not played shows as a gap in the x that reach the device.
+private struct LongFrames: AsyncSequence, Sendable {
+    typealias Element = [LaserPoint]
+    static let length = 1600
+    struct Iterator: AsyncIteratorProtocol {
+        mutating func next() async -> [LaserPoint]? {
+            (0..<LongFrames.length).map { index in
+                try! LaserPoint(xy: SIMD2<Float>(Float(index) / 4000, 0), rgb: SIMD3<Float>(repeating: 0.5))
+            }
+        }
+    }
+    func makeAsyncIterator() -> Iterator { Iterator() }
+}
+
 final class LaserOutputStreamsTests: XCTestCase, @unchecked Sendable {
+    func testAFrameLongerThanTheLagLimitIsPlayedWholeNotCutToItsTail() async throws {
+        let recorder = VirtualLaserRecorder()
+        let streams = LaserOutputStreams(blockSize: 140, pauseMilliseconds: 0)
+        try await streams.connect(UUID()) { VirtualLaserSession(recorder, maximumPointRate: 30000) }
+        try await streams.play(source: LongFrames(), sampleRate: 30000)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        let report = await streams.diagnosticsReport()
+        await streams.stopSource()
+        let indices = await recorder.samples().filter { !$0.isBlanked }.map { Int(($0.xy.x * 4000).rounded()) }
+        XCTAssertGreaterThan(indices.count, 3 * LongFrames.length, report)
+        // After a point comes the next one of its frame, or the first of the next frame: nothing in between is dropped.
+        let gaps = zip(indices, indices.dropFirst()).filter { $1 != $0 + 1 && $1 != 0 }.count
+        XCTAssertEqual(gaps, 0, "points of a frame were skipped: \(report)")
+    }
+
     func testBlackCenterIsOnlyBlankCenterPoints() {
         let points = LaserPoint.blackCenter(count: 280)
         XCTAssertEqual(points.count, 280)

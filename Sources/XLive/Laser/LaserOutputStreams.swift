@@ -64,15 +64,19 @@ public actor LaserOutputStreams {
         let reader: LaserSampleRing.Reader
         var converter: LaserRateConverter
         private var observedSkippedSamples = 0
+        private let sourceBlockSize: Int
         init(zone: LaserZonePlayback, outputRate: UInt32, outputBlockSize: Int) {
             self.zone = zone
             let sourceBlockSize = Int(ceil(Double(outputBlockSize) * Double(zone.rate) / Double(outputRate)))
+            self.sourceBlockSize = sourceBlockSize
             let maximumLag = max(Int(zone.rate) / 200, sourceBlockSize + 16)
             reader = zone.ring.makeReader(maximumLagSamples: maximumLag)
             converter = LaserRateConverter(sourceRate: zone.rate, outputRate: outputRate)
         }
         func pull(_ count: Int) async throws -> [LaserPoint] {
             let reader = reader
+            // A frame is pushed in one piece, so the reader is as far behind as the frame is long: it may lag that much.
+            reader.allowLag(atLeast: zone.longestFrame + sourceBlockSize + 16)
             if reader.catchUpIfNeeded() > 0 || reader.skippedSamples != observedSkippedSamples {
                 converter.reset()
                 observedSkippedSamples = reader.skippedSamples
@@ -144,7 +148,7 @@ public actor LaserOutputStreams {
         guard connecting.insert(id).inserted else { throw LaserStreamError.busy }
         defer { connecting.remove(id) }
         let session = try await open()
-        let rate = min(session.capabilities.maximumPointRate, 30_000)
+        let rate = min(session.capabilities.maximumPointRate, LaserOutput.playbackRate)
         do {
             try await session.start(pointRate: rate)
             let generation = UUID()

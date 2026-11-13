@@ -52,6 +52,7 @@ final class LaserZonePlayback: @unchecked Sendable {
     private var producer: Task<Void, Never>?
     private var failed: String?
     private var sourceMetrics = SourceMetrics()
+    private var longestChunk = 0
 
     init(id: UUID, rate: UInt32, bufferSamples: Int) {
         self.id = id; self.rate = rate
@@ -59,6 +60,8 @@ final class LaserZonePlayback: @unchecked Sendable {
     }
 
     var failure: String? { lock.withLock { failed } }
+    /// The most points the source has made in one piece so far.
+    var longestFrame: Int { lock.withLock { longestChunk } }
     var sourceDiagnostics: String { lock.withLock { sourceMetrics.description } }
 
     func start<Source: AsyncSequence & Sendable>(_ source: Source) where Source.Element == [LaserPoint] {
@@ -93,7 +96,7 @@ final class LaserZonePlayback: @unchecked Sendable {
     private func fail(_ message: String) { lock.withLock { failed = message } }
 
     private func recordPull(_ chunk: [LaserPoint], elapsed: UInt64, fill: Int) {
-        lock.withLock { sourceMetrics.recordPull(chunk, elapsed: elapsed, fill: fill, rate: rate) }
+        lock.withLock { longestChunk = max(longestChunk, chunk.count); sourceMetrics.recordPull(chunk, elapsed: elapsed, fill: fill, rate: rate) }
     }
 
     private func recordPush(elapsed: UInt64) {

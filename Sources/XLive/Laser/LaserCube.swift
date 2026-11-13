@@ -54,6 +54,35 @@ public enum LaserCubeTrace {
     }
 }
 
+/// Records the sample packets exactly as they go out to the device, for a limited time on request (the MCP tool
+/// `laser_wire_capture`), so what the cube is sent can be looked at rather than what the code before it meant to send.
+public enum LaserCubeWireTap {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var until: UInt64 = 0
+    nonisolated(unsafe) private static var packets: [(time: UInt64, data: Data)] = []
+
+    static func record(_ packet: Data) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        lock.withLock { if now < until { packets.append((now, packet)) } }
+    }
+
+    /// Records for `seconds`, then writes `file`: per packet 8 bytes uptime ns, 2 bytes length, the packet (little endian).
+    /// Returns the number of packets.
+    public static func capture(seconds: Double, to file: URL) async throws -> Int {
+        lock.withLock { packets = []; until = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1e9) }
+        try await Task.sleep(nanoseconds: UInt64((seconds + 0.2) * 1e9))
+        let taken = lock.withLock { () -> [(time: UInt64, data: Data)] in until = 0; defer { packets = [] }; return packets }
+        var out = Data()
+        for item in taken {
+            withUnsafeBytes(of: item.time.littleEndian) { out.append(contentsOf: $0) }
+            withUnsafeBytes(of: UInt16(item.data.count).littleEndian) { out.append(contentsOf: $0) }
+            out.append(item.data)
+        }
+        try out.write(to: file)
+        return taken.count
+    }
+}
+
 public enum LaserCubeError: Error, Equatable, Sendable {
     case timeout, malformedResponse, operationInProgress, sessionFailed
     case unsupportedProtocol(UInt8)
@@ -104,7 +133,7 @@ public struct LaserCube: LaserOutputDevice {
 }
 
 @available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)
-private actor LaserCubeSession: LaserOutputSession {
+private actor LaserCubeSession: LaserOutputSession, LaserOutputQueueReporting {
     nonisolated let capabilities: LaserOutputCapabilities
     nonisolated let states: AsyncStream<LaserOutputState>
     private let events: AsyncStream<LaserOutputState>.Continuation
@@ -124,6 +153,9 @@ private actor LaserCubeSession: LaserOutputSession {
     private var frame: UInt8 = 0
     private let clock = ContinuousClock()
     private var emptyReported = false
+    /// The device's queue as last seen, for `queuedPoints`; it does not take part in pacing the writes.
+    private var seenQueued = 0
+    private var seenAt = ContinuousClock.now
 
     init(transport: any LaserCubeTransport, info: LaserCubeInfo) {
         self.transport = transport; self.initialInfo = info; self.free = info.bufferFree
@@ -206,6 +238,22 @@ private actor LaserCubeSession: LaserOutputSession {
         }
     }
 
+    /// The points the device is kept filled to: writes wait for the queue to fall below it.
+    nonisolated var queueCapacity: Int { max(1, initialInfo.bufferSize - min(140, initialInfo.bufferSize - 1)) }
+
+    /// How many points the device holds and has not played, as last seen and run down at the point rate since then.
+    var queuedPoints: Int {
+        guard playbackEnabled, rate > 0 else { return seenQueued }
+        let elapsed = seenAt.duration(to: clock.now)
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        return max(0, seenQueued - Int(seconds * Double(rate)))
+    }
+
+    private func noteQueue(_ queued: Int) {
+        seenQueued = max(0, queued)
+        seenAt = clock.now
+    }
+
     private var targetFill: Int { max(1, initialInfo.bufferSize - min(140, initialInfo.bufferSize - 1)) }
 
     private func send(_ points: [LaserPoint], token: UInt64) async throws {
@@ -225,6 +273,7 @@ private actor LaserCubeSession: LaserOutputSession {
                     try check(token)
                     free = try LaserCubeWire.bufferFree(reply, capacity: initialInfo.bufferSize)
                     queued = initialInfo.bufferSize - free
+                    noteQueue(queued)
                     LaserCubeTrace.note("wait-credit", since: began, "queued=\(queued)")
                     LaserCubeTrace.level(queued: queued)
                     if playbackEnabled, queued == 0 { underrun("in wait loop") }
@@ -243,6 +292,7 @@ private actor LaserCubeSession: LaserOutputSession {
                 sequence &+= 1
                 packetOffset = end
             }
+            for packet in packets { LaserCubeWireTap.record(packet) }
             let sendBegan = LaserCubeTrace.now()
             let replies = try await resilient("samples", token: token) {
                 try await transport.exchangeSamples(packets, timeout: .seconds(1))
@@ -254,6 +304,7 @@ private actor LaserCubeSession: LaserOutputSession {
                 free = try LaserCubeWire.bufferFree(reply, capacity: initialInfo.bufferSize, sequence: sequence)
             }
             try check(token)
+            noteQueue(initialInfo.bufferSize - free)
             LaserCubeTrace.level(queued: initialInfo.bufferSize - free)
             if free == initialInfo.bufferSize { underrun("after send (free=\(free))") } else { emptyReported = false }
             offset += count
@@ -339,6 +390,7 @@ private actor LaserCubeSession: LaserOutputSession {
         let info = try await readInfo()
         try check(token)
         LaserCubeTrace.note("monitor-info", since: began, "queued=\(info.bufferSize - info.bufferFree)")
+        noteQueue(info.bufferSize - info.bufferFree)
         guard info.outputEnabled, info.pointRate == rate else { throw LaserCubeError.configurationNotApplied }
         if info.bufferFree == info.bufferSize { underrun("seen by monitor") } else { emptyReported = false }
     }

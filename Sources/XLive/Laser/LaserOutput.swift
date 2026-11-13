@@ -7,6 +7,8 @@ public struct LaserOutput: Codable, Equatable, Sendable, Identifiable {
     public var device: Device
     public var address: String
     public var masks: LaserMaskSettings
+    /// The most a laser is driven at, in points per second (a device may take less: it plays at the lower of its own maximum and this).
+    public static let playbackRate: UInt32 = 30_000
     public init(id: UUID = UUID(), name: String, device: Device = .unassigned, address: String = "", masks: LaserMaskSettings = .init()) {
         self.id = id; self.name = name; self.device = device; self.address = address; self.masks = masks
     }

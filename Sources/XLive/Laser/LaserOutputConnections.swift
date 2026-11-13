@@ -50,6 +50,11 @@ public actor LaserOutputConnections {
         }
     }
 
+    public func showPattern(_ points: [LaserPoint], for id: UUID) async throws {
+        pendingMasks[id] = nil
+        try await streams.play(points, for: id)
+    }
+
     public func updatePreviewMasks(_ masks: LaserMaskSettings, for id: UUID) async {
         await streams.setMasks(masks, for: id)
         guard await streams.patternActive(id) else { return }
